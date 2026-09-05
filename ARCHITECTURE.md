@@ -71,10 +71,15 @@ Isso cobre muito mais do que parece: um `click()` não-confiável **executa** a 
 (submete formulário, marca checkbox, navega em `<a>`). O que evento não-confiável nunca faz é
 ação padrão de **teclado** — daí os fallbacks.
 
-`chrome.debugger` está em `optional_permissions`, não em `permissions`: a instalação padrão não
-exibe o aviso de depuração, e o CDP seria pedido com gesto do usuário. **A escalada em si ainda
-não foi construída** — o sinal que a dispararia (`"sem efeito perceptível"` no resultado do
-clique) já existe.
+**`debugger` não pode ser opcional.** O Chrome recusa: *"Permission 'debugger' cannot be listed as
+optional. This permission will be omitted."* Ou seja, não existe pedir CDP sob demanda com gesto
+do usuário — ou a permissão está em `permissions` desde a instalação, com o aviso de depuração no
+diálogo, ou não existe.
+
+Hoje ela **não** está declarada: a extensão instala sem aviso assustador e o caminho DOM cobre o
+uso. **A escalada em si não foi construída** — o sinal que a dispararia (`"sem efeito perceptível"`
+no resultado do clique) já existe. Quando for construída, a decisão passa a ser do usuário no
+momento da instalação, não no momento do uso.
 
 ### Aprovação mora no background
 
@@ -200,7 +205,8 @@ Registradas para decisão, não esquecidas:
 
 1. **Escalada para CDP ("Modo preciso")** — o caminho DOM está pronto e emite o sinal que a
    dispararia (`"sem efeito perceptível"`). O `chrome.debugger` já está em
-   `optional_permissions`. Falta o `cdp-actuator` e o consentimento por sessão.
+   `permissions` do manifest — e isso é uma decisão de instalação, não de sessão, porque o Chrome
+   não aceita `debugger` como permissão opcional.
 2. **Seções de opções ainda vazias** — Geral, Navegador, Permissões e Atalhos mostram
    "Em preparação".
 3. ~~**Sem atalho de teclado**~~ — resolvido: `Alt+V`, alterável em `chrome://extensions/shortcuts`.
