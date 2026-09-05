@@ -1,6 +1,7 @@
 import { ActionResult, AgentEvent, AppSettings, BrowserAction } from "./types";
 import { ToolCall, fetchUrl, searchProvider } from "./provider";
 import { executeAction } from "./agent";
+import { recordAction } from "./action-stats";
 import { saveScript } from "./script-store";
 import { requestTakeover } from "./approvals";
 
@@ -53,6 +54,7 @@ export async function runToolCall(call: ToolCall, settings: AppSettings): Promis
       const action = toBrowserAction(args);
       if (!action) return { content: `ERRO [unsupported] Argumentos insuficientes para ${args.action ?? "browser_action"}.`, event: { kind: "error", text: `Chamada inválida de ${args.action ?? "browser_action"}.` } };
       const result = await executeAction(action, settings.agent.autonomy);
+      void recordAction(action, result);
       return {
         content: renderActionResult(result),
         event: { kind: result.ok ? "result" : "error", text: result.summary, action },

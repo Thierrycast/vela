@@ -199,6 +199,16 @@ o `ref_1_0` de um iframe. Ao agir, o prefixo é removido e a mensagem roteada pa
 A UI (Lens, Pulse, Trace) fica guardada atrás de `window.top === window.self`: sem isso um site
 com 12 iframes de anúncio ganharia 12 botões da Vela.
 
+## Medir antes de decidir sobre o CDP
+
+`action-stats.ts` conta o desfecho real de cada ação: total, quantas saíram **sem efeito
+perceptível**, e as falhas por código. A conta aparece em Opções → Avançado.
+
+Existe por um motivo específico: a recomendação de "rode um tempo e veja se precisa de CDP" não
+vale nada sem o número. Se a fatia de "sem efeito perceptível" for baixa, o caminho DOM basta e a
+extensão continua instalando sem aviso de depuração. Se for alta, o `cdp-actuator` se justifica —
+e aí a permissão `debugger` entra no manifest sabendo o que compra.
+
 ## Pendências conhecidas
 
 Registradas para decisão, não esquecidas:
@@ -207,15 +217,13 @@ Registradas para decisão, não esquecidas:
    dispararia (`"sem efeito perceptível"`). O `chrome.debugger` já está em
    `permissions` do manifest — e isso é uma decisão de instalação, não de sessão, porque o Chrome
    não aceita `debugger` como permissão opcional.
-2. **Seções de opções ainda vazias** — Geral, Navegador, Permissões e Atalhos mostram
-   "Em preparação".
-3. ~~**Sem atalho de teclado**~~ — resolvido: `Alt+V`, alterável em `chrome://extensions/shortcuts`.
-4. **Aprovação com o painel fechado** só aparece se o Live Voice estiver ligado (é o Pulse que
+2. ~~**Sem atalho de teclado**~~ — resolvido: `Alt+V`, alterável em `chrome://extensions/shortcuts`.
+3. **Aprovação com o painel fechado** só aparece se o Live Voice estiver ligado (é o Pulse que
    a mostra). Sem nenhuma das duas superfícies, a ação é recusada com `unattended`.
-5. ~~**Renomear a tarefa**~~ — resolvido: o título na topbar é editável.
-6. **Modo claro nunca foi verificado visualmente** — os tokens existem, o olhar não.
-7. **Endpoints de áudio não confirmados** — dependem da sondagem com a chave real.
-8. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
+4. ~~**Renomear a tarefa**~~ — resolvido: o título na topbar é editável.
+5. **Modo claro nunca foi verificado visualmente** — os tokens existem, o olhar não.
+6. ~~**Endpoints de áudio não confirmados** — dependem da sondagem com a chave real.
+7. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
 
 ### O cursor é o caminho da execução, não um enfeite
 
