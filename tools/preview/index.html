@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vela — superfícies para review</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#080a0b;color:#f1f4f4;font:15px/1.5 system-ui,sans-serif;padding:48px 32px}
+main{max-width:760px;margin:0 auto}
+h1{font-size:22px;letter-spacing:-.02em;margin:0 0 6px}
+p{color:#9aa4a5;margin:0 0 28px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#687274;margin:30px 0 10px;font-weight:600}
+ul{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+a{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:13px 15px;border:1px solid #252c30;border-radius:10px;background:#121619;color:#f1f4f4;text-decoration:none;transition:border-color .18s ease,background .18s ease}
+a:hover{border-color:#58d8cd;background:#171c1f}
+small{color:#687274;font-size:12px;text-align:right}
+code{font-family:ui-monospace,monospace;font-size:12px;color:#58d8cd}
+</style>
+</head>
+<body><main>
+<h1>Vela — superfícies para review</h1>
+<p>A mesma interface da extensão, servida em localhost. Só o <code>chrome.*</code> é substituído por um dublê; componentes, CSS e estados são os reais. O painel foi desenhado para ~380 px de largura.</p>
+
+<h2>Painel lateral</h2>
+<ul>
+  <li><a href="/panel.html">Conversa em andamento<small>estado padrão, com atividade e anexo</small></a></li>
+  <li><a href="/panel.html?estado=vazio">Estado vazio<small>primeira abertura</small></a></li>
+  <li><a href="/panel.html?estado=executando">Executando<small>agente trabalhando</small></a></li>
+  <li><a href="/panel.html?estado=aprovacao">Pedindo aprovação<small>modo Assistir</small></a></li>
+  <li><a href="/panel.html?estado=suavez">Sua vez<small>tomada de controle</small></a></li>
+</ul>
+
+<h2>Configurações</h2>
+<ul>
+  <li><a href="/options.html">Todas as seções<small>navegue pela coluna da esquerda</small></a></li>
+</ul>
+</main></body>
+</html>

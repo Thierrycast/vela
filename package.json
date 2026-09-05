@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build && vite build --config vite.content.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "harness": "vite build --config tools/vite.harness.config.ts && node tools/out/harness.mjs"
+    "harness": "vite build --config tools/vite.harness.config.ts && node tools/out/harness.mjs",
+    "ui": "vite --config vite.preview.config.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.1.1",

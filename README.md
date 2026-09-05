@@ -50,23 +50,49 @@ Toda vez que rodar `npm run build`, clique em **Atualizar** no card da extensão
 DisableLoadExtensionCommandLineSwitch` **não** resolve. O caminho que funciona é o CDP:
 
 ```bash
-# 1. Chrome headless com perfil isolado — não abre janela nenhuma
-chrome.exe --headless=new --disable-gpu --user-data-dir=<pasta temporária>            --remote-debugging-port=9451 --no-first-run --no-default-browser-check about:blank
+# 1. Chrome de teste com perfil isolado, em posição VISÍVEL na tela
+chrome.exe --user-data-dir=<pasta temporária> --remote-debugging-port=9451            --window-position=60,60 --window-size=1200,900            --no-first-run --no-default-browser-check about:blank
 
 # 2. Carregar a extensão pelo próprio protocolo
 #    Extensions.loadUnpacked { path: "<caminho absoluto de dist>" }  →  devolve o id
 ```
 
-`Extensions.loadUnpacked` funciona em headless com as APIs de extensão completas e o service
-worker ativo. Depois disso dá para abrir `chrome-extension://<id>/index.html` como aba comum e
-dirigir tudo por `Runtime.evaluate` — inclusive chamar `chrome.tabs.sendMessage` a partir do
-service worker para exercitar ações reais numa página.
+`Extensions.loadUnpacked` funciona tanto com janela quanto em `--headless=new`, com as APIs de
+extensão completas e o service worker ativo. Depois disso dá para abrir
+`chrome-extension://<id>/index.html` como aba comum e dirigir tudo por `Runtime.evaluate` —
+inclusive chamar `chrome.tabs.sendMessage` a partir do service worker para exercitar ações reais
+numa página.
 
-**Use headless.** Em modo com janela, mesmo com `--window-position` fora da tela, a instância
-aparece na barra de tarefas e não dá para interagir com ela — parece um travamento.
+**Nunca posicione a janela fora da tela.** `--window-position=3000,3000` deixa a instância na
+barra de tarefas sem poder ser clicada, o que parece travamento. Janela de teste é para ser vista
+e usada; headless só quando a medição é automatizada e não há nada para olhar.
 
 Ao encerrar, matar **só o processo daquela porta** (`netstat -ano` → `taskkill /PID`), nunca
 `taskkill /IM chrome.exe`, que derruba o navegador pessoal junto.
+
+## Revisar a interface fora da extensão
+
+Ferramentas de review de interface não conseguem abrir páginas `chrome-extension://`. Para isso
+existe um servidor de preview que serve **a mesma UI** em localhost — mesmos componentes, mesmo
+CSS, mesmos estados; só o `chrome.*` é substituído por um dublê.
+
+```bash
+npm run ui        # http://127.0.0.1:5178
+```
+
+A página inicial lista as superfícies e os estados:
+
+| Rota | Estado |
+|---|---|
+| `/panel.html` | conversa em andamento, com atividade e anexo |
+| `/panel.html?estado=vazio` | primeira abertura |
+| `/panel.html?estado=executando` | agente trabalhando |
+| `/panel.html?estado=aprovacao` | pedindo aprovação (modo Assistir) |
+| `/panel.html?estado=suavez` | tomada de controle |
+| `/options.html` | configurações, todas as seções |
+
+O painel foi desenhado para ~380 px de largura — vale ajustar o viewport da ferramenta.
+O dublê vive em `tools/preview/chrome-stub.ts`; novos estados entram lá.
 
 ## Scripts
 
@@ -75,6 +101,7 @@ npm run build       # build completo (é o que gera dist/)
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint
 npm run harness     # exercita o loop do agente em Node, sem navegador
+npm run ui          # serve a UI em localhost para review de interface
 ```
 
 O `harness` roda o loop de verdade contra um provider e uma página falsos. É onde os erros de

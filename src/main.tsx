@@ -12,6 +12,13 @@ import "./motion.css";
 
 type Takeover = { reason: string; expected: string };
 
+/** O anexo guarda `Trecho selecionado em X (url):\n<texto>`; o chip mostra só o texto. */
+const attachmentPreview = (item: string) => {
+  const lineBreak = item.indexOf("\n");
+  const text = (lineBreak >= 0 ? item.slice(lineBreak + 1) : item).replace(/\s+/g, " ").trim();
+  return text.length > 24 ? `${text.slice(0, 24)}…` : text;
+};
+
 function App() {
   const { settings, update } = useSettings();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -162,7 +169,7 @@ function App() {
         {settings.context.currentPage && <ContextChip tone="active"><Globe2 size={12} /> Página atual</ContextChip>}
         {session.tabCount > 0 && settings.context.sessionTabs && <ContextChip><Layers3 size={12} /> {session.tabCount} aba{session.tabCount > 1 ? "s" : ""}</ContextChip>}
         {attachments.map((item, index) => <ContextChip key={`${index}-${item.slice(0, 12)}`} title={item} onRemove={() => setAttachments((current) => current.filter((_, position) => position !== index))}>
-          <span>{`Trecho · ${item.replace(/\s+/g, " ").slice(0, 22)}…`}</span>
+          <span>{`Trecho · ${attachmentPreview(item)}`}</span>
         </ContextChip>)}
       </div>
       <div className="composer">
