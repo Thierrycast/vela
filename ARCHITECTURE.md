@@ -176,3 +176,20 @@ Registradas para decisão, não esquecidas:
 6. **Modo claro nunca foi verificado visualmente** — os tokens existem, o olhar não.
 7. **Endpoints de áudio não confirmados** — dependem da sondagem com a chave real.
 8. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
+
+## WebMCP — verificado no Chrome 152 (set/2026)
+
+Testado no navegador instalado, não em documentação:
+
+- `document.modelContext` existe atrás de `--enable-features=WebMCP`. **Não** está ligado por
+  padrão no estável. `navigator.modelContext` foi descontinuado; a API mora em `document`.
+- Interface `ModelContext` com `registerTool`, `getTools`, `executeTool` e `ontoolchange`.
+- **O mundo isolado do content script enxerga as tools registradas pela página.** Testado com
+  `Page.createIsolatedWorld`: o mundo isolado leu as tools registradas no mundo principal.
+  Isso significa que a Vela lê e executa tools de WebMCP **direto do content script**, sem
+  injeção no mundo principal e sem ponte de postMessage.
+- Só funciona em HTTPS.
+
+Consequência de projeto: quando a página oferece uma tool (`buscar_produto`, `adicionar_ao_carrinho`),
+usá-la é sempre melhor que simular cliques — é semântica, não imitação. A camada de DOM continua
+necessária para tudo que não expõe tools, que hoje é quase toda a web.
