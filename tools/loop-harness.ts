@@ -20,17 +20,21 @@ function sseStream(chunks: string[]) {
 }
 
 /** Página falsa: responde `agent:action` como o content script responderia. */
-function fakePage(): (message: { type: string; action?: BrowserAction }) => ActionResult | { ok: boolean } {
+function fakePage(): (message: { type: string; action?: BrowserAction }, frameId?: number) => ActionResult | { ok: boolean } {
   let snapshotId = 0;
-  return (message) => {
+  return (message, frameId = 0) => {
+    if (message.type === "agent:action" && message.action?.type === "extractPage") {
+      snapshotId += 1;
+      const nome = frameId === 0 ? "Continuar" : "Pagar agora";
+      return { ok: true, summary: "lido", snapshotId, content: `# Elementos interativos
+[ref_${snapshotId}_0]<button name="${nome}" />` };
+    }
+    if (message.type === "agent:action" && message.action && "ref" in message.action) {
+      return { ok: true, summary: `frame ${frameId} recebeu ${message.action.ref}` };
+    }
     if (message.type === "agent:ping") return { ok: true };
     if (message.type !== "agent:action" || !message.action) return { ok: true };
     const action = message.action;
-    if (action.type === "extractPage") {
-      snapshotId += 1;
-      return { ok: true, summary: "Página lida: 2 elementos interativos.", snapshotId, url: "https://exemplo.com", title: "Exemplo",
-        content: `url: https://exemplo.com\n\n# Elementos interativos\n[ref_${snapshotId}_0]<textbox name="Buscar" />\n[ref_${snapshotId}_1]<button name="Enviar" />` };
-    }
     if (action.type === "click" && action.ref && !action.ref.startsWith(`ref_${snapshotId}_`)) {
       return { ok: false, code: "stale_snapshot", summary: "O snapshot mudou. Chame extractPage de novo antes de agir." };
     }
@@ -54,9 +58,10 @@ function installChrome(store: Record<string, unknown>, page: ReturnType<typeof f
       update: async () => { setTimeout(() => navListeners.forEach((fn) => fn({ tabId: 7, frameId: 0, url: "https://destino.com" })), 10); },
       create: async () => ({ id: 8 }),
       get: async () => ({ id: 7, url: "https://exemplo.com" }),
-      sendMessage: async (_tabId: number, message: { type: string; action?: BrowserAction }) => page(message),
+      sendMessage: async (_tabId: number, message: { type: string; action?: BrowserAction }, options?: { frameId?: number }) => page(message, options?.frameId ?? 0),
     },
     webNavigation: {
+      getAllFrames: async () => [{ frameId: 0, url: "https://loja.com/checkout" }, { frameId: 9, url: "https://pagamentos.com/form" }],
       onCompleted: { addListener: (fn: typeof navListeners[number]) => navListeners.push(fn), removeListener: () => undefined },
       onErrorOccurred: { addListener: () => undefined, removeListener: () => undefined },
       onHistoryStateUpdated: { addListener: () => undefined, removeListener: () => undefined },
@@ -125,7 +130,14 @@ await run("modo observar bloqueia", [
   [delta("Entendi, não posso agir."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "observe" } });
 
-// 5. O system prompt e o bloco de estado chegam ao provider?
+// 5. iframes: refs de frames diferentes não podem colidir.
+await run("iframes com refs por frame", [
+  [delta("Lendo tudo."), toolCall("c1", "browser_action", { action: "extractPage" }), DONE],
+  [delta("Clicando no iframe."), toolCall("c2", "browser_action", { action: "click", ref: "f9.ref_2_0" }), DONE],
+  [delta("Feito."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// 6. O system prompt e o bloco de estado chegam ao provider?
 const body = JSON.parse(wire[0]) as { messages: Array<{ role: string; content: string }> };
 console.log("\n=== prompt enviado ===");
 console.log("primeira mensagem:", body.messages[0].role, "|", body.messages[0].content.slice(0, 80).replace(/\n/g, " "), "…");

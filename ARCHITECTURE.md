@@ -151,6 +151,15 @@ em `storage.local`; `vela:session` e `vela:attachments` em `storage.session` (so
 Chrome, que é o desejado para id de tab group). Há migração automática das chaves antigas
 `browser-ai:*`.
 
+### Leitura de iframes
+
+`injection.ts` registra o content script com `allFrames: true` e `agent.ts` lê cada frame
+separadamente, prefixando os refs com `f<frameId>.` — sem isso o `ref_1_0` do topo colidiria com
+o `ref_1_0` de um iframe. Ao agir, o prefixo é removido e a mensagem roteada para aquele frame.
+
+A UI (Lens, Pulse, Trace) fica guardada atrás de `window.top === window.self`: sem isso um site
+com 12 iframes de anúncio ganharia 12 botões da Vela.
+
 ## Pendências conhecidas
 
 Registradas para decisão, não esquecidas:
@@ -158,16 +167,12 @@ Registradas para decisão, não esquecidas:
 1. **Escalada para CDP ("Modo preciso")** — o caminho DOM está pronto e emite o sinal que a
    dispararia (`"sem efeito perceptível"`). O `chrome.debugger` já está em
    `optional_permissions`. Falta o `cdp-actuator` e o consentimento por sessão.
-2. **iframes cross-origin** — `page-snapshot` percorre o documento de topo e shadow roots
-   abertos; iframes de outra origem são invisíveis. É onde vivem checkout, login e captcha.
-   Exige `allFrames: true` no registro **e** guardar toda a UI atrás de
-   `window.top === window.self` antes, senão um site com 12 iframes de anúncio ganha 12 Lens.
-3. **Seções de opções ainda vazias** — Geral, Navegador, Permissões e Atalhos mostram
+2. **Seções de opções ainda vazias** — Geral, Navegador, Permissões e Atalhos mostram
    "Em preparação".
-4. **Sem atalho de teclado** — o manifest não declara `commands`; abrir o painel exige clique.
-5. **Aprovação com o painel fechado** só aparece se o Live Voice estiver ligado (é o Pulse que
+3. ~~**Sem atalho de teclado**~~ — resolvido: `Alt+V`, alterável em `chrome://extensions/shortcuts`.
+4. **Aprovação com o painel fechado** só aparece se o Live Voice estiver ligado (é o Pulse que
    a mostra). Sem nenhuma das duas superfícies, a ação é recusada com `unattended`.
-6. **`session:rename` não tem quem chame** — o backend existe, falta a UI de renomear a tarefa.
-7. **Modo claro nunca foi verificado visualmente** — os tokens existem, o olhar não.
-8. **Endpoints de áudio não confirmados** — dependem da sondagem com a chave real.
-9. **Não é repositório git** — `.gitignore` pronto, `git init` não foi rodado.
+5. ~~**Renomear a tarefa**~~ — resolvido: o título na topbar é editável.
+6. **Modo claro nunca foi verificado visualmente** — os tokens existem, o olhar não.
+7. **Endpoints de áudio não confirmados** — dependem da sondagem com a chave real.
+8. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
