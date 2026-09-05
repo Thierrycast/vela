@@ -14,11 +14,11 @@ const browserActionTool = {
   type: "function",
   function: {
     name: "browser_action",
-    description: "Opera a aba ativa. Comece por extractPage para receber os refs dos elementos; use esses refs em click e type.",
+    description: "Opera a aba ativa. Comece por extractPage: ele devolve os refs dos elementos e, quando existirem, as ferramentas próprias da página. Prefira pageTool a simular cliques.",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "wait"] },
+        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "wait", "pageTool"] },
         url: { type: "string", description: "Para navigate." },
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
         ref: { type: "string", description: "Identificador vindo do último extractPage, ex.: ref_3_12." },
@@ -31,6 +31,8 @@ const browserActionTool = {
         milliseconds: { type: "number", description: "Para wait, máximo 10000." },
         extractMode: { type: "string", enum: ["outline", "text"], description: "Para extractPage. outline traz só estrutura e elementos; text inclui o texto da página." },
         offset: { type: "number", description: "Para extractPage: continua a leitura a partir deste ponto quando o resultado veio truncado." },
+        toolName: { type: "string", description: "Para pageTool: nome exato de uma ferramenta listada em \"Ferramentas oferecidas pela página\"." },
+        toolArguments: { type: "object", description: "Para pageTool: argumentos conforme o schema anunciado pela ferramenta." },
       },
       required: ["action"],
     },

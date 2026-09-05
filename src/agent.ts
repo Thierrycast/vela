@@ -4,7 +4,8 @@ import { loadSettings } from "./storage";
 import { approvalKey, describeAction, isRisky, requestApproval } from "./approvals";
 
 const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "scroll", "wait"];
-const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000 };
+const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool"];
+const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000, pageTool: 20_000 };
 
 export const isReadOnly = (action: BrowserAction) => READ_ONLY.includes(action.type);
 
@@ -139,7 +140,7 @@ export async function executeAction(action: BrowserAction, autonomy: Autonomy): 
 
   if (action.type === "extractPage") return readAllFrames(tab.id, action);
 
-  if (!isReadOnly(action)) await beginTrace(tab.id);
+  if (!isReadOnly(action) && !NO_CURSOR.includes(action.type)) await beginTrace(tab.id);
 
   const { frameId, ref } = splitFrameRef("ref" in action ? action.ref : undefined);
   const routed = "ref" in action && ref !== action.ref ? { ...action, ref } : action;
@@ -171,5 +172,5 @@ export async function executeAction(action: BrowserAction, autonomy: Autonomy): 
 
 async function traceConfig() {
   const settings = await loadSettings();
-  return { cursor: settings.agent.showCursor, border: settings.agent.showControlBorder, highlight: settings.agent.showTargetHighlights };
+  return { cursor: settings.agent.showCursor, border: settings.agent.showControlBorder, highlight: settings.agent.showTargetHighlights, speed: settings.agent.cursorSpeed };
 }

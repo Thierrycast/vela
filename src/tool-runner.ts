@@ -8,6 +8,7 @@ type ToolArguments = {
   action?: BrowserAction["type"]; url?: string; newTab?: boolean; ref?: string; selector?: string;
   text?: string; submit?: boolean; mode?: "replace" | "append"; key?: string;
   deltaX?: number; deltaY?: number; milliseconds?: number; extractMode?: "outline" | "text"; offset?: number;
+  toolName?: string; toolArguments?: unknown;
   query?: string; max_results?: number; max_length?: number; reason?: string; expected?: string;
   name?: string; description?: string; code?: string; matches?: string[];
 };
@@ -28,6 +29,7 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
     case "scroll": return { type: "scroll", deltaX: args.deltaX, deltaY: args.deltaY };
     case "extractPage": return { type: "extractPage", mode: args.extractMode, offset: args.offset };
     case "wait": return { type: "wait", milliseconds: args.milliseconds ?? 1000 };
+    case "pageTool": return args.toolName ? { type: "pageTool", name: args.toolName, arguments: args.toolArguments } : null;
     default: return null;
   }
 }

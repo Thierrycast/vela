@@ -1,5 +1,6 @@
 import { ActionResult, BrowserAction } from "./types";
 import { accessibleName, captureSnapshot, invalidateSnapshot, resolveRef, roleOf } from "./page-snapshot";
+import { callPageTool, describePageTools, listPageTools } from "./page-tools";
 
 function failure(code: Extract<ActionResult, { ok: false }>["code"], summary: string): ActionResult { return { ok: false, code, summary }; }
 
@@ -100,7 +101,17 @@ function pressKey(element: Element | null, key: string) {
 export async function performAction(action: BrowserAction): Promise<ActionResult> {
   if (action.type === "extractPage") {
     const snapshot = captureSnapshot({ mode: action.mode, offset: action.offset });
-    return { ok: true, summary: `Página lida: ${snapshot.elementCount} elementos interativos.`, content: snapshot.content, snapshotId: snapshot.snapshotId, truncated: snapshot.truncated, nextOffset: snapshot.nextOffset, url: snapshot.url, title: snapshot.title };
+    const pageTools = await listPageTools();
+    const content = snapshot.content + describePageTools(pageTools);
+    const extra = pageTools.length ? ` A página oferece ${pageTools.length} ferramenta(s) própria(s).` : "";
+    return { ok: true, summary: `Página lida: ${snapshot.elementCount} elementos interativos.${extra}`, content, snapshotId: snapshot.snapshotId, truncated: snapshot.truncated, nextOffset: snapshot.nextOffset, url: snapshot.url, title: snapshot.title };
+  }
+
+  if (action.type === "pageTool") {
+    const result = await callPageTool(action.name, action.arguments);
+    return result.ok
+      ? { ok: true, summary: `Usei a ferramenta “${action.name}” da página.`, content: result.text }
+      : failure("unsupported", result.text);
   }
 
   if (action.type === "wait") {
@@ -134,8 +145,6 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
   if (!element) return failure("element_not_found", "Elemento não encontrado.");
   if (element.hasAttribute("disabled")) return failure("element_not_interactable", `${describeTarget(element)} está desabilitado.`);
 
-  element.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
-  await wait(60);
 
   if (action.type === "click") {
     const before = captureSignals(element);

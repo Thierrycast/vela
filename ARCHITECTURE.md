@@ -177,6 +177,25 @@ Registradas para decisão, não esquecidas:
 7. **Endpoints de áudio não confirmados** — dependem da sondagem com a chave real.
 8. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
 
+### O cursor é o caminho da execução, não um enfeite
+
+`traceLayer.begin()` devolve uma **promise que resolve na chegada do cursor**, e a ação só
+dispara depois dela. Antes, o cursor animava em paralelo enquanto o clique já tinha acontecido —
+o desenho representava a ação em vez de ser a ação.
+
+A decisão continua barata e instantânea: o alvo vem do retrato de DOM que já está em mãos, sem
+procura. O que passa a custar tempo é só o trajeto, e ele tem teto: 450 ms em Natural, 220 ms em
+Rápido, zero em Instantâneo (`settings.agent.cursorSpeed`). Só ações com alvo esperam —
+`extractPage`, `web_search`, `web_fetch` e `navigate` não têm cursor e não esperam nada.
+
+Medido na extensão real: Natural acrescenta ~520 ms por ação com alvo, Rápido ~300 ms. Uma ida
+ao modelo custa segundos, então o cursor não é o gargalo.
+
+Duas armadilhas que isso criou e que estão tratadas: o prazo precisa de um `setTimeout` de
+segurança (se o loop de animação não estiver rodando, o RAF nunca cobraria o prazo e a ação
+esperaria para sempre), e `end()` de uma ação não pode parar o loop enquanto outra ainda espera
+chegada.
+
 ## WebMCP — verificado no Chrome 152 (set/2026)
 
 Testado no navegador instalado, não em documentação:
@@ -189,6 +208,11 @@ Testado no navegador instalado, não em documentação:
   Isso significa que a Vela lê e executa tools de WebMCP **direto do content script**, sem
   injeção no mundo principal e sem ponte de postMessage.
 - Só funciona em HTTPS.
+- **Assinatura real de `executeTool`**, descoberta testando: recebe o *objeto* vindo de
+  `getTools()` (não o nome) e os argumentos como **string JSON**. Passar um objeto falha com
+  `Failed to parse input arguments`, e passar o nome falha com `not of type 'RegisteredTool'`.
+- O retorno também chega como **string JSON** no formato MCP `{content:[{type,text}]}`, não como
+  objeto — precisa de parse antes de extrair o texto.
 
 Consequência de projeto: quando a página oferece uma tool (`buscar_produto`, `adicionar_ao_carrinho`),
 usá-la é sempre melhor que simular cliques — é semântica, não imitação. A camada de DOM continua

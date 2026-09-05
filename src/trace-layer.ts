@@ -1,6 +1,10 @@
 import { AgentCursorMotion } from "./cursor-motion";
 
-export type TraceConfig = { cursor: boolean; border: boolean; highlight: boolean };
+export type CursorSpeed = "natural" | "fast" | "instant";
+export type TraceConfig = { cursor: boolean; border: boolean; highlight: boolean; speed?: CursorSpeed };
+
+const ARRIVAL_TOLERANCE = 6;
+const TRAVEL_DEADLINE: Record<CursorSpeed, number> = { natural: 450, fast: 220, instant: 0 };
 
 const STYLE = `
 .border{position:fixed;inset:1px;border:2px solid #58d8cd;box-shadow:inset 0 0 22px #58d8cd22;opacity:.8;transition:opacity 220ms ease;pointer-events:none}
@@ -26,6 +30,7 @@ class TraceLayer {
   private readonly highlights = new Map<string, HTMLDivElement>();
   private readonly motion = new AgentCursorMotion();
   private frame = 0;
+  private arrivals: Array<{ resolve: () => void; deadline: number; timer: number }> = [];
   private lastTick = 0;
   private sessionActive = false;
   private paused = false;
@@ -69,6 +74,7 @@ class TraceLayer {
 
   endSession() {
     this.sessionActive = false;
+    this.releaseArrivals();
     this.stopLoop();
     this.border?.remove(); this.border = null;
     this.pill?.remove(); this.pill = null;
@@ -93,22 +99,34 @@ class TraceLayer {
     if (span && waiting) span.textContent = label;
   }
 
-  begin(actionId: string, target: Element | null, config: TraceConfig, ghost = false) {
-    if (!this.sessionActive || window.top !== window.self) return;
+  /** Devolve a chegada do cursor: a ação espera por ela, então a animação é o agir. */
+  begin(actionId: string, target: Element | null, config: TraceConfig, ghost = false): Promise<void> {
+    if (!this.sessionActive || window.top !== window.self || !target) return Promise.resolve();
     const root = this.ensure();
+    const speed = config.speed ?? "natural";
     this.cursor?.classList.toggle("ghost", ghost);
-    if (target) {
-      const rect = target.getBoundingClientRect();
-      if (config.highlight) {
-        const highlight = document.createElement("div");
-        highlight.className = "target";
-        highlight.style.cssText += `left:${rect.left - 3}px;top:${rect.top - 3}px;width:${rect.width + 6}px;height:${rect.height + 6}px`;
-        root.append(highlight);
-        this.highlights.set(actionId, highlight);
-      }
-      this.motion.setTarget({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    this.motion.setSpeed(speed === "fast" ? "fast" : "natural");
+
+    const rect = target.getBoundingClientRect();
+    if (config.highlight) {
+      const highlight = document.createElement("div");
+      highlight.className = "target";
+      highlight.style.cssText += `left:${rect.left - 3}px;top:${rect.top - 3}px;width:${rect.width + 6}px;height:${rect.height + 6}px`;
+      root.append(highlight);
+      this.highlights.set(actionId, highlight);
     }
+
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    if (speed === "instant" || !config.cursor || !this.cursor) { this.motion.jumpTo(point); this.startLoop(); return Promise.resolve(); }
+
+    this.motion.setTarget(point);
     this.startLoop();
+    return new Promise<void>((resolve) => {
+      const entry = { resolve: () => { clearTimeout(entry.timer); resolve(); }, deadline: performance.now() + TRAVEL_DEADLINE[speed], timer: 0 };
+      // Backstop: sem isto, um loop parado deixaria a ação esperando para sempre.
+      entry.timer = setTimeout(() => { this.arrivals = this.arrivals.filter((item) => item !== entry); resolve(); }, TRAVEL_DEADLINE[speed] + 60) as unknown as number;
+      this.arrivals.push(entry);
+    });
   }
 
   ripple() {
@@ -126,7 +144,7 @@ class TraceLayer {
   end(actionId: string) {
     this.highlights.get(actionId)?.remove();
     this.highlights.delete(actionId);
-    if (!this.highlights.size) this.stopLoop();
+    if (!this.highlights.size && !this.arrivals.length) this.stopLoop();
   }
 
   private startLoop() {
@@ -140,10 +158,20 @@ class TraceLayer {
         this.cursor.style.top = `${point.y}px`;
         this.cursor.style.transform = `translate(-50%,-50%) scale(${1 - point.compression * 0.3})`;
       }
+      if (this.arrivals.length) {
+        const arrived = this.motion.distanceToTarget <= ARRIVAL_TOLERANCE;
+        const stillTravelling: typeof this.arrivals = [];
+        for (const arrival of this.arrivals) {
+          if (arrived || now >= arrival.deadline) arrival.resolve(); else stillTravelling.push(arrival);
+        }
+        this.arrivals = stillTravelling;
+      }
       this.frame = requestAnimationFrame(tick);
     };
     this.frame = requestAnimationFrame(tick);
   }
+
+  private releaseArrivals() { const pending = this.arrivals; this.arrivals = []; for (const arrival of pending) arrival.resolve(); }
 
   private stopLoop() {
     if (this.frame) cancelAnimationFrame(this.frame);

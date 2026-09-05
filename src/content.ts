@@ -66,13 +66,19 @@ function start() {
 
 async function runTracedAction(action: BrowserAction, actionId: string, trace: TraceConfig, ghost: boolean) {
   const target = "ref" in action && action.ref ? resolveRef(action.ref).element : "selector" in action && action.selector ? document.querySelector(action.selector) : null;
-  traceLayer.begin(actionId, target, trace, ghost);
-  if (action.type === "click") setTimeout(() => traceLayer.ripple(), 320);
+
+  // Rola antes de mirar: senão o cursor persegue a posição que o elemento tinha.
+  if (target) { target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior }); await new Promise((resolve) => requestAnimationFrame(resolve)); }
+
+  // A viagem do cursor é o caminho da ação, não um enfeite paralelo.
+  await traceLayer.begin(actionId, target, trace, ghost);
+  if (action.type === "click") traceLayer.ripple();
+
   try {
-    if (ghost) { await new Promise((resolve) => setTimeout(resolve, 650)); return { ok: false, code: "denied", summary: "Modo Observar: a ação foi mostrada mas não executada." }; }
+    if (ghost) { await new Promise((resolve) => setTimeout(resolve, 350)); return { ok: false, code: "denied", summary: "Modo Observar: a ação foi mostrada mas não executada." }; }
     return await performAction(action);
   } finally {
-    setTimeout(() => traceLayer.end(actionId), action.type === "click" ? 500 : 220);
+    setTimeout(() => traceLayer.end(actionId), action.type === "click" ? 400 : 200);
   }
 }
 

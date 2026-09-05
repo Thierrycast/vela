@@ -60,6 +60,7 @@ export function describeAction(action: BrowserAction, targetLabel: string) {
     case "click": return `Clicar em ${targetLabel || action.ref || action.selector || "um elemento"}`;
     case "type": return `Digitar “${action.text.slice(0, 40)}”${action.submit ? " e enviar" : ""} em ${targetLabel || "um campo"}`;
     case "keyPress": return `Pressionar ${action.key}`;
+    case "pageTool": return `Usar a ferramenta “${action.name}” da própria página`;
     default: return `Executar ${action.type}`;
   }
 }

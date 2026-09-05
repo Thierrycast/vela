@@ -20,6 +20,7 @@ export type ProviderProfile = {
 };
 
 export type Autonomy = "observe" | "assist" | "auto";
+export type CursorSpeed = "natural" | "fast" | "instant";
 
 export type AppSettings = {
   theme: ThemeMode;
@@ -31,6 +32,7 @@ export type AppSettings = {
     showCursor: boolean;
     showControlBorder: boolean;
     showTargetHighlights: boolean;
+    cursorSpeed: CursorSpeed;
   };
   context: { currentPage: boolean; selection: boolean; sessionTabs: boolean; outsideTabs: boolean };
   voice: { transcriptionModel: string; speechModel: string; speechVoice: string };
@@ -53,6 +55,7 @@ export type BrowserAction =
   | { type: "keyPress"; key: string; ref?: string }
   | { type: "scroll"; deltaX?: number; deltaY?: number }
   | { type: "extractPage"; mode?: "outline" | "text"; offset?: number }
+  | { type: "pageTool"; name: string; arguments?: unknown }
   | { type: "wait"; milliseconds: number };
 
 export type ActionErrorCode =
@@ -111,7 +114,7 @@ export const defaultSettings: AppSettings = {
     enabled: true,
     capabilities: { streaming: true, tools: true, vision: true, audio: false, webFetch: false },
   }],
-  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true },
+  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural" },
   context: { currentPage: true, selection: true, sessionTabs: true, outsideTabs: false },
   voice: { transcriptionModel: "whisper-1", speechModel: "tts-1", speechVoice: "alloy" },
 };
