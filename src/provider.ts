@@ -127,6 +127,22 @@ export async function fetchUrl(profile: ProviderProfile, url: string, maxLength 
   return content.slice(0, maxLength);
 }
 
+export type ConnectionCheck = { ok: boolean; detail: string; models?: number };
+
+/** Uma requisição real responde três perguntas de uma vez: a chave foi salva, o gateway
+ *  responde, e a credencial vale. É mais útil que um botão "salvar". */
+export async function testConnection(profile: ProviderProfile): Promise<ConnectionCheck> {
+  if (!profile.baseUrl.trim()) return { ok: false, detail: "Informe a URL base do gateway." };
+  if (!profile.apiKey.trim()) return { ok: false, detail: "Informe a chave de API." };
+  try {
+    const models = await listModels(profile);
+    if (!models.length) return { ok: false, detail: "Conectou, mas o gateway não listou nenhum modelo." };
+    return { ok: true, detail: `Conectado — ${models.length} modelos disponíveis.`, models: models.length };
+  } catch (error) {
+    return { ok: false, detail: error instanceof Error ? error.message : "Não foi possível conectar." };
+  }
+}
+
 export async function probeAudioEndpoints(profile: ProviderProfile): Promise<Record<string, number>> {
   const paths = ["audio/transcriptions", "audio/speech", "web/fetch"];
   const results: Record<string, number> = {};
