@@ -163,6 +163,21 @@ Trocar o nome no default não bastava: quem já usava a versão anterior tinha `
 igual a "Browser AI" e os accents legados. Nome ou cor que o usuário escolheu de fato não são
 tocados.
 
+## Saber se está funcionando
+
+As configurações salvam sozinhas, mas autosave não dá certeza — e para uma chave de API a certeza
+é o que importa. Em vez de um botão "Salvar" (que só confirmaria a escrita local), a tela de
+Providers tem **Testar**: uma requisição real ao gateway responde de uma vez se a chave foi salva,
+se o gateway responde e se a credencial vale.
+
+O resultado vira um LED ao lado do nome do provider — cinza sem chave, âmbar pulsando enquanto
+testa, verde conectado com a contagem de modelos, vermelho com o motivo da falha. O teste roda
+sozinho ao abrir a seção quando há chave, e a impressão digital `id:baseUrl:final-da-chave` evita
+repetir a requisição a cada render.
+
+Na sondagem de endpoints, **HTTP 400 e 422 significam que a rota existe** — ela recusou o corpo
+vazio da sonda, não a requisição. Só 404 e 405 significam ausência.
+
 ## Chaves de armazenamento
 
 `vela:settings`, `vela:conversations`, `vela:logs`, `vela:user-scripts`, `vela:pulse-position`
