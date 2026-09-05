@@ -1,0 +1,31 @@
+{
+  "name": "vela",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build && vite build --config vite.content.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "harness": "vite build --config tools/vite.harness.config.ts && node tools/out/harness.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "lucide-react": "^1.38.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "vite": "^8.2.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.2.7",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "eslint": "^10.9.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.69.0"
+  }
+}

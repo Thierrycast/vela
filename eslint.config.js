@@ -1,0 +1,24 @@
+import js from "@eslint/js";
+import globals from "globals";
+import tseslint from "typescript-eslint";
+import reactHooks from "eslint-plugin-react-hooks";
+
+export default tseslint.config(
+  { ignores: ["dist/**", "refs/**", "tools/**", "node_modules/**"] },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    files: ["public/*-worklet.js"],
+    languageOptions: { globals: { AudioWorkletProcessor: "readonly", registerProcessor: "readonly", sampleRate: "readonly", currentTime: "readonly" } },
+  },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    languageOptions: { ecmaVersion: 2022, globals: { ...globals.browser, chrome: "readonly" } },
+    plugins: { "react-hooks": reactHooks },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+      "no-console": "warn",
+    },
+  },
+);

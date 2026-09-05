@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}canvas{display:block}</style></head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const CANVAS_COLOR = "#080a0b";
+const SIGNAL = "#58d8cd";
+const SIGNAL_BRIGHT = "#79e9df";
+
+function roundedRect(context, size, radius) {
+  context.beginPath();
+  context.moveTo(radius, 0);
+  context.arcTo(size, 0, size, size, radius);
+  context.arcTo(size, size, 0, size, radius);
+  context.arcTo(0, size, 0, 0, radius);
+  context.arcTo(0, 0, size, 0, radius);
+  context.closePath();
+}
+
+function drawMark(context, size) {
+  const center = size / 2;
+  context.clearRect(0, 0, size, size);
+  roundedRect(context, size, size * 0.235);
+  context.fillStyle = CANVAS_COLOR;
+  context.fill();
+
+  if (size <= 16) {
+    // Glifo dedicado para 16px: dois elementos, traço alinhado a meio pixel.
+    const radius = 5.5;
+    context.strokeStyle = SIGNAL;
+    context.lineWidth = 1.5;
+    context.lineCap = "round";
+    context.beginPath();
+    context.arc(center, center, radius, -0.35, 5.1);
+    context.stroke();
+    context.fillStyle = SIGNAL_BRIGHT;
+    context.beginPath();
+    context.arc(center + radius * Math.cos(-0.35), center + radius * Math.sin(-0.35), 1.4, 0, Math.PI * 2);
+    context.fill();
+    return;
+  }
+
+  const outerRadius = size * 0.315;
+  context.lineCap = "round";
+
+  // Órbita externa incompleta.
+  context.strokeStyle = SIGNAL;
+  context.lineWidth = Math.max(1.5, size * 0.058);
+  context.beginPath();
+  context.arc(center, center, outerRadius, -0.42, 4.95);
+  context.stroke();
+
+  // Lente interna: elipse rotacionada com um quadrante aberto.
+  context.save();
+  context.translate(center, center);
+  context.rotate(-0.49);
+  context.strokeStyle = SIGNAL;
+  context.globalAlpha = 0.55;
+  context.lineWidth = Math.max(1, size * 0.034);
+  context.beginPath();
+  context.ellipse(0, 0, outerRadius * 0.42, outerRadius * 0.66, 0, 0.62, 5.35);
+  context.stroke();
+  context.restore();
+
+  // Ponto orbital no vão da órbita externa.
+  context.globalAlpha = 1;
+  context.fillStyle = SIGNAL_BRIGHT;
+  context.beginPath();
+  context.arc(center + outerRadius * Math.cos(-0.42), center + outerRadius * Math.sin(-0.42), size * 0.072, 0, Math.PI * 2);
+  context.fill();
+}
+
+const size = Number(new URLSearchParams(location.search).get("size") || 128);
+const canvas = document.getElementById("c");
+canvas.width = size;
+canvas.height = size;
+canvas.style.width = size + "px";
+canvas.style.height = size + "px";
+drawMark(canvas.getContext("2d"), size);
+</script>
+</body>
+</html>

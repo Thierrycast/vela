@@ -1,0 +1,9 @@
+node_modules/
+dist/
+tsconfig.tsbuildinfo
+.playwright-mcp/
+
+# Material de referência (brief, boards, extensões de terceiros descompiladas).
+# Fica no disco para consulta, fora do repositório.
+refs/
+tools/out/
