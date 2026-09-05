@@ -4,6 +4,9 @@ export const SETTINGS_KEY = "vela:settings";
 const MESSAGES_KEY = "vela:messages";
 const CONVERSATIONS_KEY = "vela:conversations";
 const LOGS_KEY = "vela:logs";
+const BRAND_HEALED_KEY = "vela:brand-renamed";
+const LEGACY_APP_NAMES = ["Browser AI", "browser-ai"];
+const LEGACY_ACCENTS = ["#d97757", "#5250f2"];
 
 const legacyKey = (key: string) => key.replace(/^vela:/, "browser-ai:");
 
@@ -36,7 +39,32 @@ export function normalizeSettings(stored: Partial<AppSettings> | undefined): App
   };
 }
 
-export const loadSettings = async () => normalizeSettings(await local.get<Partial<AppSettings>>(SETTINGS_KEY, {}));
+/**
+ * O produto trocou de nome. Sem isto, quem já usava a versão antiga continuaria vendo
+ * "Browser AI" e a cor antiga para sempre — o valor salvo venceria o default novo.
+ * Roda uma única vez e não toca em nome ou cor que o usuário tenha escolhido de fato.
+ */
+async function healLegacyBrand(settings: AppSettings): Promise<AppSettings> {
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return settings;
+  const stored = await chrome.storage.local.get(BRAND_HEALED_KEY);
+  if (stored[BRAND_HEALED_KEY]) return settings;
+
+  const staleName = LEGACY_APP_NAMES.includes(settings.brand.appName.trim());
+  const staleAccent = LEGACY_ACCENTS.includes(settings.brand.accentColor.trim().toLowerCase());
+  const healed: AppSettings = {
+    ...settings,
+    brand: {
+      appName: staleName ? defaultSettings.brand.appName : settings.brand.appName,
+      accentColor: staleAccent ? "" : settings.brand.accentColor,
+      logoText: staleName ? defaultSettings.brand.logoText : settings.brand.logoText,
+    },
+  };
+  await chrome.storage.local.set({ [BRAND_HEALED_KEY]: true });
+  if (staleName || staleAccent) await local.set(SETTINGS_KEY, healed);
+  return healed;
+}
+
+export const loadSettings = async () => healLegacyBrand(normalizeSettings(await local.get<Partial<AppSettings>>(SETTINGS_KEY, {})));
 export const saveSettings = (settings: AppSettings) => local.set(SETTINGS_KEY, settings);
 
 export const loadMessages = () => local.get<ChatMessage[]>(MESSAGES_KEY, []);

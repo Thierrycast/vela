@@ -31,6 +31,7 @@ function App() {
   const portRef = useRef<SidecarPort | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const menuRef = useRef<HTMLElement>(null);
 
   useTheme(settings);
 
@@ -59,6 +60,21 @@ function App() {
     portRef.current = connectSidecar(apply, () => { portRef.current = null; });
     return () => { portRef.current?.disconnect(); portRef.current = null; };
   }, []);
+
+  // Popover fecha ao clicar fora e no Escape — comportamento esperado de qualquer menu.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOnOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target)) return;
+      if ((target as HTMLElement).closest?.("[aria-label='Menu']")) return;
+      setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => { document.removeEventListener("pointerdown", closeOnOutside); document.removeEventListener("keydown", closeOnEscape); };
+  }, [menuOpen]);
 
   useEffect(() => { streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight, behavior: "smooth" }); }, [messages.length, running, approval, takeover]);
 
@@ -109,7 +125,7 @@ function App() {
         <button className="icon-button" aria-label="Configurações" onClick={openOptions}><Settings2 size={17} /></button>
       </div>
     </header>
-    {menuOpen && <aside className="popover">
+    {menuOpen && <aside className="popover" ref={menuRef}>
       <button onClick={newChat}><Plus size={15} /> Nova tarefa</button>
       <button onClick={openOptions}><Settings2 size={15} /> Configurações</button>
       {history.length > 1 && <>

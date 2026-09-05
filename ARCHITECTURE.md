@@ -144,6 +144,25 @@ painel → chat:submit ──► agent-loop (background)
 - `getUserMedia` no offscreen não consegue exibir prompt → permissão concedida pelas opções.
 - AudioWorklet precisa ser script clássico → fica em `public/`, fora do processamento do Vite.
 
+## Movimento e fechamento de camadas
+
+Popover e menu do Lens fecham ao clicar fora e no Escape. O do Lens usa `composedPath()` porque
+vive em shadow DOM — `contains()` não atravessa a fronteira. Clicar num item do menu fecha, como
+esperado; clicar em área vazia do próprio menu não.
+
+As animações usam os tokens de `motion.css` e são de entrada, nunca de saída: mensagem e itens de
+atividade sobem 6 px, cartões de aprovação e o popover fazem um *pop* curto de 4 px. Botões têm
+`transform: scale(.94)` no `:active` — resposta tátil que custa nada. Tudo desligado sob
+`prefers-reduced-motion`.
+
+## Renomeação do produto e dados salvos
+
+Trocar o nome no default não bastava: quem já usava a versão anterior tinha `appName` e
+`accentColor` salvos, e o valor salvo vence o default para sempre. `healLegacyBrand()` roda uma
+única vez e corrige apenas valores que sabidamente vieram da identidade antiga — nome exatamente
+igual a "Browser AI" e os accents legados. Nome ou cor que o usuário escolheu de fato não são
+tocados.
+
 ## Chaves de armazenamento
 
 `vela:settings`, `vela:conversations`, `vela:logs`, `vela:user-scripts`, `vela:pulse-position`

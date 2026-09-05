@@ -159,4 +159,10 @@ function installLens() {
   });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
   document.addEventListener("scroll", close, { passive: true });
+  // Clique fora fecha o menu do Lens; o próprio host é blindado por composedPath.
+  document.addEventListener("pointerdown", (event) => {
+    if (!host) return;
+    if (event.composedPath().includes(host)) return;
+    close();
+  }, true);
 }
