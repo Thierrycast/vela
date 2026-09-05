@@ -50,16 +50,20 @@ Toda vez que rodar `npm run build`, clique em **Atualizar** no card da extensão
 DisableLoadExtensionCommandLineSwitch` **não** resolve. O caminho que funciona é o CDP:
 
 ```bash
-# 1. Chrome de automação com perfil isolado (não toque no seu Chrome pessoal)
-chrome.exe --user-data-dir=<pasta temporária> --remote-debugging-port=9444            --no-first-run --no-default-browser-check about:blank
+# 1. Chrome headless com perfil isolado — não abre janela nenhuma
+chrome.exe --headless=new --disable-gpu --user-data-dir=<pasta temporária>            --remote-debugging-port=9451 --no-first-run --no-default-browser-check about:blank
 
 # 2. Carregar a extensão pelo próprio protocolo
 #    Extensions.loadUnpacked { path: "<caminho absoluto de dist>" }  →  devolve o id
 ```
 
-Depois disso dá para abrir `chrome-extension://<id>/index.html` como aba comum e dirigir tudo
-por `Runtime.evaluate` — inclusive chamar `chrome.tabs.sendMessage` do service worker para
-exercitar ações reais na página.
+`Extensions.loadUnpacked` funciona em headless com as APIs de extensão completas e o service
+worker ativo. Depois disso dá para abrir `chrome-extension://<id>/index.html` como aba comum e
+dirigir tudo por `Runtime.evaluate` — inclusive chamar `chrome.tabs.sendMessage` a partir do
+service worker para exercitar ações reais numa página.
+
+**Use headless.** Em modo com janela, mesmo com `--window-position` fora da tela, a instância
+aparece na barra de tarefas e não dá para interagir com ela — parece um travamento.
 
 Ao encerrar, matar **só o processo daquela porta** (`netstat -ano` → `taskkill /PID`), nunca
 `taskkill /IM chrome.exe`, que derruba o navegador pessoal junto.
