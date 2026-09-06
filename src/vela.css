@@ -120,3 +120,8 @@
    viravam um quadrado. A máscara radial os arredonda sem cortar o brilho que vaza — recortar
    com overflow mataria justamente o halo que dá vida à forma. */
 .welcome-mark canvas{-webkit-mask-image:radial-gradient(circle at 50% 50%,#000 52%,transparent 74%);mask-image:radial-gradient(circle at 50% 50%,#000 52%,transparent 74%)}
+
+/* O canvas é criado pelo efeito, não pelo React: só assim dá para descartá-lo e criar outro
+   quando o shader não compila — um canvas nunca troca de tipo de contexto. */
+span.vela-orb-canvas{display:block;flex:none}
+span.vela-orb-canvas>canvas{display:block;width:100%;height:100%}

@@ -141,6 +141,10 @@ de vozes buscada do próprio servidor.
 Vem apontando de fábrica para a `speech-api` do laboratório (`http://SEU-SERVIDOR-DE-VOZ:8010`), que
 segue o padrão da OpenAI em `/v1/audio/speech` e `/v1/audio/transcriptions`.
 
+A lista de vozes vem do próprio servidor assim que a seção abre — não é preciso clicar em
+Testar. **Aparência da voz** escolhe como a Vela se mostra ao ouvir e falar, com preview ao vivo
+de cada opção.
+
 🔴 **Clique em "Permitir microfone" uma vez.** O runtime de voz roda num documento offscreen, e
 documento offscreen **não consegue exibir o prompt de permissão** — sem essa liberação, feita na
 página de opções, `getUserMedia` falha calado e o botão parece quebrado.

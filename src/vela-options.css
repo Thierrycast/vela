@@ -50,3 +50,6 @@
 /* `[hidden]` é regra do navegador e perde para qualquer classe: sem isto o aviso de falha
    ficava visível por cima de um shader que estava rodando bem. */
 .visual-stage em[hidden]{display:none}
+
+.visual-canvas{display:block;width:100%;height:100%}
+.visual-canvas>canvas{display:block;width:100%;height:100%}

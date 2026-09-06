@@ -10,28 +10,48 @@ import { VoiceVisualMetrics } from "./audio-metrics";
 export type VelaState = MotionState;
 
 export function VelaOrb({ state = "idle", size = 34, metrics, visual }: { state?: VelaState; size?: number; metrics?: VoiceVisualMetrics; visual?: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hostRef = useRef<HTMLSpanElement>(null);
   const rendererRef = useRef<VoiceVisual | null>(null);
   useEffect(() => {
-    if (!canvasRef.current) return;
+    const host = hostRef.current;
+    if (!host) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     // Abaixo de 24px o shader é desperdício: nesse tamanho nada do detalhe aparece.
     const entry = size >= 24 ? VISUALS.find((item) => item.id === visual) : undefined;
-    // Sonda num canvas descartável: pedir "webgl" aqui e falhar deixaria este canvas incapaz de
-    // receber o contexto 2D do renderer de reserva.
-    const wanted = entry && (!entry.webgl || shadersAvailable()) ? entry : undefined;
-    const candidate = wanted?.create(canvasRef.current, { reducedMotion: reduced });
-    const usable = candidate && (!("ok" in candidate) || (candidate as { ok: boolean }).ok);
-    if (candidate && !usable) candidate.destroy();
-    const renderer = usable ? candidate : new VelaOrbRenderer(canvasRef.current, { reducedMotion: reduced });
-    renderer.start(); rendererRef.current = renderer;
-    const observer = new ResizeObserver(() => renderer.resize()); observer.observe(canvasRef.current);
-    const visibility = new IntersectionObserver(([entry]) => renderer.setVisible(entry.isIntersecting)); visibility.observe(canvasRef.current);
-    return () => { observer.disconnect(); visibility.disconnect(); renderer.destroy(); rendererRef.current = null; };
+
+    const build = () => {
+      const canvas = document.createElement("canvas");
+      host.replaceChildren(canvas);
+      return canvas;
+    };
+
+    let renderer: VoiceVisual | null = null;
+    let canvas = build();
+    if (entry && (!entry.webgl || shadersAvailable())) {
+      const candidate = entry.create(canvas, { reducedMotion: reduced });
+      if (!("ok" in candidate) || (candidate as { ok: boolean }).ok) renderer = candidate;
+      else {
+        // O shader não compilou e o canvas ficou preso ao contexto WebGL: o de reserva precisa
+        // de um elemento novo, senão getContext("2d") devolve null e lança.
+        candidate.destroy();
+        canvas = build();
+      }
+    }
+    if (!renderer) renderer = new VelaOrbRenderer(canvas, { reducedMotion: reduced });
+
+    const active = renderer;
+    active.start();
+    rendererRef.current = active;
+    active.setState(state);
+    const observer = new ResizeObserver(() => active.resize()); observer.observe(canvas);
+    const visibility = new IntersectionObserver(([item]) => active.setVisible(item.isIntersecting)); visibility.observe(canvas);
+    return () => { observer.disconnect(); visibility.disconnect(); active.destroy(); rendererRef.current = null; host.replaceChildren(); };
+    // `state` entra só na montagem; mudanças dele são aplicadas pelo efeito seguinte.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visual, size]);
   useEffect(() => { rendererRef.current?.setState(state); }, [state]);
   useEffect(() => { if (metrics) rendererRef.current?.setMetrics(metrics); }, [metrics]);
-  return <canvas ref={canvasRef} className={`vela-orb-canvas state-${state}`} style={{ width: size, height: size }} aria-label={`Vela: ${state}`} role="img" />;
+  return <span ref={hostRef} className={`vela-orb-canvas state-${state}`} style={{ width: size, height: size }} aria-label={`Vela: ${state}`} role="img" />;
 }
 
 const STATE_LABEL: Partial<Record<VelaState, string>> = {

@@ -310,6 +310,17 @@ monta o visual uma vez, em `show()`, quando a preferência já é conhecida. Pel
 existe `shadersAvailable()`, que sonda num canvas descartável — sondar no canvas real o
 queimaria para o renderer 2D de reserva.
 
+**A mesma regra derrubou o painel por outro caminho**, e a sonda não bastava. Trocar o visual nas
+preferências re-executa o efeito do `VelaOrb`: o canvas já estava preso ao contexto WebGL do
+visual anterior, e o renderer 2D do próximo lançava `Canvas 2D indisponível`, levando o painel
+junto. O caso mais fácil de encontrar era um `visual` vazio nas settings antigas, mas qualquer
+troca bastava.
+
+Por isso o canvas do orb **deixou de ser gerenciado pelo React**: o componente é um `<span>` host
+e o efeito cria o elemento, podendo descartá-lo e criar outro virgem sempre que precisar. Sonda
+serve para saber se WebGL existe — não diz se aquele shader compila, e não resolve trocar de
+renderer no mesmo elemento.
+
 O custo de levar os shaders ao content script é real: `content.js` foi de 33 KB para 56 KB
 (18,7 KB gzip). É o preço de o Pulse poder usar qualquer visual escolhido; a infra WebGL é o
 grosso, não os shaders em si, então recortar a tabela economizaria pouco.
