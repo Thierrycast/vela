@@ -1,5 +1,5 @@
 import { ActionResult, Autonomy, BrowserAction } from "./types";
-import { isPdf, isRestrictedUrl, waitForContentScript, waitForNavigation } from "./navigation";
+import { isPdf, isRestrictedUrl, restrictionReason, waitForContentScript, waitForNavigation } from "./navigation";
 import { loadSettings } from "./storage";
 import { approvalKey, describeAction, isRisky, requestApproval } from "./approvals";
 
@@ -108,7 +108,7 @@ export async function executeAction(action: BrowserAction, autonomy: Autonomy): 
   // Recusas baratas vêm antes da aprovação: não faz sentido consultar o usuário
   // sobre uma ação que já vai falhar por causa da página.
   if (action.type !== "navigate") {
-    if (isRestrictedUrl(tab.url)) return failure("restricted_url", `A Vela não pode agir em ${tab.url ?? "esta página"}. Peça ao usuário para abrir uma página comum.`);
+    if (isRestrictedUrl(tab.url)) return failure("restricted_url", `Não dá para agir em ${tab.url ?? "esta página"}: ${restrictionReason(tab.url)}. Explique isso ao usuário e peça para ele abrir a página onde quer que você trabalhe.`);
     if (isPdf(tab.url) && action.type === "extractPage") return failure("unsupported", "Esta aba é um PDF; o leitor de página não funciona aqui. Use web_fetch nesta URL.");
   }
 

@@ -23,3 +23,10 @@
 .bridge-warning strong{color:var(--text-primary);font-weight:600}
 .setting-control .toggle{margin-left:12px}
 .setting-control input[readonly]{color:var(--text-muted)}
+
+/* Linhas com e sem lixeira precisam terminar na mesma borda: sem o slot reservado, o badge
+   de quem não tem botão fica deslocado e a coluna inteira parece torta. */
+.setting-control{gap:10px}
+.setting-control .icon-danger{width:26px;height:26px;display:grid;place-items:center;border-radius:6px;flex:none}
+.setting-control .icon-danger:hover{background:color-mix(in srgb,var(--danger) 14%,transparent)}
+.setting-control .icon-danger[hidden]{display:grid!important;visibility:hidden;pointer-events:none}

@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Bot, CircleStop, ExternalLink, Globe2, Layers3, Menu, Paperclip, Plus, Send, Settings2 } from "lucide-react";
+import { FileText, Layers, Menu, Paperclip, Plus, Search, Send, Settings2, Square, WifiOff } from "lucide-react";
 import { AgentEvent, ChatMessage } from "./types";
 import { SidecarInbound, SidecarPort, VoiceState, connectSidecar } from "./messages";
 import type { ApprovalRequest } from "./approvals";
 import { useSettings, useTheme } from "./use-settings";
 import { ActivityTimeline, AgentStatus, ApprovalCard, ContextChip, DeveloperDetails, DictationButton, LiveVoiceButton, TakeoverCard, VelaOrb, VelaState } from "./vela-components";
+import { AssistantActions, MessageEditor, UserActions } from "./message-actions";
+import { Markdown } from "./markdown";
 import { VelaMark } from "./vela-mark";
 import { Select } from "./select";
 import { playAttentionChime } from "./chime";
@@ -15,13 +17,17 @@ import "./motion.css";
 
 type Takeover = { reason: string; expected: string };
 
+/** Uma escala só para todo ícone do painel — a espessura vem do CSS, em `.app-shell svg`. */
+const ICON = { action: 17, inline: 14, chip: 13 } as const;
+const ATTACHMENT_LIMIT = 20_000;
+
 const AUTONOMY_OPTIONS = [
   { value: "observe" as const, label: "Observar", hint: "só lê, nunca age" },
   { value: "assist" as const, label: "Assistir", hint: "pede aprovação" },
   { value: "auto" as const, label: "Auto", hint: "age sozinha" },
 ];
 
-/** O anexo guarda `Trecho selecionado em X (url):\n<texto>`; o chip mostra só o texto. */
+/** O anexo guarda `<cabeçalho>:\n<texto>`; o chip mostra só o começo do texto. */
 const attachmentPreview = (item: string) => {
   const lineBreak = item.indexOf("\n");
   const text = (lineBreak >= 0 ? item.slice(lineBreak + 1) : item).replace(/\s+/g, " ").trim();
@@ -34,11 +40,14 @@ function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [telemetry, setTelemetry] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
+  const [connected, setConnected] = useState(true);
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(true);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [dictating, setDictating] = useState(false);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const [takeover, setTakeover] = useState<Takeover | null>(null);
@@ -47,6 +56,7 @@ function App() {
   const portRef = useRef<SidecarPort | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLElement>(null);
 
   useTheme(settings);
@@ -67,13 +77,14 @@ function App() {
       if (message.type === "chat:takeover-closed") setTakeover(null);
       if (message.type === "chat:session") setSession({ title: message.title, tabCount: message.tabCount });
       if (message.type === "chat:history") setHistory(message.items);
-      if (message.type === "voice:state") { setVoiceState(message.state); if (message.state === "idle") setDictating(false); }
-      if (message.type === "voice:error") { setVoiceState("error"); setDictating(false); setEvents((current) => [...current, { kind: "error", text: message.message }]); }
+      if (message.type === "chat:speaking" && !message.speaking) setSpeakingId(null);
+      if (message.type === "voice:state") { setVoiceState(message.state); if (message.state === "idle") { setDictating(false); setSpeakingId(null); } }
+      if (message.type === "voice:error") { setVoiceState("error"); setDictating(false); setSpeakingId(null); setEvents((current) => [...current, { kind: "error", text: message.message }]); }
       if (message.type === "voice:transcript") { setInput((current) => `${current}${current ? " " : ""}${message.text}`); composerRef.current?.focus(); }
       if (message.type === "chat:prefill") { setInput(message.text); composerRef.current?.focus(); }
       if (message.type === "chat:attachments") setAttachments(message.items);
     };
-    portRef.current = connectSidecar(apply, () => { portRef.current = null; });
+    portRef.current = connectSidecar(apply, setConnected);
     return () => { portRef.current?.disconnect(); portRef.current = null; };
   }, []);
 
@@ -97,24 +108,30 @@ function App() {
   const activeProvider = useMemo(() => settings.providers.find((item) => item.id === settings.activeProviderId), [settings]);
   const configured = !!activeProvider?.apiKey && !!activeProvider?.defaultModel;
   const bubbles = useMemo(() => messages.filter((item) => item.role === "user" || (item.role === "assistant" && (item.content.length > 0 || item.status === "streaming"))), [messages]);
+  const lastAssistantId = useMemo(() => [...bubbles].reverse().find((item) => item.role === "assistant")?.id ?? null, [bubbles]);
 
   const agentState: VelaState = takeover ? "waiting" : approval ? "paused" : running ? "thinking"
     : voiceState === "listening" ? "listening" : voiceState === "speaking" ? "speaking" : voiceState === "error" ? "error" : "idle";
 
-  const post = (message: Parameters<SidecarPort["post"]>[0]) => portRef.current?.post(message);
+  const post = (message: Parameters<SidecarPort["post"]>[0]) => portRef.current?.post(message) ?? false;
 
   const submit = () => {
     const text = input.trim();
     if (!text || running) return;
-    post({ type: "chat:submit", text });
-    setInput("");
+    // Só limpa o campo se a mensagem realmente saiu: com a porta caída, apagar seria perder o texto.
+    if (post({ type: "chat:submit", text })) setInput("");
   };
   const newChat = () => { post({ type: "chat:new" }); setMenuOpen(false); };
   const openMenu = () => { const next = !menuOpen; setMenuOpen(next); if (next) post({ type: "chat:history-request" }); };
   const openOptions = () => { if (typeof chrome !== "undefined") chrome.runtime?.openOptionsPage?.(); };
+
   const toggleLive = () => {
-    post({ type: voiceState === "idle" ? "voice:start-live" : "voice:stop-live" });
-    setEvents((current) => [...current, { kind: "status", text: voiceState === "idle" ? "Iniciando Live Voice…" : "Live Voice encerrado." }]);
+    const starting = voiceState === "idle";
+    post({ type: starting ? "voice:start-live" : "voice:stop-live" });
+    setEvents((current) => {
+      const text = starting ? "Iniciando Live Voice…" : "Live Voice encerrado.";
+      return current.at(-1)?.text === text ? current : [...current, { kind: "status", text }];
+    });
   };
   const toggleDictation = () => {
     if (dictating) { post({ type: "voice:stop-live" }); setDictating(false); return; }
@@ -122,10 +139,26 @@ function App() {
     setDictating(true);
   };
 
+  const speak = (message: ChatMessage) => {
+    if (speakingId === message.id) { post({ type: "chat:speak-stop" }); setSpeakingId(null); return; }
+    if (post({ type: "chat:speak", text: message.content })) setSpeakingId(message.id);
+  };
+
+  /** Editar, reenviar e gerar outra resposta são a mesma operação: a linha do tempo volta a um
+   *  ponto e segue de lá. Anexar correções ao fim confundiria o modelo e o histórico. */
+  const rewind = (id: string, text?: string) => { post({ type: "chat:rewind", id, text }); setEditingId(null); };
+  const regenerate = (assistantId: string) => post({ type: "chat:rewind", id: assistantId });
+
+  const attachFile = async (file: File) => {
+    const text = (await file.text()).slice(0, ATTACHMENT_LIMIT);
+    if (!text.trim()) { setEvents((current) => [...current, { kind: "error", text: `“${file.name}” não tem texto legível.` }]); return; }
+    post({ type: "chat:attach", name: file.name, text });
+  };
+
   return <main className="app-shell">
     <header className="topbar">
-      <button className="icon-button" aria-label="Menu" onClick={openMenu}><Menu size={18} /></button>
-      <span className="brand-mark"><VelaMark size={19} /></span>
+      <button className="icon-button" aria-label="Menu" onClick={openMenu}><Menu size={ICON.action} /></button>
+      <span className="brand-mark"><VelaMark size={ICON.action} /></span>
       <input
         className="session-title"
         value={session.title || settings.brand.appName}
@@ -137,10 +170,11 @@ function App() {
       />
       {agentState !== "idle" && <AgentStatus state={agentState} />}
       <div className="topbar-actions">
-        <button className="icon-button" aria-label="Nova conversa" onClick={newChat}><Plus size={18} /></button>
-        <button className="icon-button" aria-label="Configurações" onClick={openOptions}><Settings2 size={17} /></button>
+        <button className="icon-button" aria-label="Nova conversa" onClick={newChat}><Plus size={ICON.action} /></button>
+        <button className="icon-button" aria-label="Configurações" onClick={openOptions}><Settings2 size={ICON.action} /></button>
       </div>
     </header>
+    {!connected && <div className="offline-banner"><WifiOff size={ICON.chip} /> Reconectando ao agente…</div>}
     {menuOpen && <aside className="popover" ref={menuRef}>
       <span className="popover-label">Conversas recentes</span>
       {history.length > 0
@@ -155,13 +189,24 @@ function App() {
             <h1>Como posso ajudar?</h1>
             <p>{configured ? "Converse, pesquise e deixe o agente cuidar do navegador." : "Configure um provider nas opções para começar."}</p>
             <div className="suggestions">
-              <button onClick={() => setInput("Leia esta página e me diga o que dá para fazer aqui")}><Bot size={15} /> Ler a página atual</button>
-              <button onClick={() => setInput("Pesquise por ")}><ExternalLink size={15} /> Pesquisar na web</button>
+              <button onClick={() => setInput("Leia esta página e me diga o que dá para fazer aqui")}><FileText size={ICON.inline} /> Ler a página atual</button>
+              <button onClick={() => setInput("Pesquise por ")}><Search size={ICON.inline} /> Pesquisar na web</button>
             </div>
           </div>
         : <div className="message-list">{bubbles.map((message) => <article className={`message ${message.role}`} key={message.id}>
             {message.role === "assistant" && <span className="avatar"><VelaOrb state={message.status === "streaming" ? "thinking" : "idle"} size={16} /></span>}
-            <div className="message-content">{message.content || <span className="vela-loader" aria-label="Vela processando" />}</div>
+            {editingId === message.id
+              ? <MessageEditor value={message.content} onCancel={() => setEditingId(null)} onSubmit={(text) => rewind(message.id, text)} />
+              : <div className="message-body">
+                  <div className="message-content">
+                    {message.content
+                      ? (message.role === "assistant" ? <Markdown text={message.content} /> : message.content)
+                      : <span className="vela-loader" aria-label="Vela processando" />}
+                  </div>
+                  {message.content && message.status !== "streaming" && (message.role === "assistant"
+                    ? <AssistantActions text={message.content} speaking={speakingId === message.id} onSpeak={() => speak(message)} onRegenerate={message.id === lastAssistantId && !running ? () => regenerate(message.id) : undefined} />
+                    : <UserActions text={message.content} onEdit={() => setEditingId(message.id)} onResend={() => rewind(message.id)} />)}
+                </div>}
           </article>)}</div>}
 
       {takeover && <TakeoverCard reason={takeover.reason} expected={takeover.expected} onResume={() => { post({ type: "takeover:resume" }); setTakeover(null); }} />}
@@ -173,16 +218,18 @@ function App() {
 
     <footer className="composer-wrap">
       <div className="context-strip">
-        {settings.context.currentPage && <ContextChip tone="active"><Globe2 size={12} /> Página atual</ContextChip>}
-        {session.tabCount > 0 && settings.context.sessionTabs && <ContextChip><Layers3 size={12} /> {session.tabCount} aba{session.tabCount > 1 ? "s" : ""}</ContextChip>}
-        {attachments.map((item, index) => <ContextChip key={`${index}-${item.slice(0, 12)}`} title={item} onRemove={() => setAttachments((current) => current.filter((_, position) => position !== index))}>
+        {settings.context.currentPage && <ContextChip tone="active"><VelaMark size={ICON.chip} /> Página atual</ContextChip>}
+        {session.tabCount > 0 && settings.context.sessionTabs && <ContextChip><Layers size={ICON.chip} /> {session.tabCount} aba{session.tabCount > 1 ? "s" : ""}</ContextChip>}
+        {attachments.map((item, index) => <ContextChip key={`${index}-${item.slice(0, 12)}`} title={item} onRemove={() => post({ type: "chat:detach", index })}>
           <span>{`Trecho · ${attachmentPreview(item)}`}</span>
         </ContextChip>)}
       </div>
       <div className="composer">
         <textarea ref={composerRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder="Diga à Vela o que fazer..." rows={1} />
         <div className="composer-bar">
-          <button className="icon-button" aria-label="Adicionar contexto" title="Selecione texto numa página e use o menu da Vela"><Paperclip size={17} /></button>
+          <button className="icon-button" aria-label="Anexar arquivo de texto" title="Anexar arquivo de texto (.md, .txt, .json, .csv)" onClick={() => fileRef.current?.click()}><Paperclip size={ICON.action} /></button>
+          <input ref={fileRef} type="file" hidden accept=".txt,.md,.markdown,.json,.csv,.log,.yml,.yaml,text/*"
+            onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void attachFile(file); }} />
           <DictationButton active={dictating} onClick={toggleDictation} disabled={!configured} />
           <LiveVoiceButton active={voiceState !== "idle" && !dictating} onClick={toggleLive} disabled={!configured} />
           <Select compact label="Autonomia" value={settings.agent.autonomy} options={AUTONOMY_OPTIONS}
@@ -192,8 +239,8 @@ function App() {
           </span>
           <div className="composer-actions">
             {running
-              ? <button className="send-button stop" onClick={() => post({ type: "chat:abort" })} aria-label="Parar"><CircleStop size={17} /></button>
-              : <button className="send-button" onClick={submit} disabled={!input.trim()} aria-label="Enviar"><Send size={16} /></button>}
+              ? <button className="send-button stop" onClick={() => post({ type: "chat:abort" })} aria-label="Parar"><Square size={13} fill="currentColor" /></button>
+              : <button className="send-button" onClick={submit} disabled={!input.trim()} aria-label="Enviar"><Send size={ICON.inline} /></button>}
           </div>
         </div>
       </div>

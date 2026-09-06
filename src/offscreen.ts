@@ -16,6 +16,7 @@ chrome.runtime.onMessage.addListener((message: { type?: string; text?: string; m
   if (message.type === "voice:stop") { stop(); return false; }
   if (message.type === "voice:toggle-mute") { toggleMute(); return false; }
   if (message.type === "voice:speak" && message.text) { void speak(message.text); return false; }
+  if (message.type === "voice:speak-stop") { output?.pause(); output = null; return false; }
   return false;
 });
 
@@ -76,7 +77,16 @@ async function start(nextMode: "live" | "dictation") {
   mode = nextMode;
   try {
     await activeProfile();
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch (error) {
+      // Documento offscreen não exibe o prompt de permissão: sem a liberação prévia feita na
+      // página de opções, isto falha calado e o botão de voz parece quebrado.
+      const name = error instanceof DOMException ? error.name : "";
+      throw new Error(name === "NotAllowedError"
+        ? "O microfone não está liberado para a Vela. Abra Configurações → Voz e clique em “Permitir microfone”."
+        : name === "NotFoundError" ? "Nenhum microfone encontrado nesta máquina." : "Não consegui abrir o microfone.", { cause: error });
+    }
     audio = new AudioContext({ sampleRate: SAMPLE_RATE });
     await audio.audioWorklet.addModule(chrome.runtime.getURL("vela-capture-worklet.js"));
     const source = audio.createMediaStreamSource(stream);
@@ -151,7 +161,9 @@ async function speak(text: string) {
     if (url) URL.revokeObjectURL(url);
     speakingUntil = Date.now() + 250;
     segmenter?.resume();
-    if (stream) publish("listening");
+    // Sem microfone aberto, esta foi uma leitura avulsa: o runtime volta a ocioso em vez de
+    // ficar preso em "falando" para sempre.
+    publish(stream ? "listening" : "idle");
   }
 }
 

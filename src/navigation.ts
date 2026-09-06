@@ -2,6 +2,19 @@ const RESTRICTED = /^(chrome|edge|about|devtools|view-source|chrome-extension|mo
 const WEB_STORE = /^https:\/\/chromewebstore\.google\.com|^https:\/\/chrome\.google\.com\/webstore/i;
 
 export const isRestrictedUrl = (url: string | undefined) => !url || RESTRICTED.test(url) || WEB_STORE.test(url);
+
+/**
+ * A causa importa: "não posso agir aqui" sem motivo parece limitação da Vela, quando na verdade
+ * é o Chrome que proíbe extensões nessas páginas. Nenhuma extensão consegue — nem a do Google.
+ */
+export function restrictionReason(url: string | undefined): string {
+  if (!url) return "não consegui identificar a aba ativa";
+  if (WEB_STORE.test(url)) return "o Chrome bloqueia toda extensão na Chrome Web Store, para que nenhuma possa instalar ou remover outra sem você ver. Nenhuma extensão age aqui";
+  if (/^chrome-extension:|^moz-extension:/i.test(url)) return "esta é a página de uma extensão, e o Chrome não deixa uma extensão mexer na outra";
+  if (/^(chrome|edge|about):/i.test(url)) return "é uma página interna do navegador, onde o Chrome não permite scripts de extensão";
+  if (/^devtools:|^view-source:/i.test(url)) return "é uma página de ferramentas do navegador, fora do alcance de extensões";
+  return "o Chrome não permite scripts de extensão nesta página";
+}
 export const isPdf = (url: string | undefined) => !!url && /\.pdf($|[?#])/i.test(url);
 
 export type NavigationOutcome = { ok: boolean; url?: string; partial?: boolean; error?: string };

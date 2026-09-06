@@ -83,6 +83,33 @@ export async function reset() {
   await flush();
 }
 
+export async function messageById(id: string): Promise<ChatMessage | null> {
+  return (await active()).messages.find((item) => item.id === id) ?? null;
+}
+
+/** Corta a conversa a partir de uma mensagem (inclusive). É o que sustenta editar, reenviar e
+ *  gerar outra resposta: em vez de anexar correções ao fim, a linha do tempo volta ao ponto. */
+export async function truncateFrom(id: string): Promise<ChatMessage | null> {
+  const conversation = await active();
+  const index = conversation.messages.findIndex((item) => item.id === id);
+  if (index < 0) return null;
+  const [target] = conversation.messages.splice(index, conversation.messages.length - index);
+  conversation.updatedAt = Date.now();
+  schedulePersist();
+  return target ?? null;
+}
+
+/** A mensagem do usuário que antecede uma resposta — o ponto de partida de "gerar outra". */
+export async function previousUserMessage(id: string): Promise<ChatMessage | null> {
+  const messages = (await active()).messages;
+  const index = messages.findIndex((item) => item.id === id);
+  if (index < 0) return null;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (messages[cursor].role === "user") return messages[cursor];
+  }
+  return null;
+}
+
 export async function list(): Promise<ConversationSummary[]> {
   const conversations = await ensure();
   return conversations

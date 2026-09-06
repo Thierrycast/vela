@@ -15,6 +15,13 @@ export async function listAttachments(): Promise<string[]> {
   return (stored[ATTACHMENTS_KEY] as string[] | undefined) ?? [];
 }
 
+export async function removeAttachment(index: number) {
+  const current = await listAttachments();
+  const next = current.filter((_, position) => position !== index);
+  await chrome.storage.session.set({ [ATTACHMENTS_KEY]: next });
+  return next;
+}
+
 export async function clearAttachments() {
   await chrome.storage.session.remove(ATTACHMENTS_KEY);
 }

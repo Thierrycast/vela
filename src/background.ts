@@ -4,7 +4,7 @@ import { listScripts } from "./script-store";
 import { parseMetadata } from "./user-script";
 import { SIDECAR_PORT, SidecarInbound, SidecarOutbound, VoiceState } from "./messages";
 import { LensIntent, attachmentText, lensPrompt } from "./prompts";
-import { addAttachment, listAttachments } from "./browser-context";
+import { addAttachment, listAttachments, removeAttachment } from "./browser-context";
 import { ApprovalDecision, cancelPendingApprovals, clearSessionApprovals, configureApprovals, resolveApproval, resumeTakeover } from "./approvals";
 import * as agentLoop from "./agent-loop";
 import * as conversation from "./conversation";
@@ -131,6 +131,42 @@ async function speakLastAnswer() {
   if (last) void chrome.runtime.sendMessage({ type: "voice:speak", text: last.content }).catch(() => undefined);
 }
 
+/** Ler uma resposta em voz alta sobe o runtime de áudio sozinho: não faz sentido exigir que o
+ *  Live Voice esteja ligado só para ouvir uma mensagem. */
+async function speakText(text: string) {
+  try {
+    await ensureVoiceRuntime();
+    void chrome.runtime.sendMessage({ type: "voice:speak", text }).catch(() => undefined);
+  } catch (error) {
+    broadcast({ type: "voice:error", message: error instanceof Error ? error.message : "Não consegui iniciar a leitura." });
+    broadcast({ type: "chat:speaking", speaking: false });
+  }
+}
+
+async function stopSpeaking() {
+  void chrome.runtime.sendMessage({ type: "voice:speak-stop" }).catch(() => undefined);
+  broadcast({ type: "chat:speaking", speaking: false });
+  if (voiceMode === "off") await chrome.offscreen?.closeDocument().catch(() => undefined);
+}
+
+/**
+ * Editar, reenviar e gerar outra resposta são a mesma operação: a linha do tempo volta a um
+ * ponto e segue de lá. Anexar a correção ao fim deixaria o histórico contraditório — o modelo
+ * leria o pedido antigo e o novo como duas instruções.
+ */
+async function rewind(id: string, text?: string) {
+  if (agentLoop.isRunning()) { cancelPendingApprovals(); agentLoop.abort(); }
+  const target = await conversation.messageById(id);
+  if (!target) return;
+  const anchor = target.role === "user" ? target : await conversation.previousUserMessage(id);
+  if (!anchor) return;
+  const prompt = (text ?? anchor.content).trim();
+  if (!prompt) return;
+  await conversation.truncateFrom(anchor.id);
+  broadcast({ type: "chat:snapshot", ...(await agentLoop.snapshot()) });
+  await runTurn(prompt);
+}
+
 async function startVoice(mode: "live" | "dictation") {
   try {
     await ensureVoiceRuntime();
@@ -171,6 +207,16 @@ async function applySidecarMessage(message: SidecarOutbound) {
     broadcast({ type: "chat:snapshot", ...(await agentLoop.snapshot()) });
     return;
   }
+  if (message.type === "chat:rewind") return rewind(message.id, message.text);
+  if (message.type === "chat:speak") return speakText(message.text);
+  if (message.type === "chat:speak-stop") return stopSpeaking();
+  if (message.type === "chat:attach") {
+    const header = `Arquivo anexado “${message.name}”:`;
+    broadcast({ type: "chat:attachments", items: await addAttachment(`${header}\n${message.text}`) });
+    broadcast({ type: "chat:event", event: { kind: "status", text: `Anexei “${message.name}” ao contexto.` } });
+    return;
+  }
+  if (message.type === "chat:detach") { broadcast({ type: "chat:attachments", items: await removeAttachment(message.index) }); return; }
   if (message.type === "approval:resolve") return resolveApproval(message.id, message.decision);
   if (message.type === "takeover:resume") return resumeTakeover();
   if (message.type === "session:rename") { await renameSession(message.title); await publishSession(); return; }

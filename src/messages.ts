@@ -26,7 +26,8 @@ export type SidecarInbound =
   | { type: "chat:takeover"; reason: string; expected: string }
   | { type: "chat:takeover-closed" }
   | { type: "chat:session"; title: string; tabCount: number }
-  | { type: "chat:history"; items: Array<{ id: string; title: string; updatedAt: number }> };
+  | { type: "chat:history"; items: Array<{ id: string; title: string; updatedAt: number }> }
+  | { type: "chat:speaking"; speaking: boolean };
 
 export type SidecarOutbound =
   | { type: "chat:submit"; text: string }
@@ -39,17 +40,73 @@ export type SidecarOutbound =
   | { type: "voice:start-dictation" }
   | { type: "chat:history-request" }
   | { type: "chat:open"; id: string }
-  | { type: "session:rename"; title: string };
+  | { type: "session:rename"; title: string }
+  | { type: "chat:rewind"; id: string; text?: string }
+  | { type: "chat:speak"; text: string }
+  | { type: "chat:speak-stop" }
+  | { type: "chat:attach"; name: string; text: string }
+  | { type: "chat:detach"; index: number };
 
 export type SidecarPort = {
-  post: (message: SidecarOutbound) => void;
+  post: (message: SidecarOutbound) => boolean;
   disconnect: () => void;
 };
 
-export function connectSidecar(onMessage: (message: SidecarInbound) => void, onDisconnect?: () => void): SidecarPort | null {
-  if (typeof chrome === "undefined" || !chrome.runtime?.connect) return null;
-  const port = chrome.runtime.connect({ name: SIDECAR_PORT });
-  port.onMessage.addListener((message) => onMessage(message as SidecarInbound));
-  port.onDisconnect.addListener(() => { void chrome.runtime.lastError; onDisconnect?.(); });
-  return { post: (message) => port.postMessage(message), disconnect: () => port.disconnect() };
+/**
+ * O service worker do MV3 é descartado com 30 s ociosos e leva a porta junto. Sem reconexão, o
+ * painel continua aberto com uma porta morta: `postMessage` não lança, a mensagem simplesmente
+ * some, e o usuário fica digitando no vazio. Por isso a porta se reabre sozinha, e `post` avisa
+ * quando não conseguiu entregar — quem chama decide se limpa o campo ou não.
+ */
+export function connectSidecar(
+  onMessage: (message: SidecarInbound) => void,
+  onConnectionChange?: (connected: boolean) => void,
+): SidecarPort {
+  let port: chrome.runtime.Port | null = null;
+  let closed = false;
+  let attempt = 0;
+  let retryTimer = 0;
+
+  const open = () => {
+    if (closed || typeof chrome === "undefined" || !chrome.runtime?.connect) return;
+    try {
+      port = chrome.runtime.connect({ name: SIDECAR_PORT });
+    } catch {
+      port = null;
+      schedule();
+      return;
+    }
+    attempt = 0;
+    onConnectionChange?.(true);
+    port.onMessage.addListener((message) => onMessage(message as SidecarInbound));
+    port.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError;
+      port = null;
+      onConnectionChange?.(false);
+      schedule();
+    });
+  };
+
+  const schedule = () => {
+    if (closed || retryTimer) return;
+    const delay = Math.min(250 * 2 ** attempt, 4000);
+    attempt += 1;
+    retryTimer = setTimeout(() => { retryTimer = 0; open(); }, delay) as unknown as number;
+  };
+
+  open();
+
+  return {
+    post: (message) => {
+      if (!port) { schedule(); return false; }
+      try { port.postMessage(message); return true; }
+      catch { port = null; onConnectionChange?.(false); schedule(); return false; }
+    },
+    disconnect: () => {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      port?.disconnect();
+      port = null;
+    },
+  };
 }

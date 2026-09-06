@@ -104,7 +104,7 @@ export function AdvancedPanel({ settings, update }: { settings: AppSettings; upd
     <div className="settings-group">
       {slices.map((slice) => <Row key={slice.key} label={slice.label} description={slice.description}>
         <span className="status-badge">{formatBytes(slice.bytes)}</span>
-        {slice.clearable && slice.bytes > 0 && <button className="icon-danger" onClick={() => void wipe(slice)} aria-label={`Apagar ${slice.label}`}><Trash2 size={15} /></button>}
+        <button className="icon-danger" hidden={!slice.clearable || slice.bytes === 0} onClick={() => void wipe(slice)} aria-label={`Apagar ${slice.label}`}><Trash2 size={15} /></button>
       </Row>)}
       <Row label="Total" description="O limite do chrome.storage.local é de 10 MB por extensão."><span className="status-badge">{formatBytes(totalBytes)}</span></Row>
     </div>

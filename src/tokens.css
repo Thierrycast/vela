@@ -1,7 +1,7 @@
 @font-face{font-family:"Inter var";src:url("/fonts/inter-var-latin.woff2") format("woff2");font-weight:100 900;font-style:normal;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 
-:root{--canvas:#f3f5f4;--panel:#fafbfa;--surface:#fff;--surface-raised:#f5f7f6;--surface-hover:#edf2f0;--border:#d9dfde;--text-primary:#15191a;--text-secondary:#667071;--text-muted:#8b9695;--signal:#087e79;--signal-bright:#0b9c94;--signal-dim:#d8f0ed;--warning:#a66e12;--danger:#b84343;--radius-sm:7px;--radius-md:10px;--radius-lg:14px;--shadow:0 12px 40px #17232212;--motion:180ms ease;--font-ui:"Inter var",system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:ui-monospace,"Cascadia Mono",Consolas,monospace}
-:root[data-theme=dark]{--canvas:#080a0b;--panel:#0d1012;--surface:#121619;--surface-raised:#171c1f;--surface-hover:#1b2125;--border:#252c30;--text-primary:#f1f4f4;--text-secondary:#9aa4a5;--text-muted:#687274;--signal:#58d8cd;--signal-bright:#79e9df;--signal-dim:#143a36;--warning:#e4b65e;--danger:#ee7070;--shadow:0 16px 50px #0008}
+:root{--canvas:#f3f5f4;--panel:#fafbfa;--surface:#fff;--surface-raised:#f5f7f6;--surface-hover:#edf2f0;--border:#d9dfde;--text-primary:#15191a;--text-secondary:#667071;--text-muted:#8b9695;--signal:#087e79;--signal-bright:#0b9c94;--signal-dim:#d8f0ed;--warning:#a66e12;--danger:#b84343;--radius-sm:7px;--radius-md:10px;--radius-lg:14px;--shadow:0 12px 40px #17232212;--motion:180ms ease;--font-ui:"Inter var",system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:ui-monospace,"Cascadia Mono",Consolas,monospace;--scroll-thumb:#c4cdcb;--scroll-thumb-hover:#9aa8a5}
+:root[data-theme=dark]{--canvas:#080a0b;--panel:#0d1012;--surface:#121619;--surface-raised:#171c1f;--surface-hover:#1b2125;--border:#252c30;--text-primary:#f1f4f4;--text-secondary:#9aa4a5;--text-muted:#687274;--signal:#58d8cd;--signal-bright:#79e9df;--signal-dim:#143a36;--warning:#e4b65e;--danger:#ee7070;--shadow:0 16px 50px #0008;--scroll-thumb:#2b3439;--scroll-thumb-hover:#3d4a50}
 
 *{box-sizing:border-box}
 body{margin:0;background:var(--canvas);color:var(--text-primary);font-family:var(--font-ui);font-size:14px;-webkit-font-smoothing:antialiased}
@@ -27,3 +27,13 @@ button{cursor:pointer}
 .vela-select-list small{color:var(--text-muted);font-size:10px}
 @keyframes vela-select-in{from{opacity:0;transform:translateY(-4px) scale(.97)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.vela-select-list{animation:none}.vela-select-trigger svg{transition:none}}
+
+/* Barra de rolagem: fina, sem setas, sem trilho — some no repouso e aparece ao passar o mouse.
+   Vale para o painel, as opções e qualquer área rolável dentro deles. */
+*{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border:3px solid transparent;background-clip:padding-box;border-radius:99px;transition:background .18s ease}
+::-webkit-scrollbar-thumb:hover{background:var(--scroll-thumb-hover);background-clip:padding-box}
+::-webkit-scrollbar-corner{background:transparent}
+::-webkit-scrollbar-button{display:none}
