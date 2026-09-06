@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { VISUALS, VisualId } from "../../src/voice-visuals";
+import { STATE_MOOD } from "../../src/gl-visual";
 import { VoiceMetricsAnalyzer, VoiceVisualMetrics, emptyVoiceMetrics } from "../../src/audio-metrics";
 import { MotionState } from "../../src/motion-tokens";
 import { VoiceVisual } from "../../src/gl-visual";
@@ -8,6 +9,21 @@ import "../../src/tokens.css";
 import "./lab.css";
 
 const STATES: MotionState[] = ["idle", "listening", "thinking", "speaking", "acting", "error"];
+
+/** O botão veste a cor do estado que representa: o controle vira legenda do que se vê. */
+const cssColor = (state: MotionState) => {
+  const [red, green, blue] = STATE_MOOD[state];
+  return `rgb(${Math.round(red * 255)} ${Math.round(green * 255)} ${Math.round(blue * 255)})`;
+};
+/** Ruído 1D suave: base de tudo que precisa oscilar sem repetir. */
+function noise1d(position: number) {
+  const cell = Math.floor(position);
+  const fraction = position - cell;
+  const smooth = fraction * fraction * (3 - 2 * fraction);
+  const at = (index: number) => { const value = Math.sin(index * 127.1) * 43758.5453; return value - Math.floor(value); };
+  return at(cell) * (1 - smooth) + at(cell + 1) * smooth;
+}
+
 const STATE_LABEL: Record<string, string> = {
   idle: "Ocioso", listening: "Ouvindo você", thinking: "Pensando", speaking: "Falando", acting: "Agindo", error: "Erro",
 };
@@ -42,19 +58,21 @@ function Lab() {
     };
 
     if (source === "simulated") {
-      // Uma voz falsa plausível: rajadas com pausa, para conferir attack e release sem falar.
+      // Fala falsa, mas não periódica: senoide dá um vai-e-vem que denuncia o loop na hora.
+      // Frases e sílabas saem de ruído, com duração irregular — como fala de verdade.
       const started = performance.now();
       const tick = () => {
         if (stopped) return;
         const seconds = (performance.now() - started) / 1000;
-        const phrase = Math.sin(seconds * 0.55) > -0.1 ? 1 : 0;
-        const syllable = (Math.sin(seconds * 11) * 0.5 + 0.5) ** 2;
-        const energy = phrase * (0.18 + syllable * 0.7);
+        const frase = noise1d(seconds * 0.28) > 0.42 ? 1 : 0;
+        const silaba = noise1d(seconds * 4.2) * noise1d(seconds * 7.9 + 31);
+        const ataque = noise1d(seconds * 13.5 + 77);
+        const energy = frase * Math.min(1, 0.12 + silaba * 1.5 + ataque * 0.2);
         publish({
           energy,
-          bass: energy * (0.5 + Math.sin(seconds * 2.3) * 0.35),
-          mid: energy * (0.6 + Math.sin(seconds * 5.1) * 0.3),
-          high: energy * (0.35 + Math.sin(seconds * 9.7) * 0.3),
+          bass: energy * (0.45 + noise1d(seconds * 1.7) * 0.5),
+          mid: energy * (0.55 + noise1d(seconds * 3.3 + 12) * 0.45),
+          high: energy * (0.25 + noise1d(seconds * 6.1 + 44) * 0.4),
           speaking: energy > 0.12,
         });
         timer = window.setTimeout(tick, 40);
@@ -110,7 +128,7 @@ function Lab() {
 
       <div className="lab-group" role="group" aria-label="Estado do agente">
         {STATES.map((item) => (
-          <button key={item} className={state === item ? "on" : ""} onClick={() => setState(item)}>{STATE_LABEL[item]}</button>
+          <button key={item} className={state === item ? "on" : ""} style={{ "--tom": cssColor(item) } as React.CSSProperties} onClick={() => setState(item)}>{STATE_LABEL[item]}</button>
         ))}
       </div>
 

@@ -15,6 +15,28 @@ export type VoiceVisual = {
   destroy(): void;
 };
 
+/**
+ * Cada estado tem cor e ritmo próprios. Antes tudo era ciano andando na mesma cadência, e o
+ * visual não dizia nada sobre o que estava acontecendo — só que algo estava.
+ */
+export const STATE_MOOD: Record<MotionState, [number, number, number]> = {
+  idle: [0.35, 0.84, 0.80],
+  listening: [0.35, 0.88, 0.99],
+  thinking: [0.55, 0.52, 0.95],
+  speaking: [0.45, 0.88, 0.72],
+  acting: [0.99, 0.72, 0.35],
+  waiting: [0.95, 0.76, 0.38],
+  paused: [0.55, 0.60, 0.62],
+  error: [0.95, 0.42, 0.42],
+  complete: [0.52, 0.92, 0.62],
+};
+
+/** Ritmo por estado — o que o volume jamais deve controlar. */
+export const STATE_PACE: Record<MotionState, number> = {
+  idle: 0.45, listening: 0.8, thinking: 1.35, speaking: 1.0, acting: 1.6,
+  waiting: 0.6, paused: 0.22, error: 0.5, complete: 1.1,
+};
+
 /** Ordem estável: o shader recebe o estado como número e compara com estes índices. */
 export const STATE_INDEX: Record<MotionState, number> = {
   idle: 0, listening: 1, thinking: 2, speaking: 3, acting: 4, waiting: 5, paused: 6, error: 7, complete: 8,
@@ -47,8 +69,11 @@ uniform float uAgent;
 uniform vec3 uSignal;
 uniform vec3 uAccent;
 uniform float uAlpha;
+uniform float uPace;
+uniform vec3 uMood;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+
 
 float noise(vec2 p) {
   vec2 i = floor(p);
@@ -70,6 +95,15 @@ float fbm(vec2 p) {
   }
   return value;
 }
+
+/** Oscilador sem período: soma de ruído em três escalas incomensuráveis entre si. */
+float drift(float seed, float speed) {
+  float t = uTime * speed;
+  return (fbm(vec2(t, seed)) + fbm(vec2(t * 0.4142, seed + 11.3)) * 0.6 + fbm(vec2(t * 0.2361, seed + 27.9)) * 0.35) / 1.95;
+}
+
+/** O mesmo, centrado em zero: serve onde antes havia sin(). */
+float wander(float seed, float speed) { return drift(seed, speed) * 2.0 - 1.0; }
 
 /** Distorce as coordenadas com outro campo de ruído: é daqui que vem a sensação de líquido. */
 vec2 warp(vec2 p, float amount, float time) {
@@ -116,6 +150,8 @@ export class ShaderVisual implements VoiceVisual {
   private listening = 0;
   private agent = 0;
   private time = 0;
+  private pace = 1;
+  private readonly mood: [number, number, number] = [0, 0, 0];
   private raf = 0;
   private lastFrame = 0;
   private visible = true;
@@ -177,7 +213,7 @@ export class ShaderVisual implements VoiceVisual {
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
 
-    for (const name of ["uResolution", "uTime", "uEnergy", "uBass", "uMid", "uHigh", "uSpeaking", "uState", "uListening", "uAgent", "uSignal", "uAccent", "uAlpha"]) {
+    for (const name of ["uResolution", "uTime", "uEnergy", "uBass", "uMid", "uHigh", "uSpeaking", "uState", "uListening", "uAgent", "uSignal", "uAccent", "uAlpha", "uPace", "uMood"]) {
       this.uniforms[name] = gl.getUniformLocation(program, name);
     }
     gl.enable(gl.BLEND);
@@ -227,7 +263,8 @@ export class ShaderVisual implements VoiceVisual {
     if (!this.visible) return;
     const delta = Math.min(48, now - this.lastFrame);
     this.lastFrame = now;
-    this.time += delta / 1000;
+    this.pace += (STATE_PACE[this.state] - this.pace) * Math.min(1, delta / 1000 * 2.2);
+    this.time += (delta / 1000) * this.pace;
     this.draw(delta);
     this.raf = requestAnimationFrame(this.render);
   };
@@ -242,6 +279,10 @@ export class ShaderVisual implements VoiceVisual {
     const ease = Math.min(1, delta / 1000 * 9);
     for (const key of ["energy", "bass", "mid", "high", "speaking"] as const) {
       this.current[key] += (this.target[key] - this.current[key]) * (ease || 1);
+    }
+    const target = STATE_MOOD[this.state];
+    for (let channel = 0; channel < 3; channel += 1) {
+      this.mood[channel] += (target[channel] - this.mood[channel]) * Math.min(1, delta / 1000 * 2.6);
     }
     const index = STATE_INDEX[this.state];
     this.stateValue += (index - this.stateValue) * Math.min(1, delta / 1000 * 6);
@@ -260,6 +301,8 @@ export class ShaderVisual implements VoiceVisual {
     gl.uniform1f(this.uniforms.uListening, this.listening);
     gl.uniform1f(this.uniforms.uAgent, this.agent);
     gl.uniform1f(this.uniforms.uAlpha, 1);
+    gl.uniform1f(this.uniforms.uPace, this.pace);
+    gl.uniform3fv(this.uniforms.uMood, this.mood);
     gl.uniform3fv(this.uniforms.uSignal, parseColor(this.options.signal));
     gl.uniform3fv(this.uniforms.uAccent, parseColor(this.options.accent));
 

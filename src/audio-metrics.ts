@@ -13,8 +13,9 @@ export class VoiceMetricsAnalyzer {
   private readonly analyser: AnalyserNode;
   private readonly data: Uint8Array;
   private readonly bands: { bass: [number, number]; mid: [number, number]; high: [number, number] } = { bass: [0.02, 0.12], mid: [0.12, 0.48], high: [0.48, 0.92] };
-  private gate = 0.035;
+  private gate = 0.075;
   private speakingHold = 0;
+  private previousEnergy = 0;
 
   constructor(context: AudioContext, source: AudioNode) {
     this.context = context;
@@ -38,7 +39,15 @@ export class VoiceMetricsAnalyzer {
       for (let i = start; i < end; i += 1) value += this.data[i] / 255;
       return clamp(value / (end - start) * 2.2);
     };
-    const next = { energy: gated, bass: band(this.bands.bass), mid: band(this.bands.mid), high: band(this.bands.high), speaking: gated > 0.12 };
+    const bass = band(this.bands.bass);
+    const mid = band(this.bands.mid);
+    const high = band(this.bands.high);
+    // Voz tem corpo nos graves e médios; estalo de tecla espalha energia para os agudos.
+    const voiced = bass + mid > high * 1.35;
+    // E some tão rápido quanto chegou: um salto seguido de queda imediata não é sílaba.
+    const sustained = gated > 0.16 && this.previousEnergy > 0.08;
+    this.previousEnergy = gated;
+    const next = { energy: gated, bass, mid, high, speaking: voiced && sustained };
     const attack = 0.32;
     const release = 0.12;
     (Object.keys(next) as Array<keyof VoiceVisualMetrics>).forEach((key) => {
@@ -48,7 +57,8 @@ export class VoiceMetricsAnalyzer {
       const factor = target > current ? attack : release;
       (this.metrics[key] as number) = current + (target - current) * factor;
     });
-    this.speakingHold = next.speaking ? 5 : Math.max(0, this.speakingHold - 1);
+    // Segurar por ~320ms evita piscar entre sílabas da mesma frase.
+    this.speakingHold = next.speaking ? 8 : Math.max(0, this.speakingHold - 1);
     this.metrics.speaking = this.speakingHold > 0;
     return this.metrics;
   }

@@ -127,3 +127,7 @@
 @media (prefers-reduced-motion: reduce) {
   .lab-readout b, .lab-vad { transition: none; }
 }
+
+/* Cada estado veste a própria cor, no botão e no visual. */
+.lab-group button.on { background: color-mix(in srgb, var(--tom, var(--signal)) 20%, transparent); color: var(--tom, var(--signal)); }
+.lab-group button.on::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tom, var(--signal)); display: inline-block; margin-right: 6px; vertical-align: middle; }

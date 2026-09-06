@@ -105,3 +105,5 @@
 @keyframes vela-bubble{from{opacity:0;transform:translateY(5px) scale(.985)}to{opacity:1;transform:none}}
 .message{animation:vela-bubble var(--motion-state,220ms) var(--ease-enter,cubic-bezier(.16,1,.3,1)) both}
 @media(prefers-reduced-motion:reduce){.popover.leaving,.developer-details[open]>div,.message{animation:none}}
+
+.composer-bar{padding:5px 8px 7px 6px}
