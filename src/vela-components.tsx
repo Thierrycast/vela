@@ -7,10 +7,6 @@ import { VoiceVisualMetrics } from "./audio-metrics";
 
 export type VelaState = MotionState;
 
-export function VelaIcon({ size = 18, className = "" }: { size?: number; className?: string }) {
-  return <span className={`vela-icon ${className}`} style={{ width: size, height: size }} aria-hidden="true"><span /></span>;
-}
-
 export function VelaOrb({ state = "idle", size = 34, metrics }: { state?: VelaState; size?: number; metrics?: VoiceVisualMetrics }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<VelaOrbRenderer | null>(null);

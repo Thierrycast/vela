@@ -11,3 +11,19 @@ button{cursor:pointer}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .autonomy-select select{border:0;background:transparent;color:var(--text-secondary);font-size:11px;outline:0;max-width:72px}
 .autonomy-select select option{background:var(--surface);color:var(--text-primary)}
+.vela-select{position:relative;display:inline-flex}
+.vela-select-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-secondary);font-size:12px;transition:border-color var(--motion,180ms) ease,color var(--motion,180ms) ease,background var(--motion,180ms) ease}
+.vela-select-trigger:hover{border-color:var(--signal);color:var(--text-primary)}
+.vela-select.open .vela-select-trigger{border-color:var(--signal);color:var(--text-primary)}
+.vela-select-trigger svg{transition:transform var(--motion-state,220ms) var(--ease-standard,ease);flex:none}
+.vela-select.open .vela-select-trigger svg{transform:rotate(180deg)}
+.vela-select.compact .vela-select-trigger{height:26px;padding:0 6px;font-size:11px;border-color:transparent;background:transparent}
+.vela-select.compact .vela-select-trigger:hover{background:var(--surface-hover);border-color:transparent}
+.vela-select-list{position:absolute;z-index:30;bottom:calc(100% + 6px);left:0;min-width:100%;margin:0;padding:4px;list-style:none;background:var(--surface-raised);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);animation:vela-select-in var(--motion-fast,140ms) var(--ease-enter,cubic-bezier(.16,1,.3,1)) both;transform-origin:bottom left}
+.settings-main .vela-select-list,.setting-control .vela-select-list{bottom:auto;top:calc(100% + 6px);transform-origin:top left}
+.vela-select-list button{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;padding:7px 9px;border:0;border-radius:6px;background:transparent;color:var(--text-secondary);font-size:12px;text-align:left;white-space:nowrap}
+.vela-select-list button:hover{background:var(--surface-hover);color:var(--text-primary)}
+.vela-select-list button.selected{color:var(--signal)}
+.vela-select-list small{color:var(--text-muted);font-size:10px}
+@keyframes vela-select-in{from{opacity:0;transform:translateY(-4px) scale(.97)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.vela-select-list{animation:none}.vela-select-trigger svg{transition:none}}
