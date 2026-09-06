@@ -47,14 +47,14 @@ export function ContextChip({ children, onRemove, tone = "default", title }: { c
   return <span className={`context-chip ${tone}`} title={title}>{children}{onRemove && <button onClick={onRemove} aria-label="Remover contexto">×</button>}</span>;
 }
 
-export function ActivityTimeline({ items, open, onToggle }: { items: string[]; open: boolean; onToggle: () => void }) {
+export function ActivityTimeline({ items, open, onToggle }: { items: Array<{ text: string; kind: string }>; open: boolean; onToggle: () => void }) {
   if (!items.length) return null;
   return <section className="activity-panel">
     <button className="activity-header" onClick={onToggle} aria-expanded={open}>
       <span><Radio size={14} /> Atividade do agente</span>
       <span className="activity-count">{items.length} eventos <ChevronDown size={14} /></span>
     </button>
-    {open && <div className="activity-list">{items.map((item, index) => <div className="activity-item" key={`${index}-${item.slice(0, 24)}`}><span className="activity-marker" />{item}</div>)}</div>}
+    {open && <div className="activity-list">{items.map((item, index) => <div className={`activity-item ${item.kind}`} key={`${index}-${item.text.slice(0, 24)}`}><span className="activity-marker" />{item.text}</div>)}</div>}
   </section>;
 }
 
@@ -67,7 +67,7 @@ export function DeveloperDetails({ provider, model, telemetry }: { provider?: st
 }
 
 export function DictationButton({ active = false, onClick, disabled = false }: { active?: boolean; onClick?: () => void; disabled?: boolean }) {
-  return <button className={`voice-button ${active ? "active" : ""}`} onClick={onClick} disabled={disabled} aria-label={active ? "Parar ditado" : "Ditado por voz"} title={disabled ? "Configure o provider para usar voz" : "Ditado por voz"}><Mic size={16} /></button>;
+  return <button className={`voice-button ${active ? "active" : ""}`} onClick={onClick} disabled={disabled} aria-label={active ? "Parar ditado" : "Ditado por voz"} title={disabled ? "Configure o servidor de voz em Configurações → Voz" : "Ditado por voz"}><Mic size={16} /></button>;
 }
 
 export function LiveVoiceButton({ active = false, onClick, disabled = false }: { active?: boolean; onClick?: () => void; disabled?: boolean }) {

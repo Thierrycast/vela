@@ -228,7 +228,7 @@ function App() {
       {takeover && <TakeoverCard reason={takeover.reason} expected={takeover.expected} onResume={() => { post({ type: "takeover:resume" }); setTakeover(null); }} />}
       {approval && <ApprovalCard summary={approval.summary} detail={approval.detail} onDecide={(decision) => { post({ type: "approval:resolve", id: approval.id, decision }); setApproval(null); }} />}
 
-      <ActivityTimeline items={events.map((event) => event.text)} open={activityOpen} onToggle={() => setActivityOpen((value) => !value)} />
+      <ActivityTimeline items={events.map((event) => ({ text: event.text, kind: event.kind }))} open={activityOpen} onToggle={() => setActivityOpen((value) => !value)} />
       {(telemetry.length > 0 || bubbles.length > 0) && <DeveloperDetails provider={activeProvider?.name} model={activeProvider?.defaultModel} telemetry={telemetry} />}
     </section>
 

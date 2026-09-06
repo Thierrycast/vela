@@ -37,6 +37,17 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
   const [voices, setVoices] = useState<string[] | null>(null);
   const { voice } = settings;
 
+  // Sem isto, a lista só existia depois de um clique em Testar — e o campo ficava um texto livre
+  // onde o usuário teria de adivinhar o nome de uma voz.
+  useEffect(() => {
+    if (!voice.baseUrl.trim()) return;
+    let cancelled = false;
+    void listVoices({ baseUrl: voice.baseUrl, apiKey: voice.apiKey })
+      .then((list) => { if (!cancelled) setVoices(list); })
+      .catch(() => { if (!cancelled) setVoices(null); });
+    return () => { cancelled = true; };
+  }, [voice.baseUrl, voice.apiKey]);
+
   useEffect(() => {
     void navigator.permissions?.query({ name: "microphone" as PermissionName })
       .then((status) => {

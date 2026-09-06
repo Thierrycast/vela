@@ -107,3 +107,16 @@
 @media(prefers-reduced-motion:reduce){.popover.leaving,.developer-details[open]>div,.message{animation:none}}
 
 .composer-bar{padding:5px 8px 7px 6px}
+
+/* Precisa vencer `.app-shell>aside`, que é mais específica que `.popover` e a rebaixava. */
+.app-shell>aside.popover{z-index:30}
+
+/* Evento de erro na atividade se lê pela cor, não pelo texto. */
+.activity-item.error{color:var(--danger)}
+.activity-item.error .activity-marker{background:var(--danger)}
+.activity-item.warn .activity-marker{background:var(--warning)}
+
+/* Campo não é objeto: Energy Field e Mesh Field preenchem o retângulo inteiro, e como orb
+   viravam um quadrado. A máscara radial os arredonda sem cortar o brilho que vaza — recortar
+   com overflow mataria justamente o halo que dá vida à forma. */
+.welcome-mark canvas{-webkit-mask-image:radial-gradient(circle at 50% 50%,#000 52%,transparent 74%);mask-image:radial-gradient(circle at 50% 50%,#000 52%,transparent 74%)}

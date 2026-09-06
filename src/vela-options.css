@@ -46,3 +46,7 @@
 .visual-option>span{display:block;padding:10px 12px;border-top:1px solid var(--border)}
 .visual-option strong{display:block;font-size:12.5px;font-weight:600}
 .visual-option small{display:block;color:var(--text-muted);font-size:10.5px;font-family:var(--font-mono);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* `[hidden]` é regra do navegador e perde para qualquer classe: sem isto o aviso de falha
+   ficava visível por cima de um shader que estava rodando bem. */
+.visual-stage em[hidden]{display:none}

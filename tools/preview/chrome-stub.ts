@@ -69,6 +69,7 @@ const events: AgentEvent[] = scenario === "vazio" ? [] : [
   { kind: "result", text: "Página lida em 2 frame(s)." },
   { kind: "result", text: "Cliquei em button “Ver especificações” — a página reagiu." },
   { kind: "error", text: "O snapshot mudou. Chame extractPage de novo antes de agir." },
+  { kind: "error", text: "Configure o servidor de voz em Configurações → Voz." },
 ];
 
 // Mesmo formato que attachmentText() produz: cabeçalho, quebra de linha, texto.
@@ -78,6 +79,15 @@ const panelMessages: unknown[] = [
   { type: "chat:snapshot", messages: conversation, events, telemetry: ["omniroute · 842 ms"], running: scenario === "executando" },
   { type: "chat:session", title: scenario === "vazio" ? "" : "pesquise notebooks bons para de", tabCount: 3 },
   { type: "chat:attachments", items: scenario === "vazio" ? [] : [SAMPLE_ATTACHMENT] },
+  // Histórico com títulos longos: é onde o menu de conversas quebrava.
+  { type: "chat:history", items: [
+    { id: "h1", title: "Leia esta página e me diga o que dá para fazer aqui", updatedAt: Date.now() },
+    { id: "h2", title: "scrole para baixo", updatedAt: Date.now() - 3_600_000 },
+    { id: "h3", title: "clique no quarto item e vá até os comentários", updatedAt: Date.now() - 7_200_000 },
+    { id: "h4", title: "Leia esta página e me diga o que dá para fazer aqui", updatedAt: Date.now() - 10_800_000 },
+    { id: "h5", title: "Leia esta página e me diga o que dá para fazer aqui", updatedAt: Date.now() - 14_400_000 },
+    { id: "h6", title: "pesquise notebooks bons para desenvolvimento", updatedAt: Date.now() - 18_000_000 },
+  ] },
 ];
 
 if (scenario === "aprovacao") {

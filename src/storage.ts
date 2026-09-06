@@ -7,6 +7,8 @@ const LOGS_KEY = "vela:logs";
 const BRAND_HEALED_KEY = "vela:brand-renamed";
 const LEGACY_APP_NAMES = ["Browser AI", "browser-ai"];
 const LEGACY_ACCENTS = ["#d97757", "#5250f2"];
+const VOICE_HEALED_KEY = "vela:voice-endpoint";
+const LEGACY_VOICE_MODELS = ["whisper-1", "tts-1", ""];
 
 const legacyKey = (key: string) => key.replace(/^vela:/, "browser-ai:");
 
@@ -65,7 +67,25 @@ async function healLegacyBrand(settings: AppSettings): Promise<AppSettings> {
   return healed;
 }
 
-export const loadSettings = async () => healLegacyBrand(normalizeSettings(await local.get<Partial<AppSettings>>(SETTINGS_KEY, {})));
+/** A voz ganhou servidor próprio; quem já tinha settings ficou sem endereço e com modelo alheio. */
+async function healVoiceEndpoint(settings: AppSettings): Promise<AppSettings> {
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return settings;
+  const stored = await chrome.storage.local.get(VOICE_HEALED_KEY);
+  if (stored[VOICE_HEALED_KEY]) return settings;
+  await chrome.storage.local.set({ [VOICE_HEALED_KEY]: true });
+
+  const voice = { ...settings.voice };
+  if (!voice.baseUrl.trim()) voice.baseUrl = defaultSettings.voice.baseUrl;
+  if (!voice.streamingUrl.trim()) voice.streamingUrl = defaultSettings.voice.streamingUrl;
+  if (LEGACY_VOICE_MODELS.includes(voice.transcriptionModel.trim())) voice.transcriptionModel = defaultSettings.voice.transcriptionModel;
+  if (!voice.visual) voice.visual = defaultSettings.voice.visual;
+
+  const healed: AppSettings = { ...settings, voice };
+  await local.set(SETTINGS_KEY, healed);
+  return healed;
+}
+
+export const loadSettings = async () => healVoiceEndpoint(await healLegacyBrand(normalizeSettings(await local.get<Partial<AppSettings>>(SETTINGS_KEY, {}))));
 export const saveSettings = (settings: AppSettings) => local.set(SETTINGS_KEY, settings);
 
 export const loadMessages = () => local.get<ChatMessage[]>(MESSAGES_KEY, []);
