@@ -1,5 +1,5 @@
 import { loadSettings } from "./storage";
-import { VoiceEndpoint, synthesizeSpeech, transcribeAudio } from "./provider";
+import { VoiceEndpoint, streamSpeech, synthesizeSpeech, transcribeAudio } from "./provider";
 import { UtteranceSegmenter } from "./vad";
 import { VoiceMetricsAnalyzer } from "./audio-metrics";
 import { encodeWav } from "./wav-encoder";
@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener((message: { type?: string; text?: string; m
   if (message.type === "voice:stop") { stop(); return false; }
   if (message.type === "voice:toggle-mute") { toggleMute(); return false; }
   if (message.type === "voice:speak" && message.text) { void speak(message.text); return false; }
-  if (message.type === "voice:speak-stop") { output?.pause(); output = null; return false; }
+  if (message.type === "voice:speak-stop") { streamingStop?.(); output?.pause(); output = null; return false; }
   return false;
 });
 
@@ -138,18 +138,115 @@ function stop() {
   publish("idle");
 }
 
+/**
+ * Toca o áudio enquanto ele ainda está sendo gerado.
+ *
+ * O caminho antigo esperava o arquivo inteiro: numa frase longa, isso é a diferença entre a Vela
+ * responder e parecer travada. Aqui cada pedaço de PCM vira um buffer agendado na sequência —
+ * o relógio do AudioContext costura tudo sem emenda audível.
+ */
+async function speakStreaming(endpoint: VoiceEndpoint, spoken: string, voice: string) {
+  const body = await streamSpeech(endpoint, spoken, voice);
+  const context = new AudioContext();
+  // Um analisador na saída: o que a Vela fala move o orb do mesmo jeito que a sua voz move.
+  const mixer = context.createGain();
+  mixer.connect(context.destination);
+  const meter = new VoiceMetricsAnalyzer(context, mixer);
+  const meterTimer = self.setInterval(() => {
+    void send({ type: "voice:telemetry", telemetry: { state: "speaking", metrics: meter.sample(), timestamp: Date.now() } });
+  }, 50);
+  const reader = body.getReader();
+  let leftover = new Uint8Array(0);
+  let sampleRate = 22_050;
+  let channels = 1;
+  let headerRead = false;
+  let playAt = 0;
+  const sources: AudioBufferSourceNode[] = [];
+
+  streamingStop = () => { void reader.cancel().catch(() => undefined); for (const node of sources) { try { node.stop(); } catch { /* já parou */ } } };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const merged = new Uint8Array(leftover.length + value.length);
+      merged.set(leftover);
+      merged.set(value, leftover.length);
+      let offset = 0;
+
+      // O cabeçalho WAV chega no primeiro pedaço e traz a taxa real; assumir 22.05k daria
+      // um áudio acelerado ou arrastado conforme a voz escolhida.
+      if (!headerRead) {
+        if (merged.length < 44) { leftover = merged; continue; }
+        const view = new DataView(merged.buffer, merged.byteOffset, merged.byteLength);
+        channels = view.getUint16(22, true) || 1;
+        sampleRate = view.getUint32(24, true) || 22_050;
+        offset = 44;
+        headerRead = true;
+        playAt = context.currentTime + 0.12;
+      }
+
+      // PCM de 16 bits: sobra de byte ímpar fica para o próximo pedaço.
+      const usable = merged.length - offset;
+      const samples = Math.floor(usable / 2 / channels) * channels;
+      if (samples <= 0) { leftover = merged.subarray(offset); continue; }
+
+      const view = new DataView(merged.buffer, merged.byteOffset + offset, samples * 2);
+      const frames = samples / channels;
+      const buffer = context.createBuffer(channels, frames, sampleRate);
+      for (let channel = 0; channel < channels; channel += 1) {
+        const target = buffer.getChannelData(channel);
+        for (let frame = 0; frame < frames; frame += 1) {
+          target[frame] = view.getInt16((frame * channels + channel) * 2, true) / 32768;
+        }
+      }
+
+      const node = context.createBufferSource();
+      node.buffer = buffer;
+      node.connect(mixer);
+      playAt = Math.max(playAt, context.currentTime + 0.02);
+      node.start(playAt);
+      playAt += buffer.duration;
+      sources.push(node);
+
+      leftover = merged.subarray(offset + samples * 2);
+    }
+
+    // Espera o fim do que já foi agendado, senão o estado volta a "ocioso" com áudio tocando.
+    const restante = Math.max(0, playAt - context.currentTime) * 1000;
+    await new Promise((resolve) => setTimeout(resolve, restante + 120));
+  } finally {
+    self.clearInterval(meterTimer);
+    meter.disconnect();
+    streamingStop = null;
+    void context.close();
+  }
+}
+
+let streamingStop: (() => void) | null = null;
+
 async function speak(text: string) {
   let url = "";
   try {
     const { settings, endpoint } = await voiceTarget();
     const spoken = speakable(text);
     if (!spoken) return;
-    const blob = await synthesizeSpeech(endpoint, spoken, settings.voice.speechModel, settings.voice.speechVoice);
-    url = URL.createObjectURL(blob);
     output?.pause();
-    output = new Audio(url);
     segmenter?.suspend();
     publish("speaking");
+
+    if (settings.voice.streamSpeech) {
+      try {
+        await speakStreaming(endpoint, spoken, settings.voice.speechVoice);
+        return;
+      } catch {
+        // Servidor sem /tts/stream ou stream interrompido: o arquivo inteiro ainda funciona.
+      }
+    }
+
+    const blob = await synthesizeSpeech(endpoint, spoken, settings.voice.speechModel, settings.voice.speechVoice);
+    url = URL.createObjectURL(blob);
+    output = new Audio(url);
     await new Promise<void>((resolve, reject) => {
       output!.onended = () => resolve();
       output!.onerror = () => reject(new Error("Falha ao reproduzir a resposta."));

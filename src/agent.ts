@@ -3,6 +3,7 @@ import { isPdf, isRestrictedUrl, restrictionReason, waitForContentScript, waitFo
 import { loadSettings } from "./storage";
 import { approvalKey, describeAction, isRisky, requestApproval } from "./approvals";
 import { span } from "./trace";
+import { adoptTab } from "./session";
 
 const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "scroll", "wait"];
 const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool"];
@@ -141,6 +142,9 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
       const created = await chrome.tabs.create({ url: action.url, active: false, openerTabId: tab.id });
       if (!created.id) return failure("nav_error", "Não foi possível abrir a aba.");
       targetId = created.id;
+      // `chrome.tabs.create` feito pela própria extensão não dispara onCreatedNavigationTarget,
+      // então a aba precisa ser adotada à mão ou fica de fora do grupo da tarefa.
+      await adoptTab(created.id);
     } else {
       await chrome.tabs.update(tab.id, { url: action.url });
     }

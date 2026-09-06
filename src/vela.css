@@ -125,3 +125,23 @@
    quando o shader não compila — um canvas nunca troca de tipo de contexto. */
 span.vela-orb-canvas{display:block;flex:none}
 span.vela-orb-canvas>canvas{display:block;width:100%;height:100%}
+
+/* Palco da voz: o mesmo componente em dois tamanhos, para a transição ser contínua em vez de
+   uma troca de tela. Em foco ele cobre a conversa; recolhido, encosta acima do composer. */
+.voice-stage{display:flex;flex-direction:column;align-items:center;gap:14px;transition:padding var(--motion-state,220ms) var(--ease-standard,cubic-bezier(.2,.8,.2,1))}
+.voice-stage.focada{position:absolute;inset:49px 0 auto;z-index:5;padding:8vh 20px 24px;background:linear-gradient(var(--panel) 72%,transparent)}
+.voice-stage.compacta{flex-direction:row;justify-content:flex-end;gap:10px;padding:0 14px 8px}
+.voice-orb{border:0;background:transparent;padding:0;display:grid;place-items:center;transition:transform 160ms ease}
+.voice-orb:active{transform:scale(.97)}
+.voice-label{font-size:13px;color:var(--text-secondary)}
+.voice-transcript{margin:0;max-width:320px;text-align:center;font-size:13px;line-height:1.5;color:var(--text-primary)}
+.voice-controls{display:flex;gap:10px}
+.voice-stage.focada .voice-controls{margin-top:8px}
+.voice-control{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--text-secondary);transition:border-color var(--motion,180ms) ease,color var(--motion,180ms) ease}
+.voice-stage.compacta .voice-control{width:30px;height:30px}
+.voice-control:hover{border-color:var(--signal);color:var(--signal)}
+.voice-control.mudo{border-color:var(--warning);color:var(--warning)}
+.voice-control.encerrar:hover{border-color:var(--danger);color:var(--danger)}
+/* A conversa não some: fica atrás, e volta assim que o orb recolhe. */
+.conversation.atras-do-palco{opacity:0;pointer-events:none;transition:opacity var(--motion-state,220ms) ease}
+@media(prefers-reduced-motion:reduce){.voice-stage,.conversation.atras-do-palco{transition:none}}

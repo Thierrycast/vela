@@ -7,6 +7,7 @@ import type { ApprovalRequest } from "./approvals";
 import { useSettings, useTheme } from "./use-settings";
 import { ActivityTimeline, AgentStatus, AmbientEdge, ApprovalCard, ContextChip, DeveloperDetails, DictationButton, LiveVoiceButton, TakeoverCard, VelaOrb, VelaState } from "./vela-components";
 import { AssistantActions, MessageEditor, UserActions } from "./message-actions";
+import { VoiceStage } from "./voice-stage";
 import { Markdown } from "./markdown";
 import { VelaMark } from "./vela-mark";
 import { Select } from "./select";
@@ -48,6 +49,9 @@ function App() {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [dictating, setDictating] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [voiceFocused, setVoiceFocused] = useState(true);
+  const [voiceMuted, setVoiceMuted] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
@@ -59,6 +63,7 @@ function App() {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLElement>(null);
+  const liveRef = useRef(false);
 
   useTheme(settings);
 
@@ -87,7 +92,11 @@ function App() {
       if (message.type === "chat:speaking" && !message.speaking) setSpeakingId(null);
       if (message.type === "voice:state") { setVoiceState(message.state); if (message.state === "idle") { setDictating(false); setSpeakingId(null); } }
       if (message.type === "voice:error") { setVoiceState("error"); setDictating(false); setSpeakingId(null); setEvents((current) => [...current, { kind: "error", text: message.message }]); }
-      if (message.type === "voice:transcript") { setInput((current) => `${current}${current ? " " : ""}${message.text}`); composerRef.current?.focus(); }
+      if (message.type === "voice:transcript") {
+        // No Live Voice o que você falou já virou turno; repetir no campo de texto seria ruído.
+        if (liveRef.current) setLiveTranscript(message.text);
+        else { setInput((current) => `${current}${current ? " " : ""}${message.text}`); composerRef.current?.focus(); }
+      }
       if (message.type === "chat:prefill") { setInput(message.text); composerRef.current?.focus(); }
       if (message.type === "chat:attachments") setAttachments(message.items);
     };
@@ -123,6 +132,7 @@ function App() {
   const agentState: VelaState = takeover ? "waiting" : approval ? "paused" : running ? "thinking"
     : voiceState === "listening" ? "listening" : voiceState === "speaking" ? "speaking" : voiceState === "error" ? "error" : "idle";
 
+  const live = voiceState !== "idle" && !dictating;
   const post = (message: Parameters<SidecarPort["post"]>[0]) => portRef.current?.post(message) ?? false;
 
   /** O background é quem grava; o painel só relata o que aconteceu aqui. */
@@ -148,6 +158,8 @@ function App() {
 
   const toggleLive = () => {
     const starting = voiceState === "idle";
+    liveRef.current = starting;
+    if (starting) { setVoiceFocused(true); setLiveTranscript(""); setVoiceMuted(false); }
     post({ type: starting ? "voice:start-live" : "voice:stop-live" });
     setEvents((current) => {
       const text = starting ? "Iniciando Live Voice…" : "Live Voice encerrado.";
@@ -205,7 +217,18 @@ function App() {
         : <p className="popover-empty">Nenhuma tarefa anterior ainda.</p>}
     </aside>}
 
-    <section className="conversation" ref={streamRef}>
+    {live && <VoiceStage
+      state={agentState}
+      visual={settings.voice.visual}
+      focused={voiceFocused}
+      transcript={liveTranscript}
+      muted={voiceMuted}
+      onToggleFocus={() => setVoiceFocused((value) => !value)}
+      onToggleMute={() => { setVoiceMuted((value) => !value); void chrome.runtime?.sendMessage({ type: "voice:toggle-mute" }).catch(() => undefined); }}
+      onClose={toggleLive}
+    />}
+
+    <section className={`conversation ${live && voiceFocused ? "atras-do-palco" : ""}`} ref={streamRef}>
       {bubbles.length === 0
         ? <div className="welcome">
             <div className="welcome-mark"><VelaOrb state={agentState} size={64} visual={settings.voice.visual} /></div>

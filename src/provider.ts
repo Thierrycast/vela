@@ -176,18 +176,40 @@ export type VoiceEndpoint = { baseUrl: string; apiKey: string };
 const voiceUrl = (endpoint: VoiceEndpoint, path: string) => `${endpoint.baseUrl.replace(/\/+$/, "")}/v1/${path}`;
 const voiceHeaders = (endpoint: VoiceEndpoint): Record<string, string> => endpoint.apiKey ? { Authorization: `Bearer ${endpoint.apiKey}` } : {};
 
-/** Lista as vozes que o servidor oferece, para a tela não pedir que o usuário adivinhe um nome. */
-export async function listVoices(endpoint: VoiceEndpoint): Promise<string[]> {
-  const response = await fetch(`${endpoint.baseUrl.replace(/\/+$/, "")}/voices/names`, { headers: { Accept: "application/json", ...voiceHeaders(endpoint) } });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const payload = await response.json() as string[] | { default?: string; custom?: string[]; base?: string[]; voices?: string[]; names?: string[] };
-  if (Array.isArray(payload)) return payload.map(String);
-  // A speech-api separa as vozes em "base" e "custom"; outras implementações devolvem uma lista só.
-  const collected = [...(payload.base ?? []), ...(payload.custom ?? []), ...(payload.voices ?? []), ...(payload.names ?? [])].map(String);
-  const preferred = payload.default ? [payload.default] : [];
-  return [...new Set([...preferred, ...collected])];
-}
+export type VoiceOption = { id: string; label: string; engine: string; language?: string; ratio?: number };
 
+/**
+ * Lista as vozes com o identificador que o servidor realmente aceita.
+ *
+ * `/voices/names` só devolve as do motor padrão — as do piper ficam de fora e, sem o prefixo do
+ * motor, o servidor recusa com "Unknown voice". `/voices` traz todos os motores e ainda o
+ * benchmark, que é o que permite ordenar por velocidade em vez de por ordem alfabética.
+ */
+export async function listVoices(endpoint: VoiceEndpoint): Promise<VoiceOption[]> {
+  const base = endpoint.baseUrl.replace(/\/+$/, "");
+  const response = await fetch(`${base}/voices`, { headers: { Accept: "application/json", ...voiceHeaders(endpoint) } });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json() as {
+    default?: string;
+    engines?: Record<string, { voices?: Array<{ id?: string; name?: string; label?: string; language?: string; metrics?: { short?: { ratio?: number } } }> }>;
+  };
+
+  const options: VoiceOption[] = [];
+  for (const [engine, motor] of Object.entries(payload.engines ?? {})) {
+    for (const voice of motor.voices ?? []) {
+      const id = voice.id ?? (voice.name ? `${engine}:${voice.name}` : null);
+      if (!id) continue;
+      options.push({ id, label: voice.label || voice.name || id, engine, language: voice.language ?? undefined, ratio: voice.metrics?.short?.ratio });
+    }
+  }
+  if (options.length) {
+    // Menor razão primeiro: abaixo de 1 o servidor gera mais rápido do que o áudio dura.
+    return options.sort((first, second) => (first.ratio ?? 99) - (second.ratio ?? 99));
+  }
+
+  const nomes = await fetch(`${base}/voices/names`, { headers: { Accept: "application/json", ...voiceHeaders(endpoint) } }).then((r) => r.json()).catch(() => null) as { base?: string[]; custom?: string[] } | null;
+  return [...(nomes?.base ?? []), ...(nomes?.custom ?? [])].map((name) => ({ id: name, label: name, engine: "desconhecido" }));
+}
 export async function checkVoiceEndpoint(endpoint: VoiceEndpoint): Promise<ConnectionCheck> {
   if (!endpoint.baseUrl.trim()) return { ok: false, detail: "Sem endereço configurado." };
   try {
@@ -209,6 +231,20 @@ export async function transcribeAudio(endpoint: VoiceEndpoint, audio: Blob, mode
   if (!response.ok) { const detail = await responseDetail(response); throw new Error(`Transcrição falhou (HTTP ${response.status})${detail ? `: ${detail}` : "."}`); }
   const payload = await response.json() as { text?: string; transcript?: string };
   return payload.text ?? payload.transcript ?? "";
+}
+
+/**
+ * Abre o fluxo de áudio já em geração. Devolve o corpo cru: quem consome decide como tocar,
+ * porque tocar PCM em pedaços é problema do lado que tem AudioContext.
+ */
+export async function streamSpeech(endpoint: VoiceEndpoint, input: string, voice: string): Promise<ReadableStream<Uint8Array>> {
+  const response = await fetch(`${endpoint.baseUrl.replace(/\/+$/, "")}/tts/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "audio/wav", ...voiceHeaders(endpoint) },
+    body: JSON.stringify({ text: input, voice: voice || undefined }),
+  });
+  if (!response.ok || !response.body) throw new Error(`A síntese em streaming falhou (HTTP ${response.status}).`);
+  return response.body;
 }
 
 export async function synthesizeSpeech(endpoint: VoiceEndpoint, input: string, model: string, voice: string): Promise<Blob> {

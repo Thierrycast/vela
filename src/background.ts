@@ -187,7 +187,7 @@ async function startVoice(mode: "live" | "dictation") {
       // A preferência viaja junto: o content script não lê settings, e pedir depois deixaria o
       // Pulse aparecendo com um visual e trocando para outro na frente do usuário.
       const settings = await loadSettings();
-      void notifyTabs({ type: "pulse:show", state: "Ouvindo", visual: settings.voice.visual });
+      if (settings.voice.showPulse) void notifyTabs({ type: "pulse:show", state: "Ouvindo", visual: settings.voice.visual });
     }
   } catch (error) {
     voiceMode = "off";
@@ -284,7 +284,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   void getSession().then((session) => { if (session && changeInfo.groupId === session.groupId) void adoptTab(tabId).then(publishSession); });
 });
 
-chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; title?: string; message?: string; text?: string; url?: string; intent?: string; state?: string; scriptId?: string; id?: string; decision?: string; telemetry?: { metrics?: unknown }; entry?: unknown }, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; title?: string; message?: string; text?: string; url?: string; intent?: string; state?: string; scriptId?: string; id?: string; decision?: string; telemetry?: { metrics?: unknown; state?: string }; entry?: unknown }, _sender, sendResponse) => {
   if (message.type === "lens:action" && message.text) {
     void runLensAction({ intent: (message.intent ?? "context") as LensIntent, text: message.text, url: message.url ?? "", title: message.title ?? "" });
   }
@@ -306,7 +306,9 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
     broadcast({ type: "voice:state", state: message.state as VoiceState });
     if (voiceMode === "live") void notifyTabs({ type: "pulse:set-state", motion: message.state, state: VOICE_LABEL[message.state] ?? "Vela" });
   }
-  if (message.type === "voice:telemetry" && voiceMode === "live") void notifyActiveTab({ type: "pulse:metrics", metrics: message.telemetry?.metrics });
+  if (message.type === "voice:telemetry" && (voiceMode === "live" || message.telemetry?.state === "speaking")) {
+    void notifyActiveTab({ type: "pulse:metrics", metrics: message.telemetry?.metrics });
+  }
   if (message.type === "pulse:approval-resolve" && message.id && message.decision) resolveApproval(message.id, message.decision as ApprovalDecision);
   if (message.type === "pulse:takeover-resume") resumeTakeover();
   if (message.type === "voice:error" && message.message) broadcast({ type: "voice:error", message: message.message });

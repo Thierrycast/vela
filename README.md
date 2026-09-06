@@ -152,6 +152,26 @@ página de opções, `getUserMedia` falha calado e o botão parece quebrado.
 Endpoint em HTTP puro precisa entrar no `connect-src` do manifest: o CSP libera `https:` e o
 loopback, mais o host da tailnet declarado explicitamente.
 
+A voz de fábrica é `piper:pt_BR-cadu-medium`. A escolha não é de timbre: o servidor devolve
+quanto tempo leva para gerar em relação à duração do áudio, e o piper gera em **0,58×** o que
+fala, contra **2,04×** da kokoro — acima de 1 a fala chega sempre atrasada, porque o servidor
+perde para o relógio. Por isso a lista em Configurações → Voz vem ordenada da mais rápida para a
+mais lenta, com o número ao lado, e quem já tinha uma voz lenta salva é migrado uma vez só.
+
+**Síntese em streaming** (ligada) toca os pedaços de PCM à medida que chegam, agendados na linha
+do tempo do AudioContext, em vez de esperar o arquivo inteiro.
+
+### O palco da voz
+
+Ao entrar em Live Voice, o orb ocupa a conversa: durante uma fala o assunto é o que se ouve, não
+o que está escrito. **Tocar no orb encolhe ele e o desce até o rodapé**, e a conversa reaparece —
+é o mesmo componente nos dois tamanhos, então a transição é contínua em vez de uma troca de tela.
+Debaixo dele ficam silenciar o microfone e encerrar.
+
+A **janelinha flutuante na página** (o Pulse) nasce desligada, em Configurações → Voz. Ela é uma
+segunda superfície por cima do site que você está lendo, e só faz sentido com a barra lateral
+fechada — com o painel aberto, o palco já está lá.
+
 ## Trilha de execução
 
 Cada requisição ao modelo, chamada de ferramenta, ação na página e falha — com duração e

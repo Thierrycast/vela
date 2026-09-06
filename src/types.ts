@@ -45,6 +45,10 @@ export type AppSettings = {
     speechModel: string;
     speechVoice: string;
     streamingUrl: string;
+    /** Toca enquanto o servidor gera, em vez de esperar o arquivo inteiro. */
+    streamSpeech: boolean;
+    /** A janelinha flutuante na página. Desligada por padrão: o palco fica no painel. */
+    showPulse: boolean;
     /** Qual visual representa a Vela quando ela ouve e fala. Ver voice-visuals.ts. */
     visual: string;
   };
@@ -126,7 +130,7 @@ export const defaultSettings: AppSettings = {
     enabled: true,
     capabilities: { streaming: true, tools: true, vision: true, audio: false, webFetch: false },
   }],
-  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural", maxRounds: 8 },
+  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural", maxRounds: 12 },
   context: { currentPage: true, selection: true, sessionTabs: true, outsideTabs: false },
   bridge: { enabled: false, port: 8792, token: "", scriptPath: "" },
   voice: {
@@ -134,7 +138,9 @@ export const defaultSettings: AppSettings = {
     apiKey: "",
     transcriptionModel: "groq/whisper-large-v3-turbo",
     speechModel: "tts-1",
-    speechVoice: "",
+    speechVoice: "piper:pt_BR-cadu-medium",
+    streamSpeech: true,
+    showPulse: false,
     streamingUrl: "ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream",
     visual: "liquid-blob",
   },

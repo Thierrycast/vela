@@ -63,6 +63,7 @@ export async function submit(text: string, emit: Emit) {
   // Um id por turno costura tudo o que vem depois: rodadas, chamadas de tool, ações e falhas.
   beginTurn(newId());
   const turnSpan = span("turn", "turno completo", { autonomy: settings.agent.autonomy, maxRounds });
+  const repeats = new Map<string, number>();
   traceRecord("user.input", text.slice(0, 200), { data: { length: text.length, model: profile?.defaultModel } });
   running = true;
   controller = new AbortController();
@@ -120,6 +121,23 @@ export async function submit(text: string, emit: Emit) {
         break;
       }
 
+      for (const call of calls) {
+        const fingerprint = `${call.name}:${call.arguments}`;
+        const seen = (repeats.get(fingerprint) ?? 0) + 1;
+        repeats.set(fingerprint, seen);
+        if (seen === 3) {
+          await conversation.append({
+            id: newId(),
+            role: "system",
+            content: `Você já chamou ${call.name} com estes mesmos argumentos três vezes e o resultado não mudou. Isso não vai avançar. Tente outro caminho, ou explique ao usuário o que está impedindo e pergunte como seguir.`,
+            createdAt: Date.now(),
+            status: "complete",
+          });
+          record({ kind: "status", text: `Repetição detectada em ${call.name} — avisei o modelo.` }, emit);
+          traceRecord("tool.call", `repetição improdutiva: ${call.name}`, { ok: false, code: "repeticao", data: { name: call.name, vezes: seen } });
+        }
+      }
+
       const toolCalls = calls.map((call) => ({ id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }));
       await conversation.patch(assistant.id, { status: "complete", tool_calls: toolCalls });
       emit({ type: "chat:patch", id: assistant.id, patch: { status: "complete", tool_calls: toolCalls } });
@@ -133,8 +151,18 @@ export async function submit(text: string, emit: Emit) {
         await addMessage({ id: newId(), role: "tool", tool_call_id: call.id, content, createdAt: Date.now(), status: event.kind === "error" ? "error" : "complete" }, emit);
       }
 
+      if (round === maxRounds - 2) {
+        await conversation.append({
+          id: newId(),
+          role: "system",
+          content: "Esta é a sua última etapa nesta tarefa. Pare de usar ferramentas e responda ao usuário agora, com o que você conseguiu até aqui e o que ficou faltando.",
+          createdAt: Date.now(),
+          status: "complete",
+        });
+      }
       if (round === maxRounds - 1) {
-        await addMessage({ id: newId(), role: "assistant", content: `Atingi o limite de ${maxRounds} etapas nesta tarefa. Peça para continuar se quiser que eu siga.`, createdAt: Date.now(), status: "complete" }, emit);
+        record({ kind: "status", text: `Parei em ${maxRounds} etapas. Diga "continue" para eu seguir de onde parei.` }, emit);
+        traceRecord("turn", "limite de etapas atingido", { ok: false, code: "max_rounds", data: { maxRounds } });
       }
     }
   } catch (error) {

@@ -26,6 +26,25 @@ porta `vela:sidecar`, recebe um snapshot e depois eventos.
 Custo: o service worker morre com 30 s de ociosidade e uma aprovação humana demora mais que
 isso. Por isso há um heartbeat de 20 s enquanto houver loop ativo (`background.ts`).
 
+### O aviso de limite nunca entra no histórico do modelo
+
+O teto de rodadas existe para o loop não rodar para sempre. Mas a mensagem *"Atingi o limite de
+8 etapas"* era gravada como mensagem **do assistente** — ou seja, entrava no histórico enviado ao
+modelo na rodada seguinte. O modelo lia a própria desistência como exemplo e passava a
+repeti-la, às vezes antes mesmo de chegar ao teto. Um limite que se ensina.
+
+Agora ele tem três partes separadas:
+
+- na **penúltima** rodada, um `role: "system"` avisa que aquela é a última chance de agir e pede
+  a resposta final — o modelo fecha a tarefa em vez de ser cortado no meio;
+- ao estourar, o aviso sai como **evento de UI**, visível para a pessoa e invisível para o
+  modelo, dizendo que basta pedir "continue";
+- **repetição é detectada**: a mesma ferramenta com os mesmos argumentos três vezes injeta um
+  aviso de sistema, porque estourar o teto girando em falso é o modo de falha comum, não fazer
+  oito coisas diferentes.
+
+O teto padrão subiu para 12: com o loop de repetição resolvido, oito cortava tarefa legítima.
+
 ### A página é endereçada por `ref`, não por seletor CSS
 
 `extractPage` devolve `[ref_<snapshot>_<índice>]` para cada elemento interativo, e o modelo cita
@@ -120,6 +139,17 @@ O content script é buildado por `vite.content.config.ts` **separado**, com
 `inlineDynamicImports` e formato IIFE. Motivo: scripts injetados por `files` são clássicos e não
 suportam `import`. Com uma entrada só no build principal, o Rollup extrairia um chunk
 compartilhado no primeiro módulo em comum e o content script quebraria **em silêncio**.
+
+### O grupo de abas se chama Vela, e adota o que ela abre
+
+O grupo levava o título da tarefa (`Vela · pesquise notebooks…`), que ficava truncado a poucos
+caracteres na barra e não identificava nada. O nome agora é só **Vela**: o papel da etiqueta é
+dizer de quem são aquelas abas, e o assunto já está na conversa.
+
+Aba aberta pelo próprio agente precisa de `adoptTab` explícito. `chrome.tabs.create` chamado de
+dentro da extensão **não dispara** `onCreatedNavigationTarget` — o ouvinte que recolhe as abas
+que a página abre sozinha não vê essa; sem a adoção, a guia nova nascia fora do grupo e a tarefa
+se espalhava pela barra.
 
 ## Fluxo de uma tarefa
 
@@ -298,6 +328,31 @@ Os pesos vêm do TypeScript para o shader não virar uma árvore de condicionais
 Ouvir e falar ficam em extremos opostos de temperatura — azul frio contra âmbar quente — porque
 quem está falando é a informação mais importante da tela, e matizes vizinhos não separam isso.
 O estado `acting` usa exatamente o ciano da moldura de controle: são o mesmo momento.
+
+### O palco no painel, e a janelinha desligada
+
+Em Live Voice, `voice-stage.tsx` põe o orb por cima da conversa e o mesmo componente serve
+recolhido, encostado acima do composer: só muda a classe, então o gesto de tocar nele é uma
+transição contínua e não uma troca de tela. O palco **escuta a telemetria direto do runtime**, e
+não pelo estado do painel — são 20 amostras por segundo, e passá-las pelo componente pai
+re-renderizaria a conversa inteira a cada uma.
+
+O Pulse, a janelinha na página, passou a nascer desligado (`voice.showPulse`). Com o painel
+aberto a presença da Vela já está ali; uma segunda superfície flutuando por cima do site que a
+pessoa está lendo é intrusão. Ele continua valendo para quem trabalha com a barra lateral
+fechada, e o interruptor fica em Configurações → Voz.
+
+### A voz é escolhida por velocidade, não por timbre
+
+O servidor informa a razão entre tempo de geração e duração do áudio. Acima de 1 a fala chega
+sempre atrasada — o servidor perde para o relógio, e o atraso cresce com a frase. Medido:
+`piper:pt_BR-cadu-medium` em **0,58×** contra `kokoro:pf_dora` em **2,04×**.
+
+Por isso a lista vem de `/voices` (e não de `/voices/names`, que omite as vozes do piper),
+ordenada da mais rápida para a mais lenta, com o número visível na opção. Quem já tinha uma voz
+lenta salva é migrado uma vez só, por `healVoiceEndpoint()` — a configuração ruim tinha sido
+escolhida sem esse dado à vista, e deixar como está seria manter o defeito por respeito a uma
+decisão que ninguém tomou de fato.
 
 ### Um canvas aceita um contexto e nunca mais outro
 

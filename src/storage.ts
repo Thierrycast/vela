@@ -9,6 +9,8 @@ const LEGACY_APP_NAMES = ["Browser AI", "browser-ai"];
 const LEGACY_ACCENTS = ["#d97757", "#5250f2"];
 const VOICE_HEALED_KEY = "vela:voice-endpoint";
 const LEGACY_VOICE_MODELS = ["whisper-1", "tts-1", ""];
+/** Vozes do kokoro: boas, mas geram em o dobro do tempo do áudio. */
+const SLOW_VOICES = ["", "alloy", "pf_dora"];
 
 const legacyKey = (key: string) => key.replace(/^vela:/, "browser-ai:");
 
@@ -79,6 +81,7 @@ async function healVoiceEndpoint(settings: AppSettings): Promise<AppSettings> {
   if (!voice.streamingUrl.trim()) voice.streamingUrl = defaultSettings.voice.streamingUrl;
   if (LEGACY_VOICE_MODELS.includes(voice.transcriptionModel.trim())) voice.transcriptionModel = defaultSettings.voice.transcriptionModel;
   if (!voice.visual) voice.visual = defaultSettings.voice.visual;
+  if (SLOW_VOICES.includes(voice.speechVoice.trim())) voice.speechVoice = defaultSettings.voice.speechVoice;
 
   const healed: AppSettings = { ...settings, voice };
   await local.set(SETTINGS_KEY, healed);

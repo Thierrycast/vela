@@ -93,6 +93,16 @@ const panelMessages: unknown[] = [
 if (scenario === "aprovacao") {
   panelMessages.push({ type: "chat:approval", request: { id: "a1", summary: "Clicar em “Finalizar compra”", detail: "https://loja.exemplo.com" } });
 }
+if (scenario === "voz") {
+  panelMessages.push({ type: "voice:state", state: "listening" });
+  // Telemetria falsa em 20Hz: o palco escuta o runtime, então o dublê precisa emitir de verdade.
+  const inicio = Date.now();
+  setInterval(() => {
+    const segundos = (Date.now() - inicio) / 1000;
+    const onda = (Math.sin(segundos * 1.9) * 0.5 + 0.5) * (Math.sin(segundos * 0.7) * 0.5 + 0.5);
+    for (const fn of listeners) fn({ type: "voice:telemetry", telemetry: { state: "listening", metrics: { energy: onda, bass: onda * 0.7, mid: onda * 0.8, high: onda * 0.4, speaking: onda > 0.2 } } });
+  }, 50);
+}
 if (scenario === "suavez") {
   panelMessages.push({ type: "chat:takeover", reason: "A loja pede login para concluir o pedido.", expected: "Entre na sua conta e clique em Retomar." });
 }

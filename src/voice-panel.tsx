@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Mic, RefreshCw } from "lucide-react";
 import { AppSettings } from "./types";
-import { ConnectionCheck, checkVoiceEndpoint, listVoices } from "./provider";
+import { ConnectionCheck, VoiceOption, checkVoiceEndpoint, listVoices } from "./provider";
 import { Select } from "./select";
 import { VisualPicker } from "./visual-picker";
 import { VisualId } from "./voice-visuals";
@@ -34,7 +34,7 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
   const [microphone, setMicrophone] = useState<MicrophoneState>("unknown");
   const [detail, setDetail] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionCheck | "testing" | null>(null);
-  const [voices, setVoices] = useState<string[] | null>(null);
+  const [voices, setVoices] = useState<VoiceOption[] | null>(null);
   const { voice } = settings;
 
   // Sem isto, a lista só existia depois de um clique em Testar — e o campo ficava um texto livre
@@ -84,7 +84,13 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
     }
   };
 
-  const voiceOptions = (voices ?? []).map((item) => ({ value: item, label: item }));
+  // O rótulo carrega motor e velocidade: escolher voz sem saber que uma demora o dobro da outra
+  // é como o padrão ficou lento sem ninguém perceber.
+  const voiceOptions = (voices ?? []).map((item) => ({
+    value: item.id,
+    label: item.label + (item.ratio !== undefined ? (item.ratio < 1 ? " · rápida" : " · lenta") : ""),
+    hint: [item.engine, item.language, item.ratio !== undefined ? `gera em ${item.ratio.toFixed(2)}× a duração` : null].filter(Boolean).join(" · "),
+  }));
 
   return <>
     <h1>Voz</h1>
@@ -93,6 +99,16 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
     <h2 className="subsection">Aparência da voz</h2>
     <p className="picker-intro">Como a Vela se mostra enquanto ouve e fala. Cada opção passeia sozinha pelos estados: azul quando é você falando, âmbar quando é ela.</p>
     <VisualPicker value={voice.visual} onChange={(visual: VisualId) => patch({ visual })} />
+
+    <h2 className="subsection">Durante a conversa</h2>
+    <div className="settings-group">
+      <Row label="Síntese em streaming" description="Toca enquanto o servidor gera, em vez de esperar o arquivo inteiro. Numa frase longa é a diferença entre responder e parecer travada.">
+        <button className={`toggle ${voice.streamSpeech ? "on" : ""}`} role="switch" aria-checked={voice.streamSpeech} aria-label="Síntese em streaming" onClick={() => patch({ streamSpeech: !voice.streamSpeech })}><span /></button>
+      </Row>
+      <Row label="Janelinha flutuante na página" description="Uma segunda superfície por cima do site que você está lendo. O palco da voz já fica no painel, então ela só faz sentido com a barra lateral fechada.">
+        <button className={`toggle ${voice.showPulse ? "on" : ""}`} role="switch" aria-checked={voice.showPulse} aria-label="Janelinha flutuante" onClick={() => patch({ showPulse: !voice.showPulse })}><span /></button>
+      </Row>
+    </div>
 
     <h2 className="subsection">Microfone</h2>
     <div className="settings-group">
@@ -129,7 +145,7 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
       <Row label="Síntese" description="Modelo de /v1/audio/speech.">
         <input className="mono" value={voice.speechModel} onChange={(event) => patch({ speechModel: event.target.value })} />
       </Row>
-      <Row label="Voz" description={voices ? `${voices.length} voz(es) disponíveis neste servidor.` : "Teste a conexão para carregar a lista do servidor."}>
+      <Row label="Voz" description={voices ? `${voices.length} voz(es) neste servidor, das mais rápidas para as mais lentas.` : "Teste a conexão para carregar a lista do servidor."}>
         {voiceOptions.length > 0
           ? <Select value={voice.speechVoice || voiceOptions[0].value} label="Voz" options={voiceOptions} onChange={(speechVoice) => patch({ speechVoice })} />
           : <input value={voice.speechVoice} placeholder="padrão do servidor" onChange={(event) => patch({ speechVoice: event.target.value })} />}

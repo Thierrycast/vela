@@ -9,9 +9,10 @@ import { Select } from "./select";
 
 const ROUND_OPTIONS = [
   { value: "4", label: "4 etapas", hint: "tarefas curtas, resposta rápida" },
-  { value: "8", label: "8 etapas", hint: "padrão" },
-  { value: "14", label: "14 etapas", hint: "fluxos com formulário" },
-  { value: "24", label: "24 etapas", hint: "pesquisa longa, gasta mais" },
+  { value: "8", label: "8 etapas", hint: "conversa curta" },
+  { value: "12", label: "12 etapas", hint: "padrão" },
+  { value: "18", label: "18 etapas", hint: "navegação em site pesado" },
+  { value: "28", label: "28 etapas", hint: "pesquisa longa, gasta mais" },
 ] as const;
 
 function Row({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
