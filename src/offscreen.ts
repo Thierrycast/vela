@@ -4,6 +4,10 @@ import { UtteranceSegmenter } from "./vad";
 import { VoiceMetricsAnalyzer } from "./audio-metrics";
 import { encodeWav } from "./wav-encoder";
 import { VoiceRuntimeState } from "./voice-runtime";
+import { spanFrom, traceFrom } from "./trace-client";
+
+const trace = traceFrom("offscreen");
+const traceSpan = spanFrom("offscreen");
 
 const SAMPLE_RATE = 16_000;
 const MAX_PENDING = 3;
@@ -33,9 +37,18 @@ let muted = false;
 let speakingUntil = 0;
 const pending: Blob[] = [];
 let draining = false;
+// Janela de resumo do sinal de áudio, para a trilha não receber vinte eventos por segundo.
+let samples = 0;
+let peak = 0;
+let sum = 0;
+let windowStarted = 0;
 
 const send = (message: unknown) => chrome.runtime.sendMessage(message).catch(() => undefined);
-const publish = (next: VoiceRuntimeState) => { state = next; void send({ type: "voice:state", state, timestamp: Date.now() }); };
+const publish = (next: VoiceRuntimeState) => {
+  if (next !== state) trace("voice", `estado: ${state} → ${next}`, { data: { de: state, para: next, mode } });
+  state = next;
+  void send({ type: "voice:state", state, timestamp: Date.now() });
+};
 
 /** A voz tem servidor próprio: o gateway de texto não expõe transcrição nem síntese. */
 async function voiceTarget() {
@@ -56,33 +69,43 @@ async function drain() {
   draining = true;
   while (pending.length) {
     const blob = pending.shift()!;
+    const attempt = traceSpan("voice", "transcrição", { bytes: blob.size, fila: pending.length });
     try {
       const { settings, endpoint } = await voiceTarget();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20_000);
       const text = await transcribeAudio(endpoint, blob, settings.voice.transcriptionModel).finally(() => clearTimeout(timer));
       const clean = text.trim();
-      if (clean && !HALLUCINATIONS.some((pattern) => pattern.test(clean))) {
+      const descartado = !clean || HALLUCINATIONS.some((pattern) => pattern.test(clean));
+      attempt.end({ ok: !descartado, code: descartado ? "descartado" : undefined, data: { texto: clean, bytes: blob.size, modelo: settings.voice.transcriptionModel } });
+      if (!descartado) {
         void send({ type: "voice:transcript", text: clean, final: true, timestamp: Date.now() });
         if (mode === "live") publish("thinking");
       }
     } catch (error) {
-      void send({ type: "voice:error", message: error instanceof Error ? error.message : "Falha ao transcrever áudio." });
+      const message = error instanceof Error ? error.message : "Falha ao transcrever áudio.";
+      attempt.end({ ok: false, code: "falha", data: { erro: message } });
+      void send({ type: "voice:error", message });
     }
   }
   draining = false;
 }
 
 async function start(nextMode: "live" | "dictation") {
-  if (stream) return;
+  if (stream) { trace("voice", "start ignorado: microfone já aberto", { data: { mode: nextMode } }); return; }
   mode = nextMode;
+  const opening = traceSpan("voice", "abrir microfone", { mode: nextMode });
+  windowStarted = Date.now();
+  samples = 0; peak = 0; sum = 0;
   try {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      opening.end({ ok: true });
     } catch (error) {
       // Documento offscreen não exibe o prompt de permissão: sem a liberação prévia feita na
       // página de opções, isto falha calado e o botão de voz parece quebrado.
       const name = error instanceof DOMException ? error.name : "";
+      opening.end({ ok: false, code: name || "falha" });
       throw new Error(name === "NotAllowedError"
         ? "O microfone não está liberado para a Vela. Abra Configurações → Voz e clique em “Permitir microfone”."
         : name === "NotFoundError" ? "Nenhum microfone encontrado nesta máquina." : "Não consegui abrir o microfone.", { cause: error });
@@ -96,13 +119,29 @@ async function start(nextMode: "live" | "dictation") {
     analyzer = new VoiceMetricsAnalyzer(audio, source);
     telemetryTimer = self.setInterval(() => {
       if (!analyzer) return;
-      void send({ type: "voice:telemetry", telemetry: { state, metrics: analyzer.sample(), timestamp: Date.now() } });
+      const metrics = analyzer.sample();
+      // Um resumo a cada dois segundos, não vinte eventos por segundo: o que se quer saber depois
+      // é se o sinal existiu e com que força, não cada amostra.
+      samples += 1;
+      peak = Math.max(peak, metrics.energy);
+      sum += metrics.energy;
+      if (Date.now() - windowStarted >= 2000) {
+        trace("voice", "sinal do microfone", { data: { amostras: samples, pico: Number(peak.toFixed(3)), media: Number((sum / samples).toFixed(3)), mudo: muted, estado: state } });
+        samples = 0; peak = 0; sum = 0; windowStarted = Date.now();
+      }
+      void send({ type: "voice:telemetry", telemetry: { state, metrics, timestamp: Date.now() } });
     }, 50);
 
     segmenter = new UtteranceSegmenter({
-      onStart: () => { if (mode === "live") publish("listening"); },
+      onStart: () => { trace("voice", "fala começou"); if (mode === "live") publish("listening"); },
       onEnd: (chunks) => {
-        if (Date.now() < speakingUntil) return;
+        const amostras = chunks.reduce((total, item) => total + item.length, 0);
+        const engolido = Date.now() < speakingUntil;
+        trace("voice", engolido ? "fala ignorada (a Vela estava falando)" : "fala terminou", {
+          ok: !engolido,
+          data: { segundos: Number((amostras / (audio?.sampleRate ?? SAMPLE_RATE)).toFixed(2)) },
+        });
+        if (engolido) return;
         if (pending.length >= MAX_PENDING) { pending.shift(); void send({ type: "voice:error", message: "Transcrição atrasada; um trecho foi descartado." }); }
         pending.push(encodeWav(chunks, audio?.sampleRate ?? SAMPLE_RATE));
         void drain();
@@ -227,10 +266,11 @@ let streamingStop: (() => void) | null = null;
 
 async function speak(text: string) {
   let url = "";
+  const attempt = traceSpan("voice", "síntese", { chars: text.length });
   try {
     const { settings, endpoint } = await voiceTarget();
     const spoken = speakable(text);
-    if (!spoken) return;
+    if (!spoken) { attempt.end({ ok: false, code: "vazio" }); return; }
     output?.pause();
     segmenter?.suspend();
     publish("speaking");
@@ -238,13 +278,16 @@ async function speak(text: string) {
     if (settings.voice.streamSpeech) {
       try {
         await speakStreaming(endpoint, spoken, settings.voice.speechVoice);
+        attempt.end({ ok: true, data: { modo: "streaming", voz: settings.voice.speechVoice, texto: spoken.slice(0, 300) } });
         return;
-      } catch {
+      } catch (error) {
         // Servidor sem /tts/stream ou stream interrompido: o arquivo inteiro ainda funciona.
+        trace("voice", "streaming caiu para arquivo inteiro", { ok: false, code: "stream_indisponivel", data: { erro: error instanceof Error ? error.message : String(error) } });
       }
     }
 
     const blob = await synthesizeSpeech(endpoint, spoken, settings.voice.speechModel, settings.voice.speechVoice);
+    attempt.end({ ok: true, data: { modo: "arquivo", voz: settings.voice.speechVoice, bytes: blob.size, texto: spoken.slice(0, 300) } });
     url = URL.createObjectURL(blob);
     output = new Audio(url);
     await new Promise<void>((resolve, reject) => {
@@ -253,7 +296,9 @@ async function speak(text: string) {
       void output!.play().catch(reject);
     });
   } catch (error) {
-    void send({ type: "voice:error", message: error instanceof Error ? error.message : "Falha ao sintetizar voz." });
+    const message = error instanceof Error ? error.message : "Falha ao sintetizar voz.";
+    attempt.end({ ok: false, code: "falha", data: { erro: message } });
+    void send({ type: "voice:error", message });
   } finally {
     if (url) URL.revokeObjectURL(url);
     speakingUntil = Date.now() + 250;

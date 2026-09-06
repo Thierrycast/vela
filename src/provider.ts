@@ -14,11 +14,11 @@ const browserActionTool = {
   type: "function",
   function: {
     name: "browser_action",
-    description: "Opera a aba ativa. Comece por extractPage: ele devolve os refs dos elementos e, quando existirem, as ferramentas próprias da página. Prefira pageTool a simular cliques.",
+    description: "Opera a aba ativa. Comece por extractPage: ele devolve os refs dos elementos e, quando existirem, as ferramentas próprias da página. Quando souber o texto do que procura, use find em vez de rolar — ele varre a página inteira, inclusive o que está fora da tela, e devolve refs prontos. Prefira pageTool a simular cliques.",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "wait", "pageTool"] },
+        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "wait", "pageTool"] },
         url: { type: "string", description: "Para navigate." },
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
         ref: { type: "string", description: "Identificador vindo do último extractPage, ex.: ref_3_12." },
@@ -31,6 +31,8 @@ const browserActionTool = {
         milliseconds: { type: "number", description: "Para wait, máximo 10000." },
         extractMode: { type: "string", enum: ["outline", "text"], description: "Para extractPage. outline traz só estrutura e elementos; text inclui o texto da página." },
         offset: { type: "number", description: "Para extractPage: continua a leitura a partir deste ponto quando o resultado veio truncado." },
+        query: { type: "string", description: "Para find: o texto a procurar na página inteira, mesmo fora da tela. Sem acento e sem caixa importa." },
+        limit: { type: "number", description: "Para find: quantos resultados devolver. Padrão 20." },
         toolName: { type: "string", description: "Para pageTool: nome exato de uma ferramenta listada em \"Ferramentas oferecidas pela página\"." },
         toolArguments: { type: "object", description: "Para pageTool: argumentos conforme o schema anunciado pela ferramenta." },
       },
@@ -91,11 +93,44 @@ const scriptListTool = {
   },
 };
 
+const tabManageTool = {
+  type: "function",
+  function: {
+    name: "tab_manage",
+    description: "Governa as abas da sessão da Vela — as que estão no grupo “Vela”. list mostra o que existe, activate traz uma para a frente, close fecha as que você indicar e closeOthers deixa só uma. Abas fora do grupo pertencem ao usuário e não podem ser fechadas.",
+    parameters: {
+      type: "object",
+      properties: {
+        op: { type: "string", enum: ["list", "activate", "close", "closeOthers"] },
+        tabId: { type: "number", description: "Para activate." },
+        tabIds: { type: "array", items: { type: "number" }, description: "Para close." },
+        keep: { type: "number", description: "Para closeOthers: a aba que fica." },
+      },
+      required: ["op"],
+    },
+  },
+};
+
+const settingsTool = {
+  type: "function",
+  function: {
+    name: "vela_settings",
+    description: "Lê e muda as preferências da própria Vela: voz da síntese, visual do orb, cursor, moldura de controle, máximo de etapas, tema. Chame sem argumentos para ver tudo com o valor atual, ou com field para ver as opções válidas daquele campo antes de escrever. Endereço de servidor, chaves e autonomia não passam por aqui.",
+    parameters: {
+      type: "object",
+      properties: {
+        field: { type: "string", description: "O campo. Omita para listar todos." },
+        value: { type: "string", description: "O novo valor. Omita para apenas ler." },
+      },
+    },
+  },
+};
+
 type ToolDefinition = { type: string; function: { name: string; description: string; parameters: Record<string, unknown> } };
 
 export function buildTools(settings: AppSettings): ToolDefinition[] {
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
-  const tools: ToolDefinition[] = [browserActionTool, webSearchTool, requestUserTool, scriptWriteTool, scriptListTool];
+  const tools: ToolDefinition[] = [browserActionTool, webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool];
   if (profile?.capabilities.webFetch) tools.splice(2, 0, webFetchTool);
   return tools;
 }

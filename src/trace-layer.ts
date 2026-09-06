@@ -13,15 +13,20 @@ const TRAVEL_DEADLINE: Record<CursorSpeed, number> = { natural: 450, fast: 220, 
  *
  * Ficam literais aqui porque este arquivo vira CSS dentro de um shadow root na página do
  * usuário, onde não há tokens nem imports para resolver.
+ *
+ * A moldura é uma **linha fina com luz**, não uma faixa larga: a espessura vem do halo — quatro
+ * camadas de sombra da mesma cor, da mais fechada à mais aberta — enquanto o traço em si tem 1px
+ * e o `sweep` que gira ocupa 2px. Uma faixa grossa tapa o conteúdo e parece moldura de foto; o
+ * halo diz "sob controle" sem disputar espaço com a página.
  */
 const STYLE = `
 .border{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity 380ms cubic-bezier(.2,.8,.2,1);z-index:0}
 .border.on{opacity:1}
-.border:before{content:"";position:absolute;inset:0;box-shadow:inset 0 0 34px 10px #58d8cd3a,inset 0 0 120px 30px #58d8cd1c;animation:vela-breathe 3.8s ease-in-out infinite}
-.sweep{position:absolute;inset:0;overflow:hidden;padding:11px;-webkit-mask:linear-gradient(#000,#000) content-box,linear-gradient(#000,#000);-webkit-mask-composite:xor;mask:linear-gradient(#000,#000) content-box,linear-gradient(#000,#000);mask-composite:exclude;filter:drop-shadow(0 0 7px #58d8cdcc) drop-shadow(0 0 20px #58d8cd7a);animation:vela-glow 3.8s ease-in-out infinite}
+.border:before{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 1px #58d8cdd9,inset 0 0 9px #58d8cd8c,inset 0 0 26px #58d8cd47,inset 0 0 70px #58d8cd1f;animation:vela-breathe 3.8s ease-in-out infinite}
+.sweep{position:absolute;inset:0;overflow:hidden;padding:2px;-webkit-mask:linear-gradient(#000,#000) content-box,linear-gradient(#000,#000);-webkit-mask-composite:xor;mask:linear-gradient(#000,#000) content-box,linear-gradient(#000,#000);mask-composite:exclude;filter:drop-shadow(0 0 5px #58d8cd) drop-shadow(0 0 14px #58d8cdaa);animation:vela-glow 3.8s ease-in-out infinite}
 .sweep i{position:absolute;left:50%;top:50%;width:230vmax;height:230vmax;margin:-115vmax;background:conic-gradient(from 0deg,#58d8cdcc 0 46%,#c9fff8 62%,#58d8cdcc 78% 100%);animation:vela-sweep 9s linear infinite}
-.border.waiting:before{box-shadow:inset 0 0 34px 10px #e4b65e3a,inset 0 0 120px 30px #e4b65e1c}
-.border.waiting .sweep{filter:drop-shadow(0 0 7px #e4b65ecc) drop-shadow(0 0 20px #e4b65e7a)}
+.border.waiting:before{box-shadow:inset 0 0 0 1px #e4b65ed9,inset 0 0 9px #e4b65e8c,inset 0 0 26px #e4b65e47,inset 0 0 70px #e4b65e1f}
+.border.waiting .sweep{filter:drop-shadow(0 0 5px #e4b65e) drop-shadow(0 0 14px #e4b65eaa)}
 .border.waiting .sweep i{background:conic-gradient(from 0deg,#e4b65ecc 0 46%,#fff0cc 62%,#e4b65ecc 78% 100%)}
 @keyframes vela-breathe{0%,100%{opacity:.5}50%{opacity:1}}
 @keyframes vela-glow{0%,100%{opacity:.72}50%{opacity:1}}

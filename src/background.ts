@@ -123,7 +123,7 @@ async function publishSession() {
 async function runTurn(text: string) {
   ensureKeepAlive();
   void ensureSession(text).then(publishSession);
-  await agentLoop.submit(text, notifySurfaces);
+  return agentLoop.submit(text, notifySurfaces);
 }
 
 /** Entrada da ponte MCP: um agente de fora descreve o objetivo e a Vela executa no navegador
@@ -136,10 +136,53 @@ async function askAgent(prompt: string): Promise<string> {
   return answer?.content ?? "A tarefa terminou sem resposta em texto.";
 }
 
-async function speakLastAnswer() {
+/**
+ * Fala a resposta do turno que acabou — e só ela.
+ *
+ * Antes isto era "fale a última mensagem do assistente", sem saber se o turno tinha rendido uma.
+ * Quando a fala chegava com a Vela ocupada, o turno era descartado em silêncio e ela **repetia a
+ * resposta anterior**: você perguntava outra coisa e ouvia de novo o que já tinha ouvido.
+ */
+async function speakAnswerAfter(previousId: string | null) {
   const messages = await conversation.all();
   const last = [...messages].reverse().find((item: ChatMessage) => item.role === "assistant" && item.content.trim());
-  if (last) void chrome.runtime.sendMessage({ type: "voice:speak", text: last.content }).catch(() => undefined);
+  if (!last || last.id === previousId) {
+    traceRecord("voice", "nada novo para falar", { from: "background", ok: false, code: "sem_resposta", data: { anterior: previousId } });
+    return;
+  }
+  void chrome.runtime.sendMessage({ type: "voice:speak", text: last.content }).catch(() => undefined);
+}
+
+async function lastAnswerId(): Promise<string | null> {
+  const messages = await conversation.all();
+  return [...messages].reverse().find((item: ChatMessage) => item.role === "assistant" && item.content.trim())?.id ?? null;
+}
+
+/**
+ * Falar por cima é uma instrução nova, não ruído.
+ *
+ * Numa conversa falada não existe "aguarde a vez": se a pessoa fala enquanto a Vela trabalha, é
+ * porque quer corrigir o rumo. O turno em andamento é abortado e o novo entra no lugar — sem
+ * isso, `submit` recusava calado e a fala se perdia inteira.
+ */
+async function speakTurn(text: string) {
+  if (agentLoop.isRunning()) {
+    traceRecord("voice", "interrompi o turno para atender a nova fala", { from: "background", data: { texto: text.slice(0, 200) } });
+    cancelPendingApprovals();
+    agentLoop.abort();
+    void chrome.runtime.sendMessage({ type: "voice:speak-stop" }).catch(() => undefined);
+    // O loop encerra de forma assíncrona — ele ainda está dentro do stream do modelo. Esperar o
+    // fim de verdade evita que `submit` veja `running` e recuse a fala nova.
+    const until = Date.now() + 3000;
+    while (agentLoop.isRunning() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  const previous = await lastAnswerId();
+  const accepted = await runTurn(text);
+  if (!accepted) {
+    traceRecord("voice", "fala descartada: o turno anterior não encerrou", { from: "background", ok: false, code: "ocupada", data: { texto: text.slice(0, 200) } });
+    return;
+  }
+  await speakAnswerAfter(previous);
 }
 
 /** Ler uma resposta em voz alta sobe o runtime de áudio sozinho: não faz sentido exigir que o
@@ -314,7 +357,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
   if (message.type === "voice:error" && message.message) broadcast({ type: "voice:error", message: message.message });
   if (message.type === "voice:transcript" && message.text) {
     const text = message.text;
-    if (voiceMode === "live") { void notifyActiveTab({ type: "pulse:transcript", text }); void runTurn(text).then(speakLastAnswer); }
+    if (voiceMode === "live") { void notifyActiveTab({ type: "pulse:transcript", text }); void speakTurn(text); }
     else broadcast({ type: "voice:transcript", text });
   }
   return false;

@@ -58,6 +58,41 @@ indetectável, que é bem pior.
 
 `selector` continua aceito como alternativa para o que não aparece no snapshot.
 
+### Procurar não é rolar
+
+O retrato tem teto de 150 elementos. Numa página real com um menu de 180 links, o menu consumia
+a cota **inteira** antes de o conteúdo começar — e a agente entrava no único loop que lhe restava:
+rolar, reler, rolar, reler, sem nunca ver o que o usuário estava apontando na tela.
+
+Duas mudanças:
+
+- o corte agora acontece **depois** da ordenação por viewport, não durante a coleta na ordem do
+  documento, e o retrato diz quantos elementos ficaram de fora;
+- existe `find`, que varre o documento inteiro — inclusive o que está fora da tela e dentro de
+  shadow DOM — casando por nome acessível, texto e atributos, sem acento e sem caixa. Devolve
+  refs prontos e prefere o elemento **mais específico**: se um link e o `<div>` que o contém
+  casam, o link é a resposta, porque clicar no contêiner acerta o alvo errado.
+
+Medido numa página com 180 links de menu e uma lista de contribuições abaixo: o retrato não
+continha a palavra procurada; `find` devolveu o item certo em uma chamada, e o clique no ref
+funcionou.
+
+### As abas da sessão são dela; as outras são do usuário
+
+`tab_manage` lista, foca e fecha abas — **só as do grupo "Vela"**. Um id de fora é recusado com
+mensagem, não ignorado: recusa silenciosa ensina o modelo a tentar de novo, e fechar a aba errada
+não tem desfazer.
+
+### Ela mexe nas próprias configurações, dentro de uma lista branca
+
+"Troque para a voz do Cadu" morria em "abra Configurações → Voz" — pior ainda pela voz, que é
+onde o pedido nasce. `vela_settings` lê e escreve voz, visual, cursor, moldura, tema e teto de
+etapas.
+
+Fora da lista ficam endereço de provider, chaves e **autonomia**. As duas primeiras porque mudá-las
+desliga a Vela ou manda os dados do usuário para outro lugar; a autonomia porque é o freio que
+autoriza a agente a agir, e quem afrouxa o freio não pode ser quem ele segura.
+
 ### Toda ação devolve o que realmente aconteceu
 
 `ActionResult` é `{ok:true, summary, …}` ou `{ok:false, code, summary}`, com códigos como
@@ -342,6 +377,17 @@ aberto a presença da Vela já está ali; uma segunda superfície flutuando por 
 pessoa está lendo é intrusão. Ele continua valendo para quem trabalha com a barra lateral
 fechada, e o interruptor fica em Configurações → Voz.
 
+### Falar por cima é instrução, não ruído
+
+Numa conversa falada não existe "aguarde a vez". Mas `submit` recusava calado quando o loop já
+estava rodando, e o caminho da voz chamava "fale a última resposta" logo depois — então falar
+enquanto ela trabalhava **descartava a sua frase e repetia a resposta anterior**. Você perguntava
+outra coisa e ouvia de novo o que já tinha ouvido.
+
+Agora a fala nova aborta o turno em andamento, para a síntese, espera o loop encerrar de verdade
+e entra no lugar. E a resposta só é falada se o turno rendeu uma resposta **nova** — comparando o
+id da última mensagem antes e depois.
+
 ### A voz é escolhida por velocidade, não por timbre
 
 O servidor informa a razão entre tempo de geração e duração do áudio. Acima de 1 a fala chega
@@ -388,6 +434,14 @@ contexto WebGL sairia caro pelo que se vê. Shader fica para o painel, onde o cu
 
 `ShaderVisual.ok` diz se o programa compilou, para o chamador cair no renderer 2D em vez de
 mostrar um retângulo vazio; `webglcontextlost` é tratado e o contexto se refaz sozinho.
+
+### Classe de estado é do componente, não do app
+
+`.state-speaking { box-shadow: 0 0 0 5px … }` era resíduo do orb feito em CSS puro, escrito sem
+prefixo. Quando o orb virou canvas, a regra continuou pegando **qualquer** elemento com aquela
+classe — o `<span>` do canvas e o chip de status ganharam cada um um quadrado luminoso em volta,
+porque sombra em caixa sem `border-radius` é retângulo. Regra de estado agora nasce presa ao
+componente que a define.
 
 ### A borda viva
 

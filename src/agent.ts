@@ -5,9 +5,9 @@ import { approvalKey, describeAction, isRisky, requestApproval } from "./approva
 import { span } from "./trace";
 import { adoptTab } from "./session";
 
-const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "scroll", "wait"];
-const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool"];
-const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000, pageTool: 20_000 };
+const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait"];
+const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find"];
+const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000, pageTool: 20_000 };
 
 export const isReadOnly = (action: BrowserAction) => READ_ONLY.includes(action.type);
 

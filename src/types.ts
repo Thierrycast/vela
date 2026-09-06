@@ -71,6 +71,7 @@ export type BrowserAction =
   | { type: "keyPress"; key: string; ref?: string }
   | { type: "scroll"; deltaX?: number; deltaY?: number }
   | { type: "extractPage"; mode?: "outline" | "text"; offset?: number }
+  | { type: "find"; query?: string; selector?: string; limit?: number }
   | { type: "pageTool"; name: string; arguments?: unknown }
   | { type: "wait"; milliseconds: number };
 

@@ -55,8 +55,9 @@ async function compactSnapshots() {
   }
 }
 
-export async function submit(text: string, emit: Emit) {
-  if (running) return;
+/** Devolve se o turno foi aceito: quem chama pela voz precisa saber que a fala se perdeu. */
+export async function submit(text: string, emit: Emit): Promise<boolean> {
+  if (running) return false;
   const settings = await loadSettings();
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
   const maxRounds = Math.min(30, Math.max(2, Math.round(settings.agent.maxRounds || 8)));
@@ -116,6 +117,9 @@ export async function submit(text: string, emit: Emit) {
       if (failed || controller.signal.aborted) break;
 
       if (!calls.length) {
+        // A resposta final inteira entra na trilha: é o lado "saída do modelo" do material de
+        // ajuste fino, e sem ela sobram medições sem o que foi de fato dito.
+        traceRecord("model.text", "resposta ao usuário", { ok: true, data: { texto: assistant.content, chars: assistant.content.length, round } });
         await conversation.patch(assistant.id, { status: "complete" });
         emit({ type: "chat:patch", id: assistant.id, patch: { status: "complete" } });
         break;
@@ -178,4 +182,5 @@ export async function submit(text: string, emit: Emit) {
     await conversation.flush();
     emit({ type: "chat:running", running: false });
   }
+  return true;
 }

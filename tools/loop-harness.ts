@@ -46,15 +46,23 @@ function fakePage(): (message: { type: string; action?: BrowserAction }, frameId
 
 function installChrome(store: Record<string, unknown>, page: ReturnType<typeof fakePage>) {
   const navListeners: Array<(details: { tabId: number; frameId: number; url: string }) => void> = [];
+  const sessionStore: Record<string, unknown> = { "vela:session": { groupId: 1, title: "teste", tabIds: [7] } };
   (globalThis as Record<string, unknown>).chrome = {
     storage: {
       local: { get: async (key: string) => (key in store ? { [key]: store[key] } : {}), set: async (values: Record<string, unknown>) => { Object.assign(store, values); }, remove: async (key: string) => { delete store[key]; } },
-      session: { get: async () => ({}), set: async () => undefined, remove: async () => undefined },
+      // A sessão precisa existir de verdade: sem ela, tab_manage recusa por "não há grupo" e o
+      // teste não chega a exercitar a regra que importa — fechar aba de fora é proibido.
+      session: {
+        get: async (key: string) => (key in sessionStore ? { [key]: sessionStore[key] } : {}),
+        set: async (values: Record<string, unknown>) => { Object.assign(sessionStore, values); },
+        remove: async (key: string) => { delete sessionStore[key]; },
+      },
       onChanged: { addListener: () => undefined, removeListener: () => undefined },
     },
     notifications: { create: async () => "id" },
     tabs: {
       query: async () => [{ id: 7, url: "https://exemplo.com", title: "Exemplo", active: true }],
+      remove: async () => undefined,
       update: async () => { setTimeout(() => navListeners.forEach((fn) => fn({ tabId: 7, frameId: 0, url: "https://destino.com" })), 10); },
       create: async () => ({ id: 8 }),
       get: async () => ({ id: 7, url: "https://exemplo.com" }),
@@ -137,7 +145,25 @@ await run("iframes com refs por frame", [
   [delta("Feito."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
 
-// 6. O system prompt e o bloco de estado chegam ao provider?
+// 6. Fechar aba fora do grupo da Vela precisa ser recusado, não ignorado.
+await run("tab_manage só alcança o grupo da Vela", [
+  [delta("Fechando."), toolCall("c1", "tab_manage", { op: "close", tabIds: [99] }), DONE],
+  [delta("Não posso fechar essa."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// 7. Trocar a voz pela conversa, sem mandar o usuário abrir as configurações.
+await run("vela_settings troca o visual", [
+  [delta("Trocando."), toolCall("c1", "vela_settings", { field: "visual", value: "mesh-field" }), DONE],
+  [delta("Pronto, troquei."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// 8. Campo fora da lista branca é recusado com a lista do que existe.
+await run("vela_settings recusa campo fora da lista", [
+  [delta("Mudando a chave."), toolCall("c1", "vela_settings", { field: "apiKey", value: "roubada" }), DONE],
+  [delta("Não consigo mexer nisso."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// 9. O system prompt e o bloco de estado chegam ao provider?
 const body = JSON.parse(wire[0]) as { messages: Array<{ role: string; content: string }> };
 console.log("\n=== prompt enviado ===");
 console.log("primeira mensagem:", body.messages[0].role, "|", body.messages[0].content.slice(0, 80).replace(/\n/g, " "), "…");

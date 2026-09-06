@@ -158,6 +158,7 @@ function App() {
 
   const toggleLive = () => {
     const starting = voiceState === "idle";
+    trace(starting ? "ligou o Live Voice" : "desligou o Live Voice", { visual: settings.voice.visual, voz: settings.voice.speechVoice });
     liveRef.current = starting;
     if (starting) { setVoiceFocused(true); setLiveTranscript(""); setVoiceMuted(false); }
     post({ type: starting ? "voice:start-live" : "voice:stop-live" });
@@ -167,6 +168,7 @@ function App() {
     });
   };
   const toggleDictation = () => {
+    trace(dictating ? "parou o ditado" : "começou o ditado");
     if (dictating) { post({ type: "voice:stop-live" }); setDictating(false); return; }
     post({ type: "voice:start-dictation" });
     setDictating(true);
@@ -181,7 +183,7 @@ function App() {
   /** Editar, reenviar e gerar outra resposta são a mesma operação: a linha do tempo volta a um
    *  ponto e segue de lá. Anexar correções ao fim confundiria o modelo e o histórico. */
   const rewind = (id: string, text?: string) => { trace(text ? "editou e reenviou" : "reenviou", { id }); post({ type: "chat:rewind", id, text }); setEditingId(null); };
-  const regenerate = (assistantId: string) => post({ type: "chat:rewind", id: assistantId });
+  const regenerate = (assistantId: string) => { trace("pediu outra resposta", { id: assistantId }); return post({ type: "chat:rewind", id: assistantId }); };
 
   const attachFile = async (file: File) => {
     const text = (await file.text()).slice(0, ATTACHMENT_LIMIT);

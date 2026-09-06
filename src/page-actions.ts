@@ -1,5 +1,5 @@
 import { ActionResult, BrowserAction } from "./types";
-import { accessibleName, captureSnapshot, invalidateSnapshot, resolveRef, roleOf } from "./page-snapshot";
+import { accessibleName, captureSnapshot, findElements, invalidateSnapshot, resolveRef, roleOf } from "./page-snapshot";
 import { callPageTool, describePageTools, listPageTools } from "./page-tools";
 
 function failure(code: Extract<ActionResult, { ok: false }>["code"], summary: string): ActionResult { return { ok: false, code, summary }; }
@@ -105,6 +105,18 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
     const content = snapshot.content + describePageTools(pageTools);
     const extra = pageTools.length ? ` A página oferece ${pageTools.length} ferramenta(s) própria(s).` : "";
     return { ok: true, summary: `Página lida: ${snapshot.elementCount} elementos interativos.${extra}`, content, snapshotId: snapshot.snapshotId, truncated: snapshot.truncated, nextOffset: snapshot.nextOffset, url: snapshot.url, title: snapshot.title };
+  }
+
+  if (action.type === "find") {
+    if (!action.query?.trim() && !action.selector?.trim()) return failure("unsupported", "Informe query (texto a procurar) ou selector.");
+    const result = findElements({ query: action.query, selector: action.selector, limit: action.limit });
+    if (!result.total) return failure("element_not_found", `Nada casa com ${action.query ? `“${action.query}”` : action.selector} nesta página.`);
+    return {
+      ok: true,
+      summary: `Achei ${result.total} correspondência(s)${result.shown < result.total ? `, mostrando as ${result.shown} melhores` : ""}.`,
+      content: result.content,
+      snapshotId: result.snapshotId,
+    };
   }
 
   if (action.type === "pageTool") {

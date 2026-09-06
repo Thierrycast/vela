@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Pause, Play, Trash2 } from "lucide-react";
+import { Download, Flag, Pause, Play, Trash2 } from "lucide-react";
 import { TraceEvent, TraceKind, toJsonl } from "./trace";
 import { useTheme } from "./use-settings";
 import { defaultSettings } from "./types";
 import "./tokens.css";
 import "./debug.css";
 
-const KINDS: TraceKind[] = ["turn", "user.input", "model.request", "tool.call", "action", "page.read", "navigation", "voice", "bridge", "ui", "error"];
+const KINDS: TraceKind[] = ["turn", "user.input", "model.request", "model.text", "tool.call", "action", "page.read", "navigation", "voice", "bridge", "ui", "error"];
 
 const COLOR: Partial<Record<TraceKind, string>> = {
   turn: "roxo", "user.input": "azul", "model.request": "violeta", "tool.call": "ciano",
@@ -87,6 +87,19 @@ function DebugPanel() {
 
   const limpar = () => { void chrome.runtime.sendMessage({ type: "trace:clear" }); setEvents([]); setSelected(null); };
 
+  /**
+   * Um marco na trilha antes de cada teste.
+   *
+   * Numa sessão de depuração a dois, a trilha vira uma fita longa em que tudo se parece. Uma
+   * linha dizendo "agora vou testar X" separa os casos e é o que permite ler o arquivo depois
+   * sem ter que adivinhar onde um teste terminou e o outro começou.
+   */
+  const marcar = () => {
+    const nota = window.prompt("O que você vai testar agora?");
+    if (!nota?.trim()) return;
+    void chrome.runtime.sendMessage({ type: "trace:push", entry: { kind: "ui", label: `— ${nota.trim()} —`, from: "marco", data: { marco: true } } });
+  };
+
   const failures = events.filter((event) => event.ok === false).length;
 
   return <main className="debug">
@@ -103,6 +116,7 @@ function DebugPanel() {
           {live ? <Pause size={13} /> : <Play size={13} />} {live ? "Ao vivo" : "Pausado"}
         </button>
         <button className={onlyFailures ? "on" : ""} onClick={() => setOnlyFailures(!onlyFailures)}>Só falhas</button>
+        <button onClick={marcar} title="Marca o início de um teste na trilha"><Flag size={13} /> Marcar</button>
         <button onClick={exportar}><Download size={13} /> JSONL</button>
         <button onClick={limpar}><Trash2 size={13} /> Limpar</button>
       </div>

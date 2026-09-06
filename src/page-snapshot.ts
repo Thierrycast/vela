@@ -1,4 +1,6 @@
 const MAX_NODES = 150;
+/** Teto da varredura, para não passear por uma página infinita — o corte de verdade é o de cima. */
+const HARD_LIMIT = 1200;
 const MAX_NAME = 100;
 const DEFAULT_BUDGET = 12000;
 
@@ -128,7 +130,10 @@ function collect(root: Document | ShadowRoot, found: Element[]) {
     if (node instanceof Element) {
       if (node.hasAttribute("data-vela-ui")) { node = walker.nextSibling() as Element | null; continue; }
       if (node.shadowRoot) collect(node.shadowRoot, found);
-      if (found.length < MAX_NODES && isInteractive(node) && isVisible(node)) found.push(node);
+      // O corte acontece **depois** da ordenação por viewport, não aqui: cortando na ordem do
+      // documento, um menu de navegação com cem links consumia a cota sozinho e o conteúdo que
+      // a pessoa quer nunca aparecia no retrato.
+      if (found.length < HARD_LIMIT && isInteractive(node) && isVisible(node)) found.push(node);
     }
     node = walker.nextNode() as Element | null;
   }
@@ -155,6 +160,93 @@ function readableText() {
   return chunks.join(" ").replace(/\s{2,}/g, " ");
 }
 
+/** Sem acento e em minúsculas: quem dita "recent contributions" não digita o acento certo, e a
+ *  página raramente escreve do jeito que a pessoa falou. */
+function fold(value: string) {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function everyElement(root: Document | ShadowRoot, found: Element[], limit: number) {
+  const walker = root.ownerDocument
+    ? document.createTreeWalker(root as unknown as Node, NodeFilter.SHOW_ELEMENT)
+    : document.createTreeWalker((root as Document).body ?? root, NodeFilter.SHOW_ELEMENT);
+  let node = walker.currentNode as Element | null;
+  while (node && found.length < limit) {
+    if (node instanceof Element) {
+      if (node.hasAttribute("data-vela-ui")) { node = walker.nextSibling() as Element | null; continue; }
+      if (node.shadowRoot) everyElement(node.shadowRoot, found, limit);
+      found.push(node);
+    }
+    node = walker.nextNode() as Element | null;
+  }
+}
+
+export type FindOptions = { query?: string; selector?: string; limit?: number };
+
+/**
+ * Procura na página inteira, sem rolar e sem depender do retrato.
+ *
+ * O retrato tem teto de elementos e um menu de navegação come esse teto sozinho: o que a pessoa
+ * pediu podia simplesmente não estar lá, e a saída era rolar às cegas relendo a página — que foi
+ * exatamente o loop observado. Aqui a varredura é do documento todo, incluindo shadow DOM e o
+ * que está fora do viewport, e o resultado já vem com refs válidos para clicar.
+ *
+ * Prefere o elemento **mais específico**: se um link e o `<div>` que o contém casam, o link é a
+ * resposta — clicar no contêiner acerta o alvo errado com frequência.
+ */
+export function findElements(options: FindOptions) {
+  const { query = "", selector, limit = 20 } = options;
+  const needle = fold(query);
+  const pool: Element[] = [];
+  if (selector) {
+    try { pool.push(...document.querySelectorAll(selector)); } catch { /* seletor inválido cai como zero resultados */ }
+  } else {
+    everyElement(document, pool, 12_000);
+  }
+
+  const scored: Array<{ element: Element; score: number; text: string }> = [];
+  for (const element of pool) {
+    if (!isVisible(element)) continue;
+    const name = accessibleName(element);
+    const text = (element.textContent ?? "").replace(/\s+/g, " ").trim();
+    const attributes = [element.getAttribute("aria-label"), element.getAttribute("title"), element.getAttribute("alt"), element.getAttribute("placeholder"), element.getAttribute("href")].filter(Boolean).join(" ");
+    if (needle) {
+      const inName = fold(name).includes(needle);
+      const inText = fold(text).includes(needle);
+      const inAttributes = fold(attributes).includes(needle);
+      if (!inName && !inText && !inAttributes) continue;
+      // Casar pelo nome acessível vale mais que casar por um texto que só passa por dentro.
+      const exact = fold(name) === needle ? 40 : 0;
+      const size = Math.min(20, Math.round(2000 / Math.max(20, text.length)));
+      scored.push({ element, score: exact + (inName ? 22 : 0) + (inAttributes ? 8 : 0) + size + (isInteractive(element) ? 14 : 0), text: name || text });
+    } else {
+      scored.push({ element, score: isInteractive(element) ? 10 : 0, text: name || text });
+    }
+  }
+
+  // Contêiner que só casa porque um descendente casou não é resposta.
+  const specific = scored.filter((item) => !scored.some((other) => other !== item && item.element.contains(other.element)));
+  specific.sort((first, second) => second.score - first.score);
+  const winners = specific.slice(0, limit);
+
+  snapshotId += 1;
+  nodes = winners.map((item) => item.element);
+  const lines = winners.map((item, index) => {
+    const rect = item.element.getBoundingClientRect();
+    const place = rect.bottom < 0 ? "acima do viewport" : rect.top > innerHeight ? "abaixo do viewport" : "visível";
+    const href = item.element.getAttribute("href");
+    const destino = href ? ` href="${href.slice(0, 80)}"` : "";
+    return `[ref_${snapshotId}_${index}] <${roleOf(item.element)}> ${item.text.slice(0, 120)}${destino} — ${place}`;
+  });
+
+  return {
+    content: lines.join("\n"),
+    snapshotId,
+    total: specific.length,
+    shown: winners.length,
+  };
+}
+
 export type SnapshotOptions = { mode?: "outline" | "text"; offset?: number; budget?: number };
 
 export function captureSnapshot(options: SnapshotOptions = {}) {
@@ -164,7 +256,7 @@ export function captureSnapshot(options: SnapshotOptions = {}) {
   collect(document, found);
   const viewport = found.filter((element) => { const rect = element.getBoundingClientRect(); return rect.bottom > 0 && rect.top < innerHeight; });
   const rest = found.filter((element) => !viewport.includes(element));
-  nodes = [...viewport, ...rest];
+  nodes = [...viewport, ...rest].slice(0, MAX_NODES);
 
   const sections = [
     `url: ${location.href}`,
@@ -176,6 +268,7 @@ export function captureSnapshot(options: SnapshotOptions = {}) {
     "# Elementos interativos",
     ...nodes.map((element, index) => describe(element, index)),
   ];
+  if (found.length > nodes.length) sections.push(`[${found.length - nodes.length} elementos não couberam neste retrato — use find com o texto do que você procura em vez de rolar a página]`);
   if (mode === "text") { sections.push("", "# Texto da página", readableText()); }
 
   const full = sections.join("\n");

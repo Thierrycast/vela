@@ -6,6 +6,9 @@ import { AmbientEdgeVisual, VISUALS } from "./voice-visuals";
 import { VoiceVisual, shadersAvailable } from "./gl-visual";
 import { MotionState } from "./motion-tokens";
 import { VoiceVisualMetrics } from "./audio-metrics";
+import { traceFrom } from "./trace-client";
+
+const trace = traceFrom("painel");
 
 export type VelaState = MotionState;
 
@@ -37,7 +40,11 @@ export function VelaOrb({ state = "idle", size = 34, metrics, visual }: { state?
         canvas = build();
       }
     }
+    const reserva = !renderer;
     if (!renderer) renderer = new VelaOrbRenderer(canvas, { reducedMotion: reduced });
+    // Qual renderer realmente subiu. Sem isto, "o orb não reage" é indistinguível de "o shader
+    // não compilou e caiu na reserva 2D", que se parecem na tela e têm causas opostas.
+    trace("ui", "orb montado", { data: { visual: visual ?? "(nenhum)", size, reserva, webgl: entry?.webgl ?? false, shaders: shadersAvailable() } });
 
     const active = renderer;
     active.start();

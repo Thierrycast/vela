@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { Mic, MicOff, X } from "lucide-react";
 import { VelaOrb, VelaState } from "./vela-components";
 import { VoiceVisualMetrics } from "./audio-metrics";
+import { traceFrom } from "./trace-client";
+
+const trace = traceFrom("painel");
 
 /**
  * O palco da voz dentro do painel.
@@ -28,11 +31,22 @@ export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, 
   // por segundo pelo estado do painel, o que re-renderizaria a conversa inteira a cada uma.
   const [metrics, setMetrics] = useState<VoiceVisualMetrics | undefined>(undefined);
   useEffect(() => {
+    // Um resumo periódico do que chegou: "o orb não reage" pode ser telemetria que não chega ou
+    // renderer que ignora o sinal, e só o contador separa os dois.
+    let recebidas = 0;
+    let pico = 0;
     const listener = (message: { type?: string; telemetry?: { metrics?: VoiceVisualMetrics } }) => {
-      if (message?.type === "voice:telemetry" && message.telemetry?.metrics) setMetrics(message.telemetry.metrics);
+      if (message?.type !== "voice:telemetry" || !message.telemetry?.metrics) return;
+      recebidas += 1;
+      pico = Math.max(pico, message.telemetry.metrics.energy);
+      setMetrics(message.telemetry.metrics);
     };
     chrome.runtime?.onMessage.addListener(listener);
-    return () => chrome.runtime?.onMessage.removeListener(listener);
+    const resumo = setInterval(() => {
+      trace("ui", "telemetria no palco", { data: { amostras: recebidas, pico: Number(pico.toFixed(3)) } });
+      recebidas = 0; pico = 0;
+    }, 3000);
+    return () => { chrome.runtime?.onMessage.removeListener(listener); clearInterval(resumo); };
   }, []);
 
   const label = state === "listening" ? "Ouvindo você" : state === "speaking" ? "Falando" : state === "thinking" ? "Pensando" : "Ao vivo";

@@ -70,6 +70,20 @@ e usada; headless só quando a medição é automatizada e não há nada para ol
 Ao encerrar, matar **só o processo daquela porta** (`netstat -ano` → `taskkill /PID`), nunca
 `taskkill /IM chrome.exe`, que derruba o navegador pessoal junto.
 
+## O que a Vela sabe fazer sozinha
+
+**Achar na página.** Quando ela sabe o texto do que procura, chama `find` em vez de rolar: a
+varredura pega o documento inteiro, incluindo o que está fora da tela e dentro de shadow DOM, e
+devolve o elemento já pronto para clicar. Rolar ficou sendo o que é — ler conteúdo novo, não
+procurar.
+
+**Governar as abas dela.** `tab_manage` lista, foca e fecha as abas do grupo "Vela". Peça "fecha
+as abas que você abriu" e ela fecha; abas suas, fora do grupo, ela recusa.
+
+**Mudar as próprias preferências.** "Troca para a voz do Cadu", "usa o mesh field", "desliga o
+cursor", "aumenta o limite de etapas" — `vela_settings` faz na hora, sem mandar você abrir a tela
+de configurações. Endereço de servidor, chaves e a autonomia ficam fora do alcance dela.
+
 ## Scripts do usuário
 
 Em Configurações → Scripts fica a vitrine dos userscripts deste perfil. Cada cartão mostra nome,
@@ -183,6 +197,16 @@ anexada num relatório.
 **Visor em tempo real:** Configurações → Avançado → *Abrir a trilha*, ou `debug.html` na
 extensão. Os eventos aparecem enquanto acontecem, agrupados por turno, com duração ao lado,
 filtro por tipo, busca no payload e exportação em JSONL.
+
+O botão **Marcar** insere uma linha na trilha com o que você vai testar agora. Numa sessão de
+depuração a dois é o que separa um caso do outro: sem o marco, o arquivo exportado é uma fita
+longa onde tudo se parece.
+
+A voz é gravada em detalhe, porque é onde mais quebra: microfone aberto ou negado, cada início e
+fim de fala com a duração, a transcrição com o texto e o tempo, a síntese com voz e modo, o sinal
+do microfone resumido a cada dois segundos (pico e média) e quantas amostras de telemetria o orb
+recebeu. "O orb não reage" tem duas causas opostas — sinal que não chega ou renderer que ignora —
+e os dois contadores separam uma da outra.
 
 **Dirigir a Vela de fora**, como se fosse uma pessoa:
 
