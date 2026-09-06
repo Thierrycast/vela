@@ -34,6 +34,7 @@ export function normalizeSettings(stored: Partial<AppSettings> | undefined): App
     brand: { ...defaultSettings.brand, ...(stored?.brand ?? {}) },
     agent: { ...defaultSettings.agent, ...(stored?.agent ?? {}) },
     context: { ...defaultSettings.context, ...(stored?.context ?? {}) },
+    bridge: { ...defaultSettings.bridge, ...(stored?.bridge ?? {}) },
     voice: { ...defaultSettings.voice, ...(stored?.voice ?? {}) },
     providers: stored?.providers?.length ? stored.providers : defaultSettings.providers,
   };

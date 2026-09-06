@@ -9,17 +9,24 @@ import { ApprovalDecision, cancelPendingApprovals, clearSessionApprovals, config
 import * as agentLoop from "./agent-loop";
 import * as conversation from "./conversation";
 import { injectIntoActiveTab, syncContentScriptRegistration } from "./injection";
+import { bridgeStatus, configureBridge, onKeepAliveAlarm, syncBridge } from "./bridge";
 import { SETTINGS_KEY } from "./storage";
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   void syncContentScriptRegistration();
+  void syncBridge();
 });
-chrome.runtime.onStartup.addListener(() => { void syncContentScriptRegistration(); });
+chrome.runtime.onStartup.addListener(() => { void syncContentScriptRegistration(); void syncBridge(); });
+chrome.alarms?.onAlarm.addListener((alarm) => onKeepAliveAlarm(alarm.name));
 chrome.commands?.onCommand.addListener((command, tab) => {
   if (command === "toggle-side-panel" && tab?.windowId !== undefined) void chrome.sidePanel.open({ windowId: tab.windowId });
 });
-chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes[SETTINGS_KEY]) void syncContentScriptRegistration(); });
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[SETTINGS_KEY]) return;
+  void syncContentScriptRegistration();
+  void syncBridge();
+});
 
 const sidecarPorts = new Set<chrome.runtime.Port>();
 const broadcast = (message: SidecarInbound) => {
@@ -38,6 +45,13 @@ const notifySurfaces = (message: SidecarInbound) => {
 };
 
 configureApprovals(notifySurfaces, () => sidecarPorts.size > 0 || voiceMode !== "off");
+
+/** Um agente externo não é superfície de aprovação: ele não consegue responder ao cartão. Por isso
+ *  a ponte só emite eventos para o painel, e o gate continua exigindo painel ou voz aberta. */
+configureBridge({
+  emit: (event) => notifySurfaces({ type: "chat:event", event }),
+  ask: askAgent,
+});
 
 let keepAliveTimer = 0;
 function ensureKeepAlive() {
@@ -99,6 +113,16 @@ async function runTurn(text: string) {
   ensureKeepAlive();
   void ensureSession(text).then(publishSession);
   await agentLoop.submit(text, notifySurfaces);
+}
+
+/** Entrada da ponte MCP: um agente de fora descreve o objetivo e a Vela executa no navegador
+ *  logado do usuário, com o mesmo loop, a mesma memória e o mesmo gate de autonomia. */
+async function askAgent(prompt: string): Promise<string> {
+  if (agentLoop.isRunning()) return "ERRO [falha] A Vela já está executando outra tarefa. Tente de novo quando ela terminar.";
+  await runTurn(prompt);
+  const messages = await conversation.all();
+  const answer = [...messages].reverse().find((item: ChatMessage) => item.role === "assistant" && item.content.trim());
+  return answer?.content ?? "A tarefa terminou sem resposta em texto.";
 }
 
 async function speakLastAnswer() {
@@ -195,6 +219,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
     void runLensAction({ intent: (message.intent ?? "context") as LensIntent, text: message.text, url: message.url ?? "", title: message.title ?? "" });
   }
   if (message.type === "agent:pause") { cancelPendingApprovals(); agentLoop.abort(); }
+  if (message.type === "bridge:status") { sendResponse(bridgeStatus()); return true; }
   if (message.type === "script:run" && message.scriptId && message.tabId !== undefined) {
     void runUserScript(message.scriptId, message.tabId)
       .then((result) => sendResponse({ ok: true, result }))

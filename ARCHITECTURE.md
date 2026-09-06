@@ -214,6 +214,50 @@ o modelo criar e reescrever esses mesmos textos — mas **um script salvo nasce 
 Vela nunca o executa: quem clica em Executar é o usuário. `background.ts` ainda confere o
 `@match` contra a URL da aba antes de rodar.
 
+## Ponte MCP: HTTP com long-polling, não WebSocket
+
+A Onda 7 expõe a Vela como servidor MCP para agentes de fora. Uma extensão não pode ser servidor
+MCP sozinha — não abre socket nem tem stdio — então existe um processo companheiro,
+`bridge/vela-bridge.mjs`, que é servidor MCP por stdio para o agente e servidor HTTP em
+`127.0.0.1` para a extensão.
+
+O plano original previa WebSocket. Dois fatos mudaram a escolha:
+
+- O CSP da extensão libera `connect-src http://127.0.0.1:*`, mas **não** `ws://`. WebSocket
+  exigiria mexer no CSP.
+- Node não traz servidor WebSocket, só cliente. Seria a dependência `ws` num processo que hoje
+  não tem nenhuma — ou 80 linhas de framing e handshake escritos à mão.
+
+Long-polling resolve os dois: `node:http` puro, CSP intacto. A extensão é sempre quem inicia a
+conexão; um `POST /poll` fica pendurado até 25 s esperando comando.
+
+**A latência não vem do ciclo de 25 s.** Quando um comando termina, `bridge.ts` aborta o poll em
+curso para entregar o resultado imediatamente — sem isso, um clique de 200 ms só chegaria ao
+agente no fim do ciclo. Medido de ponta a ponta: 6 ms.
+
+### O que impede um processo qualquer de dirigir o navegador
+
+Token gerado pela extensão, comparado em tempo constante (`timingSafeEqual`), e escuta apenas em
+`127.0.0.1`. Sem isso, um endpoint local sem autenticação daria a qualquer processo da máquina o
+navegador logado do usuário — é a mesma regra que o CLAUDE.md global impõe à porta 9222 do CDP.
+
+### O agente externo não é superfície de aprovação
+
+`vela_act` passa pelo mesmo `runToolCall` da conversa, então o gate de autonomia continua
+valendo. E o predicado de `configureApprovals` **não** conta a ponte: um agente de fora não tem
+como responder ao cartão de aprovação. Em modo Assistir sem painel aberto, `requestApproval`
+devolve `unattended` e a ação é recusada — o contrário seria uma porta lateral para furar o
+próprio gate.
+
+A ponte emite os eventos no feed do painel ("Agente externo agiu na página") para que o usuário
+veja o que está sendo feito em nome dele.
+
+### Sobrevivência do service worker
+
+Um `POST` pendente segura o worker, mas 30 s ociosos ainda o matam entre ciclos. `chrome.alarms`
+de 1 minuto acorda e reata (permissão `alarms` no manifest). Queda do processo local vira recuo
+progressivo até 20 s, com o estado visível em Configurações → Ponte MCP.
+
 ## Opções → Avançado
 
 Além do diagnóstico de ações, a seção reúne o que só faz sentido quando algo dá errado ou muda
@@ -248,7 +292,10 @@ Registradas para decisão, não esquecidas:
 3. **Aprovação com o painel fechado** só aparece se o Live Voice estiver ligado (é o Pulse que
    a mostra). Sem nenhuma das duas superfícies, a ação é recusada com `unattended`.
 4. ~~**Renomear a tarefa**~~ — resolvido: o título na topbar é editável.
-5. **Modo claro nunca foi verificado visualmente** — os tokens existem, o olhar não.
+5. ~~**Modo claro nunca foi verificado visualmente**~~ — resolvido: conferido no preview e na
+   extensão real.
+8. **A ponte MCP não tem descoberta automática de porta** — se 8792 estiver ocupada, o processo
+   avisa e sai, e a porta precisa ser trocada nos dois lados à mão.
 6. ~~**Endpoints de áudio não confirmados** — dependem da sondagem com a chave real.
 7. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
 

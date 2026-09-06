@@ -12,6 +12,10 @@ export default tseslint.config(
     languageOptions: { globals: { AudioWorkletProcessor: "readonly", registerProcessor: "readonly", sampleRate: "readonly", currentTime: "readonly" } },
   },
   {
+    files: ["bridge/**/*.mjs"],
+    languageOptions: { ecmaVersion: 2022, sourceType: "module", globals: globals.node },
+  },
+  {
     files: ["src/**/*.{ts,tsx}"],
     languageOptions: { ecmaVersion: 2022, globals: { ...globals.browser, chrome: "readonly" } },
     plugins: { "react-hooks": reactHooks },

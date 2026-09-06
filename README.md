@@ -80,6 +80,23 @@ digita. O formato é o do Tampermonkey — o bloco `==UserScript==` no topo do c
 A Vela cria e reescreve esses scripts a pedido (`script_write`), mas **nunca os executa**: um
 script salvo nasce desativado, e rodar é sempre um clique seu em Executar na aba atual.
 
+## Ponte MCP: outros agentes usando a Vela
+
+Configurações → Ponte MCP expõe a Vela como servidor MCP. Codex, Claude Code e afins passam a
+poder ler a página aberta, agir nela, buscar na web e **delegar uma tarefa inteira** ao modelo
+que você configurou aqui, com o seu Chrome logado como contexto.
+
+A tela gera o token, monta o trecho de configuração pronto para colar e mostra o estado da
+conexão. Os detalhes — ferramentas expostas, formato dos refs e as garantias de segurança —
+estão em [bridge/README.md](bridge/README.md).
+
+```bash
+npm run bridge -- --token=... # só para depurar; o normal é o agente subir o processo
+```
+
+O modo de autonomia vale igual para o agente de fora: em Observar ele só lê, e em Assistir cada
+ação espera aprovação no painel — sem painel aberto, a ação é recusada.
+
 ## Backup das configurações
 
 Configurações → Avançado exporta preferências, providers e scripts num JSON. **A chave de API

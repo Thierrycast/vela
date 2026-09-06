@@ -14,3 +14,12 @@
 .maintenance-notice.ok{border-left-color:var(--signal);color:var(--text-secondary)}
 .maintenance-notice.bad{border-left-color:var(--danger);color:var(--danger)}
 @media(prefers-reduced-motion:reduce){.storage-slot{transition:none}}
+.snippet{margin:14px 0 0;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden}
+.snippet-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 13px;border-bottom:1px solid var(--border)}
+.snippet-head strong{font-size:13px;font-weight:600}
+.snippet-head small{display:block;color:var(--text-muted);font-size:11px;margin-top:3px}
+.snippet pre{margin:0;padding:13px;overflow-x:auto;font:11px/1.6 var(--font-mono);color:var(--text-secondary);white-space:pre}
+.bridge-warning{margin:20px 0 0;padding:12px 14px;border:1px solid color-mix(in srgb,var(--warning) 40%,var(--border));border-left-width:3px;border-radius:8px;background:var(--surface);color:var(--text-secondary);font-size:12px;line-height:1.55}
+.bridge-warning strong{color:var(--text-primary);font-weight:600}
+.setting-control .toggle{margin-left:12px}
+.setting-control input[readonly]{color:var(--text-muted)}

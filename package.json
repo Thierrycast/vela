@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "harness": "vite build --config tools/vite.harness.config.ts && node tools/out/harness.mjs",
-    "ui": "vite --config vite.preview.config.ts"
+    "ui": "vite --config vite.preview.config.ts",
+    "bridge": "node bridge/vela-bridge.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.1.1",

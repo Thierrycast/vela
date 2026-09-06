@@ -22,6 +22,7 @@ const settings = {
   ...defaultSettings,
   brand: { ...defaultSettings.brand, appName: "Vela" },
   providers: [{ ...defaultSettings.providers[0], apiKey: "chave-de-exemplo", defaultModel: "auto/best-coding" }],
+  bridge: { enabled: true, port: 8792, token: "3f9c1ad24b7e40aab2e6c8d51f07be93", scriptPath: "C:\\Users\\voce\\projetos\\browser-ai\\bridge\\vela-bridge.mjs" },
 };
 
 const message = (role: ChatMessage["role"], content: string): ChatMessage =>
@@ -131,7 +132,7 @@ const listeners: Listener[] = [];
     id: "preview",
     getManifest: () => ({ version: "0.1.0", name: "Vela" }),
     openOptionsPage: () => { location.href = "/options.html"; },
-    sendMessage: async () => undefined,
+    sendMessage: async (outgoing: { type?: string } = {}) => outgoing.type === "bridge:status" ? { state: "on", connectedAt: Date.now() - 420_000, calls: 12 } : undefined,
     lastError: undefined,
     onMessage: { addListener: (fn: Listener) => listeners.push(fn), removeListener: noop },
     connect: () => {
