@@ -258,6 +258,41 @@ Um `POST` pendente segura o worker, mas 30 s ociosos ainda o matam entre ciclos.
 de 1 minuto acorda e reata (permissão `alarms` no manifest). Queda do processo local vira recuo
 progressivo até 20 s, com o estado visível em Configurações → Ponte MCP.
 
+## Movimento por voz: o pipeline e o renderer
+
+A cadeia é **áudio → features → suavização → parâmetros → renderer**, e cada elo é independente
+do seguinte:
+
+- `audio-metrics.ts` — FFT de 512, bandas bass/mid/high, noise gate e **envelope com attack 0.32
+  e release 0.12**. Ligar volume direto em tamanho produz tremor de VU meter; é este estágio que
+  dá a sensação de massa.
+- `motion-tokens.ts` — os nove estados (`idle`…`complete`). É a máquina de estados que costuma
+  ser terceirizada para o Rive; aqui cabe em treze linhas e não custa um runtime WASM.
+- `gl-visual.ts` — um quad que cobre a tela e um fragment shader, com segundo estágio de
+  suavização e recuperação de contexto perdido. Sem biblioteca 3D: não há geometria, câmera nem
+  cena, então uma delas seria um runtime inteiro para desenhar um retângulo.
+- `voice-visuals.ts` — os cinco visuais atrás de uma interface só (`VoiceVisual`), que o orb em
+  canvas 2D já satisfazia. Trocar de estética é trocar a classe.
+
+O prelúdio GLSL compartilhado traz ruído por hash, fBm, `domain warping` e `smooth-min` — as
+quatro peças que produzem o aspecto líquido sem simulação de fluido.
+
+### Onde cada um pode rodar
+
+O Pulse vive **dentro da página do usuário**: shader ali gasta a GPU do site que ele está usando.
+Por isso o `AmbientEdgeVisual` é canvas 2D de propósito — é uma faixa fina numa moldura, e um
+contexto WebGL sairia caro pelo que se vê. Shader fica para o painel, onde o custo é nosso.
+
+`ShaderVisual.ok` diz se o programa compilou, para o chamador cair no renderer 2D em vez de
+mostrar um retângulo vazio; `webglcontextlost` é tratado e o contexto se refaz sozinho.
+
+### A borda viva
+
+`AmbientEdge` acende a moldura do painel conforme o estado do agente. Sem microfone aberto a
+energia é zero, então **o estado sozinho já acende** e a energia é o que faz a luz respirar —
+sem isso a borda apagaria justamente enquanto o agente trabalha. Ela some no ocioso: uma barra
+lateral fica aberta o dia inteiro, e luz constante viraria ruído.
+
 ## Opções → Avançado
 
 Além do diagnóstico de ações, a seção reúne o que só faz sentido quando algo dá errado ou muda

@@ -5,7 +5,7 @@ import { AgentEvent, ChatMessage } from "./types";
 import { SidecarInbound, SidecarPort, VoiceState, connectSidecar } from "./messages";
 import type { ApprovalRequest } from "./approvals";
 import { useSettings, useTheme } from "./use-settings";
-import { ActivityTimeline, AgentStatus, ApprovalCard, ContextChip, DeveloperDetails, DictationButton, LiveVoiceButton, TakeoverCard, VelaOrb, VelaState } from "./vela-components";
+import { ActivityTimeline, AgentStatus, AmbientEdge, ApprovalCard, ContextChip, DeveloperDetails, DictationButton, LiveVoiceButton, TakeoverCard, VelaOrb, VelaState } from "./vela-components";
 import { AssistantActions, MessageEditor, UserActions } from "./message-actions";
 import { Markdown } from "./markdown";
 import { VelaMark } from "./vela-mark";
@@ -156,6 +156,7 @@ function App() {
   };
 
   return <main className="app-shell">
+    <AmbientEdge state={agentState} />
     <header className="topbar">
       <button className="icon-button" aria-label="Menu" onClick={openMenu}><Menu size={ICON.action} /></button>
       <span className="brand-mark"><VelaMark size={ICON.action} /></span>

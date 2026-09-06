@@ -1,0 +1,129 @@
+.lab {
+  min-height: 100vh;
+  background: var(--canvas);
+  color: var(--text-primary);
+  padding: 0 0 32px;
+}
+
+.lab-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+
+.lab-title strong { display: block; font-size: 14px; letter-spacing: -.01em; }
+.lab-title small { display: block; color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+
+.lab-group { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.lab-group button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: background .16s ease, color .16s ease;
+}
+.lab-group button:hover { background: var(--surface-hover); color: var(--text-primary); }
+.lab-group button.on { background: var(--signal-dim); color: var(--signal); font-weight: 600; }
+
+.lab-readout { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.lab-readout span { display: flex; flex-direction: column; gap: 4px; width: 62px; }
+.lab-readout i { font-style: normal; font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.lab-readout b {
+  display: block;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--signal);
+  transform-origin: left center;
+  transition: transform .06s linear;
+}
+.lab-vad {
+  align-self: flex-end;
+  width: auto !important;
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.lab-vad.on { color: var(--signal); border-color: var(--signal); background: var(--signal-dim); }
+
+.lab-error { margin: 16px 24px 0; color: var(--danger); font-size: 12.5px; }
+
+.lab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 18px;
+  padding: 20px 24px;
+}
+.lab-grid.focused { grid-template-columns: 1fr; max-width: 940px; margin: 0 auto; }
+
+.lab-cell {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.lab-stage { position: relative; aspect-ratio: 16 / 10; background: radial-gradient(circle at 50% 55%, #0e1214, #07090a 78%); }
+.lab-grid.focused .lab-stage { aspect-ratio: 16 / 8; }
+.lab-stage canvas { display: block; width: 100%; height: 100%; }
+
+/* O Ambient Edge acende a moldura, então precisa de uma moldura para acender. */
+.lab-cell.edge .lab-stage::after {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+.lab-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lab-cell figcaption {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.lab-cell figcaption strong { display: block; font-size: 12.5px; font-weight: 600; }
+.lab-cell figcaption small { display: block; color: var(--text-secondary); font-size: 11.5px; line-height: 1.45; margin: 4px 0 6px; }
+.lab-cell figcaption code { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); }
+.lab-cell figcaption button {
+  flex: none;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  transition: border-color .16s ease, color .16s ease;
+}
+.lab-cell figcaption button:hover { border-color: var(--signal); color: var(--signal); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lab-readout b, .lab-vad { transition: none; }
+}

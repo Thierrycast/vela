@@ -131,6 +131,31 @@ que é como elas realmente aparecem.
 
 O dublê vive em `tools/preview/chrome-stub.ts`; novos estados entram lá.
 
+## Voice Motion Lab
+
+```bash
+npm run ui   # depois abra http://127.0.0.1:5178/lab.html
+```
+
+Os cinco visuais de voz lado a lado, **recebendo exatamente o mesmo sinal ao mesmo tempo**,
+alimentados pelo seu microfone de verdade. Existe para escolher a estética falando, em vez de
+comparar screenshot — que é onde a decisão sempre travava.
+
+| | Visual | Técnica |
+|---|---|---|
+| 01 | Ambient Edge | canvas 2D · gradiente radial + blend aditivo |
+| 02 | Mesh Field | shader · focos gaussianos + domain warping |
+| 03 | Soft Orb | shader · SDF de círculo + fBm na borda |
+| 04 | Liquid Blob | shader · metaballs + smooth-min + domain warping |
+| 05 | Energy Field | shader · fBm em cristas + domain warping |
+| 00 | Orb atual | o que está no produto hoje, para comparação honesta |
+
+A barra de cima troca a fonte do sinal (microfone, voz simulada ou parado) e o estado do agente,
+e mostra `energy / bass / mid / high` ao vivo. "Isolar" abre um visual em tela maior.
+
+A **voz simulada** produz rajadas com pausa: serve para conferir attack e release sem falar, e
+para rodar onde não há microfone.
+
 ## Scripts
 
 ```bash

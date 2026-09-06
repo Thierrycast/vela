@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { Check, ChevronDown, Mic, Radio } from "lucide-react";
 import { VelaOrbRenderer } from "./orb-renderer";
+import { AmbientEdgeVisual } from "./voice-visuals";
 import { MotionState } from "./motion-tokens";
 import { VoiceVisualMetrics } from "./audio-metrics";
 
@@ -80,4 +81,38 @@ export function TakeoverCard({ reason, expected, onResume }: { reason: string; e
     <div><span className="takeover-mark">!</span><div><strong>Sua vez</strong><p>{reason}</p><p>{expected}</p></div></div>
     <button onClick={onResume}>Retomar</button>
   </div>;
+}
+
+/**
+ * A moldura do painel acende conforme o agente trabalha. É a mesma camada do 01 do laboratório,
+ * usada aqui em regime baixo: só existe quando há algo acontecendo, e some no ocioso — uma
+ * barra lateral fica aberta o dia inteiro, e luz constante viraria ruído.
+ */
+export function AmbientEdge({ state, metrics }: { state: VelaState; metrics?: VoiceVisualMetrics }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const visualRef = useRef<AmbientEdgeVisual | null>(null);
+  const awake = state !== "idle";
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--signal").trim() || undefined;
+    const visual = new AmbientEdgeVisual(canvas, { signal: accent, reducedMotion: reduced });
+    visualRef.current = visual;
+    const observer = new ResizeObserver(() => visual.resize());
+    observer.observe(canvas);
+    return () => { observer.disconnect(); visual.destroy(); visualRef.current = null; };
+  }, []);
+
+  useEffect(() => { visualRef.current?.setState(state); }, [state]);
+  useEffect(() => { if (metrics) visualRef.current?.setMetrics(metrics); }, [metrics]);
+  useEffect(() => {
+    const visual = visualRef.current;
+    if (!visual) return;
+    visual.setVisible(awake);
+    if (awake) visual.start(); else visual.stop();
+  }, [awake]);
+
+  return <canvas ref={canvasRef} className={`ambient-edge ${awake ? "awake" : ""}`} aria-hidden="true" />;
 }
