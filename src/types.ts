@@ -37,7 +37,15 @@ export type AppSettings = {
   };
   context: { currentPage: boolean; selection: boolean; sessionTabs: boolean; outsideTabs: boolean };
   bridge: { enabled: boolean; port: number; token: string; scriptPath: string };
-  voice: { transcriptionModel: string; speechModel: string; speechVoice: string };
+  /** A voz fala com outro servidor que não o do chat: o gateway de texto não serve áudio. */
+  voice: {
+    baseUrl: string;
+    apiKey: string;
+    transcriptionModel: string;
+    speechModel: string;
+    speechVoice: string;
+    streamingUrl: string;
+  };
 };
 
 export type ChatMessage = {
@@ -119,5 +127,12 @@ export const defaultSettings: AppSettings = {
   agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural", maxRounds: 8 },
   context: { currentPage: true, selection: true, sessionTabs: true, outsideTabs: false },
   bridge: { enabled: false, port: 8792, token: "", scriptPath: "" },
-  voice: { transcriptionModel: "whisper-1", speechModel: "tts-1", speechVoice: "alloy" },
+  voice: {
+    baseUrl: "http://SEU-SERVIDOR-DE-VOZ:8010",
+    apiKey: "",
+    transcriptionModel: "groq/whisper-large-v3-turbo",
+    speechModel: "tts-1",
+    speechVoice: "",
+    streamingUrl: "ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream",
+  },
 };

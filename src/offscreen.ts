@@ -1,5 +1,5 @@
 import { loadSettings } from "./storage";
-import { synthesizeSpeech, transcribeAudio } from "./provider";
+import { VoiceEndpoint, synthesizeSpeech, transcribeAudio } from "./provider";
 import { UtteranceSegmenter } from "./vad";
 import { VoiceMetricsAnalyzer } from "./audio-metrics";
 import { encodeWav } from "./wav-encoder";
@@ -37,11 +37,12 @@ let draining = false;
 const send = (message: unknown) => chrome.runtime.sendMessage(message).catch(() => undefined);
 const publish = (next: VoiceRuntimeState) => { state = next; void send({ type: "voice:state", state, timestamp: Date.now() }); };
 
-async function activeProfile() {
+/** A voz tem servidor próprio: o gateway de texto não expõe transcrição nem síntese. */
+async function voiceTarget() {
   const settings = await loadSettings();
-  const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
-  if (!profile?.apiKey) throw new Error("Configure o provider antes de usar a voz.");
-  return { settings, profile };
+  const endpoint: VoiceEndpoint = { baseUrl: settings.voice.baseUrl, apiKey: settings.voice.apiKey };
+  if (!endpoint.baseUrl.trim()) throw new Error("Configure o servidor de voz em Configurações → Voz.");
+  return { settings, endpoint };
 }
 
 function toggleMute() {
@@ -56,10 +57,10 @@ async function drain() {
   while (pending.length) {
     const blob = pending.shift()!;
     try {
-      const { settings, profile } = await activeProfile();
+      const { settings, endpoint } = await voiceTarget();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20_000);
-      const text = await transcribeAudio(profile, blob, settings.voice.transcriptionModel || profile.defaultModel).finally(() => clearTimeout(timer));
+      const text = await transcribeAudio(endpoint, blob, settings.voice.transcriptionModel).finally(() => clearTimeout(timer));
       const clean = text.trim();
       if (clean && !HALLUCINATIONS.some((pattern) => pattern.test(clean))) {
         void send({ type: "voice:transcript", text: clean, final: true, timestamp: Date.now() });
@@ -76,7 +77,6 @@ async function start(nextMode: "live" | "dictation") {
   if (stream) return;
   mode = nextMode;
   try {
-    await activeProfile();
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch (error) {
@@ -141,10 +141,10 @@ function stop() {
 async function speak(text: string) {
   let url = "";
   try {
-    const { settings, profile } = await activeProfile();
+    const { settings, endpoint } = await voiceTarget();
     const spoken = speakable(text);
     if (!spoken) return;
-    const blob = await synthesizeSpeech(profile, spoken, settings.voice.speechModel || profile.defaultModel, settings.voice.speechVoice || "alloy");
+    const blob = await synthesizeSpeech(endpoint, spoken, settings.voice.speechModel, settings.voice.speechVoice);
     url = URL.createObjectURL(blob);
     output?.pause();
     output = new Audio(url);

@@ -68,3 +68,8 @@
 .ambient-edge.awake{opacity:1}
 .app-shell>header,.app-shell>section,.app-shell>footer,.app-shell>aside,.app-shell>div{position:relative;z-index:1}
 @media(prefers-reduced-motion:reduce){.ambient-edge{transition:none}}
+
+/* A moldura acesa precisa dar a volta inteira: fundo opaco no rodapé cortava a luz embaixo,
+   bem em cima do campo de texto. O fundo passa para o shell. */
+.composer-wrap{background:transparent}
+.app-shell{background:var(--panel)}

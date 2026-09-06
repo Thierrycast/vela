@@ -171,19 +171,48 @@ export async function probeAudioEndpoints(profile: ProviderProfile): Promise<Rec
   return results;
 }
 
-export async function transcribeAudio(profile: ProviderProfile, audio: Blob, model: string): Promise<string> {
+export type VoiceEndpoint = { baseUrl: string; apiKey: string };
+
+const voiceUrl = (endpoint: VoiceEndpoint, path: string) => `${endpoint.baseUrl.replace(/\/+$/, "")}/v1/${path}`;
+const voiceHeaders = (endpoint: VoiceEndpoint): Record<string, string> => endpoint.apiKey ? { Authorization: `Bearer ${endpoint.apiKey}` } : {};
+
+/** Lista as vozes que o servidor oferece, para a tela não pedir que o usuário adivinhe um nome. */
+export async function listVoices(endpoint: VoiceEndpoint): Promise<string[]> {
+  const response = await fetch(`${endpoint.baseUrl.replace(/\/+$/, "")}/voices/names`, { headers: { Accept: "application/json", ...voiceHeaders(endpoint) } });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json() as string[] | { default?: string; custom?: string[]; base?: string[]; voices?: string[]; names?: string[] };
+  if (Array.isArray(payload)) return payload.map(String);
+  // A speech-api separa as vozes em "base" e "custom"; outras implementações devolvem uma lista só.
+  const collected = [...(payload.base ?? []), ...(payload.custom ?? []), ...(payload.voices ?? []), ...(payload.names ?? [])].map(String);
+  const preferred = payload.default ? [payload.default] : [];
+  return [...new Set([...preferred, ...collected])];
+}
+
+export async function checkVoiceEndpoint(endpoint: VoiceEndpoint): Promise<ConnectionCheck> {
+  if (!endpoint.baseUrl.trim()) return { ok: false, detail: "Sem endereço configurado." };
+  try {
+    const response = await fetch(`${endpoint.baseUrl.replace(/\/+$/, "")}/health`, { headers: { Accept: "application/json", ...voiceHeaders(endpoint) } });
+    if (!response.ok) return { ok: false, detail: `O servidor respondeu HTTP ${response.status}.` };
+    const health = await response.json().catch(() => ({})) as { status?: string; version?: string };
+    return { ok: true, detail: `Conectado${health.version ? ` — versão ${health.version}` : ""}.` };
+  } catch {
+    return { ok: false, detail: "Não consegui alcançar o servidor. Confira o endereço e se a Tailscale está de pé." };
+  }
+}
+
+export async function transcribeAudio(endpoint: VoiceEndpoint, audio: Blob, model: string): Promise<string> {
   const form = new FormData();
   form.append("file", audio, "vela-fala.wav");
   form.append("model", model);
   form.append("language", "pt");
-  const response = await fetch(apiUrl(profile, "audio/transcriptions"), { method: "POST", headers: { Accept: "application/json", Authorization: `Bearer ${profile.apiKey}` }, body: form });
+  const response = await fetch(voiceUrl(endpoint, "audio/transcriptions"), { method: "POST", headers: { Accept: "application/json", ...voiceHeaders(endpoint) }, body: form });
   if (!response.ok) { const detail = await responseDetail(response); throw new Error(`Transcrição falhou (HTTP ${response.status})${detail ? `: ${detail}` : "."}`); }
   const payload = await response.json() as { text?: string; transcript?: string };
   return payload.text ?? payload.transcript ?? "";
 }
 
-export async function synthesizeSpeech(profile: ProviderProfile, input: string, model: string, voice: string): Promise<Blob> {
-  const response = await fetch(apiUrl(profile, "audio/speech"), { method: "POST", headers: { "Content-Type": "application/json", Accept: "audio/*", Authorization: `Bearer ${profile.apiKey}` }, body: JSON.stringify({ input, model, voice }) });
+export async function synthesizeSpeech(endpoint: VoiceEndpoint, input: string, model: string, voice: string): Promise<Blob> {
+  const response = await fetch(voiceUrl(endpoint, "audio/speech"), { method: "POST", headers: { "Content-Type": "application/json", Accept: "audio/*", ...voiceHeaders(endpoint) }, body: JSON.stringify({ input, model, voice: voice || undefined }) });
   if (!response.ok) { const detail = await responseDetail(response); throw new Error(`Síntese de voz falhou (HTTP ${response.status})${detail ? `: ${detail}` : "."}`); }
   return response.blob();
 }

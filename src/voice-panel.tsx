@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Mic } from "lucide-react";
+import { Mic, RefreshCw } from "lucide-react";
 import { AppSettings } from "./types";
+import { ConnectionCheck, checkVoiceEndpoint, listVoices } from "./provider";
+import { Select } from "./select";
 
 type MicrophoneState = "unknown" | "granted" | "denied" | "prompt" | "asking" | "error";
 
@@ -19,16 +21,19 @@ function Row({ label, description, children }: { label: string; description?: st
 }
 
 /**
- * O runtime de voz vive num documento offscreen, e documento offscreen **não consegue exibir o
- * prompt de permissão do microfone**. Sem esta tela, `getUserMedia` falha lá dentro sem nenhuma
- * caixa de diálogo aparecer — e o botão de ditado parece simplesmente quebrado.
+ * Voz e chat falam com servidores diferentes. O gateway de texto não expõe transcrição nem
+ * síntese, e exigir a chave dele para gravar deixava os botões de voz mortos sem dizer por quê.
  *
- * A página de opções é uma página comum: aqui o prompt aparece, e a permissão concedida vale para
- * a origem inteira da extensão, inclusive para o offscreen.
+ * A outra armadilha: o runtime de voz vive num documento offscreen, e documento offscreen **não
+ * consegue exibir o prompt de permissão do microfone**. A página de opções é uma página comum —
+ * aqui o prompt aparece, e a permissão vale para a origem inteira da extensão.
  */
 export function VoicePanel({ settings, update }: { settings: AppSettings; update: (patch: Partial<AppSettings>) => void }) {
   const [microphone, setMicrophone] = useState<MicrophoneState>("unknown");
   const [detail, setDetail] = useState<string | null>(null);
+  const [connection, setConnection] = useState<ConnectionCheck | "testing" | null>(null);
+  const [voices, setVoices] = useState<string[] | null>(null);
+  const { voice } = settings;
 
   useEffect(() => {
     void navigator.permissions?.query({ name: "microphone" as PermissionName })
@@ -38,6 +43,16 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
       })
       .catch(() => setMicrophone("unknown"));
   }, []);
+
+  const patch = (next: Partial<AppSettings["voice"]>) => update({ voice: { ...voice, ...next } });
+
+  const test = async () => {
+    setConnection("testing");
+    const endpoint = { baseUrl: voice.baseUrl, apiKey: voice.apiKey };
+    const result = await checkVoiceEndpoint(endpoint);
+    setConnection(result);
+    if (result.ok) void listVoices(endpoint).then(setVoices).catch(() => setVoices(null));
+  };
 
   const askForMicrophone = async () => {
     setMicrophone("asking");
@@ -51,14 +66,16 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
       const name = error instanceof DOMException ? error.name : "";
       setMicrophone(name === "NotAllowedError" ? "denied" : "error");
       setDetail(name === "NotAllowedError"
-        ? "Você recusou, ou o Chrome já tinha bloqueado esta origem. Reveja em Configurações do site, no cadeado da barra de endereços desta página."
+        ? "Você recusou, ou o Chrome já tinha bloqueado esta origem. Reveja no cadeado da barra de endereços desta página."
         : name === "NotFoundError" ? "Nenhum microfone encontrado nesta máquina." : "Não consegui acessar o microfone.");
     }
   };
 
+  const voiceOptions = (voices ?? []).map((item) => ({ value: item, label: item }));
+
   return <>
     <h1>Voz</h1>
-    <p className="section-intro">O Live Voice continua no documento offscreen mesmo com a sidebar fechada. Configure aqui o acesso ao microfone e os modelos de áudio encaminhados pelo OmniRoute.</p>
+    <p className="section-intro">A voz fala com um servidor próprio, separado do provider de texto — transcrição e síntese não passam pelo gateway do chat. O runtime continua vivo num documento offscreen mesmo com a sidebar fechada.</p>
 
     <h2 className="subsection">Microfone</h2>
     <div className="settings-group">
@@ -71,17 +88,43 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
       {detail && <Row label="Detalhe"><small className={microphone === "granted" ? "probe-ok" : "probe-off"}>{detail}</small></Row>}
     </div>
 
-    <h2 className="subsection">Modelos</h2>
+    <h2 className="subsection">Servidor de voz</h2>
     <div className="settings-group">
-      <Row label="Modelo de transcrição" description="Endpoint /api/v1/audio/transcriptions.">
-        <input className="mono" value={settings.voice.transcriptionModel} onChange={(event) => update({ voice: { ...settings.voice, transcriptionModel: event.target.value } })} />
+      <Row label="Endereço" description="Sem barra no fim. As rotas seguem o padrão da OpenAI: /v1/audio/speech e /v1/audio/transcriptions.">
+        <input className="mono" value={voice.baseUrl} placeholder="http://SEU-SERVIDOR-DE-VOZ:8010" onChange={(event) => patch({ baseUrl: event.target.value })} />
       </Row>
-      <Row label="Modelo de fala" description="Endpoint /api/v1/audio/speech.">
-        <input className="mono" value={settings.voice.speechModel} onChange={(event) => update({ voice: { ...settings.voice, speechModel: event.target.value } })} />
+      <Row label="Chave" description="Deixe vazio quando o servidor não pede autenticação, como no acesso pela Tailscale.">
+        <input className="mono" type="password" value={voice.apiKey} placeholder="opcional" onChange={(event) => patch({ apiKey: event.target.value })} />
       </Row>
-      <Row label="Voz">
-        <input value={settings.voice.speechVoice} onChange={(event) => update({ voice: { ...settings.voice, speechVoice: event.target.value } })} />
+      <Row label="Conexão" description="Consulta /health e busca a lista de vozes disponíveis.">
+        {connection && connection !== "testing" && <small className={connection.ok ? "probe-ok" : "probe-off"}>{connection.detail}</small>}
+        <button className="secondary-button" onClick={() => void test()} disabled={connection === "testing" || !voice.baseUrl.trim()}>
+          <RefreshCw size={13} /> {connection === "testing" ? "Testando…" : "Testar"}
+        </button>
       </Row>
     </div>
+
+    <h2 className="subsection">Modelos</h2>
+    <div className="settings-group">
+      <Row label="Transcrição" description="Modelo de /v1/audio/transcriptions. O whisper-large-v3-turbo sai pontuado e capitalizado.">
+        <input className="mono" value={voice.transcriptionModel} onChange={(event) => patch({ transcriptionModel: event.target.value })} />
+      </Row>
+      <Row label="Síntese" description="Modelo de /v1/audio/speech.">
+        <input className="mono" value={voice.speechModel} onChange={(event) => patch({ speechModel: event.target.value })} />
+      </Row>
+      <Row label="Voz" description={voices ? `${voices.length} voz(es) disponíveis neste servidor.` : "Teste a conexão para carregar a lista do servidor."}>
+        {voiceOptions.length > 0
+          ? <Select value={voice.speechVoice || voiceOptions[0].value} label="Voz" options={voiceOptions} onChange={(speechVoice) => patch({ speechVoice })} />
+          : <input value={voice.speechVoice} placeholder="padrão do servidor" onChange={(event) => patch({ speechVoice: event.target.value })} />}
+      </Row>
+    </div>
+
+    <h2 className="subsection">Transcrição incremental</h2>
+    <div className="settings-group">
+      <Row label="WebSocket" description="Usado para mostrar o texto aparecendo enquanto você fala. Áudio em PCM 16-bit, 16 kHz, mono.">
+        <input className="mono" value={voice.streamingUrl} placeholder="ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream" onChange={(event) => patch({ streamingUrl: event.target.value })} />
+      </Row>
+    </div>
+    <p className="maintenance-notice ok">O caminho incremental existe para dar retorno visual imediato, não precisão: o motor é o Vosk, que devolve minúsculas e sem pontuação. O texto que fica é sempre o do modelo de transcrição acima, ao fim do enunciado.</p>
   </>;
 }

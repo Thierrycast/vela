@@ -131,6 +131,23 @@ que é como elas realmente aparecem.
 
 O dublê vive em `tools/preview/chrome-stub.ts`; novos estados entram lá.
 
+## Voz
+
+**A voz fala com um servidor próprio, separado do provider de texto.** O gateway de chat não
+expõe transcrição nem síntese, e exigir a chave dele para gravar deixava os botões de voz mortos
+sem dizer por quê. Configurações → Voz tem endereço, chave opcional, teste de conexão e a lista
+de vozes buscada do próprio servidor.
+
+Vem apontando de fábrica para a `speech-api` do laboratório (`http://SEU-SERVIDOR-DE-VOZ:8010`), que
+segue o padrão da OpenAI em `/v1/audio/speech` e `/v1/audio/transcriptions`.
+
+🔴 **Clique em "Permitir microfone" uma vez.** O runtime de voz roda num documento offscreen, e
+documento offscreen **não consegue exibir o prompt de permissão** — sem essa liberação, feita na
+página de opções, `getUserMedia` falha calado e o botão parece quebrado.
+
+Endpoint em HTTP puro precisa entrar no `connect-src` do manifest: o CSP libera `https:` e o
+loopback, mais o host da tailnet declarado explicitamente.
+
 ## Voice Motion Lab
 
 ```bash

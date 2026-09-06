@@ -7,8 +7,18 @@ const ARRIVAL_TOLERANCE = 6;
 const TRAVEL_DEADLINE: Record<CursorSpeed, number> = { natural: 450, fast: 220, instant: 0 };
 
 const STYLE = `
-.border{position:fixed;inset:1px;border:2px solid #58d8cd;box-shadow:inset 0 0 22px #58d8cd22;opacity:.8;transition:opacity 220ms ease;pointer-events:none}
-.border.waiting{border-color:#e4b65e;box-shadow:inset 0 0 22px #e4b65e22}
+.border{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity 380ms cubic-bezier(.2,.8,.2,1);z-index:0}
+.border.on{opacity:1}
+.border:before{content:"";position:absolute;inset:0;box-shadow:inset 0 0 34px 10px #58d8cd3a,inset 0 0 120px 30px #58d8cd1c;animation:vela-breathe 3.8s ease-in-out infinite}
+.sweep{position:absolute;inset:0;overflow:hidden;padding:11px;-webkit-mask:linear-gradient(#000,#000) content-box,linear-gradient(#000,#000);-webkit-mask-composite:xor;mask:linear-gradient(#000,#000) content-box,linear-gradient(#000,#000);mask-composite:exclude;filter:drop-shadow(0 0 7px #58d8cdcc) drop-shadow(0 0 20px #58d8cd7a);animation:vela-glow 3.8s ease-in-out infinite}
+.sweep i{position:absolute;left:50%;top:50%;width:230vmax;height:230vmax;margin:-115vmax;background:conic-gradient(from 0deg,#58d8cdcc 0 46%,#c9fff8 62%,#58d8cdcc 78% 100%);animation:vela-sweep 9s linear infinite}
+.border.waiting:before{box-shadow:inset 0 0 34px 10px #e4b65e3a,inset 0 0 120px 30px #e4b65e1c}
+.border.waiting .sweep{filter:drop-shadow(0 0 7px #e4b65ecc) drop-shadow(0 0 20px #e4b65e7a)}
+.border.waiting .sweep i{background:conic-gradient(from 0deg,#e4b65ecc 0 46%,#fff0cc 62%,#e4b65ecc 78% 100%)}
+@keyframes vela-breathe{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes vela-glow{0%,100%{opacity:.72}50%{opacity:1}}
+@keyframes vela-sweep{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.border:before,.sweep,.sweep i{animation:none}}
 .pill{position:fixed;top:9px;left:50%;transform:translateX(-50%);background:#0d1012;color:#f1f4f4;border:1px solid #252c30;border-radius:999px;padding:6px 10px;font:11px system-ui;box-shadow:0 5px 18px #0005;display:flex;align-items:center;gap:7px;pointer-events:auto}
 .pill i{width:5px;height:5px;border-radius:50%;background:#58d8cd;box-shadow:0 0 0 3px #143a36}
 .pill button{pointer-events:auto;border:0;border-left:1px solid #252c30;background:none;color:#9aa4a5;padding:0 0 0 7px;cursor:pointer;font:inherit}
@@ -56,7 +66,18 @@ class TraceLayer {
     const root = this.ensure();
     this.sessionActive = true;
     this.paused = false;
-    if (config.border && !this.border) { this.border = document.createElement("div"); this.border.className = "border"; root.append(this.border); }
+    if (config.border && !this.border) {
+      this.border = document.createElement("div");
+      this.border.className = "border";
+      const sweep = document.createElement("div");
+      sweep.className = "sweep";
+      sweep.append(document.createElement("i"));
+      this.border.append(sweep);
+      root.append(this.border);
+      // Um quadro para o browser aplicar o estado inicial: sem isso a transição não roda e a
+      // moldura aparece estalando em vez de acender.
+      requestAnimationFrame(() => this.border?.classList.add("on"));
+    }
     if (!this.pill) {
       this.pill = document.createElement("div");
       this.pill.className = "pill";

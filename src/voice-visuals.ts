@@ -119,11 +119,11 @@ void main() {
   float distance = length(uv) - radius - wobble * (0.05 + uMid * 0.09);
 
   float body = smoothstep(0.008, -0.02, distance);
-  float sheen = smoothstep(0.35, -0.2, uv.y + fbm(uv * 3.0 + time * 0.6) * 0.25);
+  float sheen = smoothstep(0.02, -0.30, uv.y + fbm(uv * 3.0 + time * 0.6) * 0.18);
   float glow = exp(-max(distance, 0.0) * 9.0) * (0.4 + uEnergy * 0.8);
 
   vec3 top = mix(uAccent, uSignal, uListening);
-  vec3 color = mix(top, vec3(0.97), sheen * 0.85) * body + mix(uSignal, uAccent, uAgent) * glow * 0.5;
+  vec3 color = mix(top, vec3(0.94), sheen * 0.42) * body + mix(uSignal, uAccent, uAgent) * glow * 0.5;
   float alpha = clamp(body + glow * 0.55, 0.0, 1.0) * uAlpha;
   gl_FragColor = vec4(color * alpha, alpha);
 }
@@ -201,7 +201,7 @@ export class AmbientEdgeVisual implements VoiceVisual {
     const speed = STATE_SPEED[this.state] ?? 0.16;
     // Sem microfone aberto não há energia nenhuma, e a borda ficaria apagada justamente quando o
     // agente está trabalhando. O estado sozinho já acende: energia é o que faz a luz respirar.
-    const pulse = (Math.sin(this.time * (this.state === "acting" ? 3.4 : 2.0)) * 0.5 + 0.5) * 0.35;
+    const pulse = (Math.sin(this.time * (this.state === "acting" ? 1.7 : 1.05)) * 0.5 + 0.5) * 0.32;
     const stateEnergy = (STATE_ENERGY[this.state] ?? 0.12) * (0.72 + pulse);
     const intensity = stateEnergy + this.current.energy * 0.7;
     const spread = Math.max(width, height) * (0.5 + this.current.bass * 0.28);
@@ -222,7 +222,7 @@ export class AmbientEdgeVisual implements VoiceVisual {
 }
 
 const STATE_SPEED: Partial<Record<MotionState, number>> = {
-  idle: 0.10, listening: 0.28, thinking: 0.5, speaking: 0.34, acting: 0.75, waiting: 0.2, paused: 0.08, error: 0.12, complete: 0.4,
+  idle: 0.012, listening: 0.05, thinking: 0.055, speaking: 0.045, acting: 0.085, waiting: 0.03, paused: 0.01, error: 0.02, complete: 0.07,
 };
 
 const STATE_ENERGY: Partial<Record<MotionState, number>> = {

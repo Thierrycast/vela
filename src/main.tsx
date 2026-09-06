@@ -107,6 +107,9 @@ function App() {
 
   const activeProvider = useMemo(() => settings.providers.find((item) => item.id === settings.activeProviderId), [settings]);
   const configured = !!activeProvider?.apiKey && !!activeProvider?.defaultModel;
+  // Voz e chat falam com servidores diferentes: exigir a chave do chat para gravar deixava os
+  // botões desabilitados sem explicação — e o pedido de permissão do microfone nunca acontecia.
+  const voiceReady = !!settings.voice.baseUrl.trim();
   const bubbles = useMemo(() => messages.filter((item) => item.role === "user" || (item.role === "assistant" && (item.content.length > 0 || item.status === "streaming"))), [messages]);
   const lastAssistantId = useMemo(() => [...bubbles].reverse().find((item) => item.role === "assistant")?.id ?? null, [bubbles]);
 
@@ -231,8 +234,8 @@ function App() {
           <button className="icon-button" aria-label="Anexar arquivo de texto" title="Anexar arquivo de texto (.md, .txt, .json, .csv)" onClick={() => fileRef.current?.click()}><Paperclip size={ICON.action} /></button>
           <input ref={fileRef} type="file" hidden accept=".txt,.md,.markdown,.json,.csv,.log,.yml,.yaml,text/*"
             onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void attachFile(file); }} />
-          <DictationButton active={dictating} onClick={toggleDictation} disabled={!configured} />
-          <LiveVoiceButton active={voiceState !== "idle" && !dictating} onClick={toggleLive} disabled={!configured} />
+          <DictationButton active={dictating} onClick={toggleDictation} disabled={!voiceReady} />
+          <LiveVoiceButton active={voiceState !== "idle" && !dictating} onClick={toggleLive} disabled={!voiceReady} />
           <Select compact label="Autonomia" value={settings.agent.autonomy} options={AUTONOMY_OPTIONS}
             onChange={(autonomy) => update((current) => ({ agent: { ...current.agent, autonomy } }))} />
           <span className="model-label" title={configured ? `${activeProvider?.name} · ${activeProvider?.defaultModel}` : "Configure um provider nas opções"}>
