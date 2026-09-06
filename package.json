@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "harness": "vite build --config tools/vite.harness.config.ts && node tools/out/harness.mjs",
     "ui": "vite --config vite.preview.config.ts",
-    "bridge": "node bridge/vela-bridge.mjs"
+    "bridge": "node bridge/vela-bridge.mjs",
+    "drive": "node tools/drive.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.1.1",

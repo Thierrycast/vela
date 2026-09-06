@@ -152,6 +152,38 @@ página de opções, `getUserMedia` falha calado e o botão parece quebrado.
 Endpoint em HTTP puro precisa entrar no `connect-src` do manifest: o CSP libera `https:` e o
 loopback, mais o host da tailnet declarado explicitamente.
 
+## Trilha de execução
+
+Cada requisição ao modelo, chamada de ferramenta, ação na página e falha — com duração e
+payload. É a matéria-prima para ajustar o que está lento ou errando, em vez de adivinhar pelo
+resultado final. Fica em IndexedDB, guarda os 20 mil eventos mais recentes e não sai do
+navegador. Chave de API e afins são redigidas antes de gravar, então a exportação pode ser
+anexada num relatório.
+
+**Visor em tempo real:** Configurações → Avançado → *Abrir a trilha*, ou `debug.html` na
+extensão. Os eventos aparecem enquanto acontecem, agrupados por turno, com duração ao lado,
+filtro por tipo, busca no payload e exportação em JSONL.
+
+**Dirigir a Vela de fora**, como se fosse uma pessoa:
+
+```bash
+npm run drive                       # roteiro padrão: abre uma página, manda uma mensagem, confere
+npm run drive -- --roteiro=meu.json # roteiro próprio
+npm run drive -- --saida=trace.jsonl
+npm run drive -- --manter           # deixa o Chrome aberto no fim
+```
+
+Abre um Chrome real com a extensão real, executa os passos e devolve **a trilha**, não uma
+captura de tela: quais eventos saíram, os cinco mais demorados e o que falhou. Testar um agente
+lendo só a resposta final não diz nada sobre o caminho.
+
+Um roteiro é uma lista de passos — `definirSettings`, `abrirPagina`, `digitar`, `clicar`,
+`esperar`, `esperarParar`, `conferir`. `digitar` usa o setter nativo de `value` e dispara
+`input`: mexer só na propriedade não avisa o React, e a mensagem nunca sairia.
+
+A ponte MCP expõe **`vela_trace`**, então um agente de fora também lê a trilha para descobrir o
+que ficou lento sem precisar do navegador na frente.
+
 ## Voice Motion Lab
 
 ```bash

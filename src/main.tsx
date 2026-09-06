@@ -125,13 +125,19 @@ function App() {
 
   const post = (message: Parameters<SidecarPort["post"]>[0]) => portRef.current?.post(message) ?? false;
 
+  /** O background é quem grava; o painel só relata o que aconteceu aqui. */
+  const trace = (label: string, data?: Record<string, unknown>) => {
+    void chrome.runtime?.sendMessage({ type: "trace:push", entry: { kind: "ui", label, from: "painel", data } }).catch(() => undefined);
+  };
+
   const submit = () => {
     const text = input.trim();
     if (!text || running) return;
     // Só limpa o campo se a mensagem realmente saiu: com a porta caída, apagar seria perder o texto.
+    trace("enviou mensagem", { chars: text.length, autonomy: settings.agent.autonomy, attachments: attachments.length });
     if (post({ type: "chat:submit", text })) setInput("");
   };
-  const newChat = () => { post({ type: "chat:new" }); closeMenu(); };
+  const newChat = () => { trace("nova conversa"); post({ type: "chat:new" }); closeMenu(); };
   const openMenu = () => {
     if (menuOpen) { closeMenu(); return; }
     setMenuLeaving(false);
@@ -155,13 +161,14 @@ function App() {
   };
 
   const speak = (message: ChatMessage) => {
+    trace("pediu leitura em voz alta", { chars: message.content.length });
     if (speakingId === message.id) { post({ type: "chat:speak-stop" }); setSpeakingId(null); return; }
     if (post({ type: "chat:speak", text: message.content })) setSpeakingId(message.id);
   };
 
   /** Editar, reenviar e gerar outra resposta são a mesma operação: a linha do tempo volta a um
    *  ponto e segue de lá. Anexar correções ao fim confundiria o modelo e o histórico. */
-  const rewind = (id: string, text?: string) => { post({ type: "chat:rewind", id, text }); setEditingId(null); };
+  const rewind = (id: string, text?: string) => { trace(text ? "editou e reenviou" : "reenviou", { id }); post({ type: "chat:rewind", id, text }); setEditingId(null); };
   const regenerate = (assistantId: string) => post({ type: "chat:rewind", id: assistantId });
 
   const attachFile = async (file: File) => {

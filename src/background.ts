@@ -10,6 +10,7 @@ import * as agentLoop from "./agent-loop";
 import * as conversation from "./conversation";
 import { injectIntoActiveTab, syncContentScriptRegistration } from "./injection";
 import { bridgeStatus, configureBridge, onKeepAliveAlarm, syncBridge } from "./bridge";
+import { TraceEvent, clearTrace, configureTrace, onTrace, readTrace, record as traceRecord } from "./trace";
 import { SETTINGS_KEY, loadSettings } from "./storage";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -26,6 +27,16 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes[SETTINGS_KEY]) return;
   void syncContentScriptRegistration();
   void syncBridge();
+});
+
+configureTrace({ from: "background" });
+
+const debugPorts = new Set<chrome.runtime.Port>();
+// Espelha cada evento para quem estiver com o visor aberto, sem esperar o lote ir ao disco.
+onTrace((event) => {
+  for (const port of debugPorts) {
+    try { port.postMessage({ type: "trace:event", event }); } catch { debugPorts.delete(port); }
+  }
 });
 
 const sidecarPorts = new Set<chrome.runtime.Port>();
@@ -231,6 +242,14 @@ async function applySidecarMessage(message: SidecarOutbound) {
 }
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "vela:debug") {
+    debugPorts.add(port);
+    void readTrace({ limit: 3000 }).then((events: TraceEvent[]) => {
+      try { port.postMessage({ type: "trace:snapshot", events }); } catch { debugPorts.delete(port); }
+    });
+    port.onDisconnect.addListener(() => { void chrome.runtime.lastError; debugPorts.delete(port); });
+    return;
+  }
   if (port.name !== SIDECAR_PORT) return;
   sidecarPorts.add(port);
   void injectIntoActiveTab();
@@ -265,12 +284,18 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   void getSession().then((session) => { if (session && changeInfo.groupId === session.groupId) void adoptTab(tabId).then(publishSession); });
 });
 
-chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; title?: string; message?: string; text?: string; url?: string; intent?: string; state?: string; scriptId?: string; id?: string; decision?: string; telemetry?: { metrics?: unknown } }, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; title?: string; message?: string; text?: string; url?: string; intent?: string; state?: string; scriptId?: string; id?: string; decision?: string; telemetry?: { metrics?: unknown }; entry?: unknown }, _sender, sendResponse) => {
   if (message.type === "lens:action" && message.text) {
     void runLensAction({ intent: (message.intent ?? "context") as LensIntent, text: message.text, url: message.url ?? "", title: message.title ?? "" });
   }
   if (message.type === "agent:pause") { cancelPendingApprovals(); agentLoop.abort(); }
   if (message.type === "bridge:status") { sendResponse(bridgeStatus()); return true; }
+  if (message.type === "trace:clear") { void clearTrace(); return false; }
+  if (message.type === "trace:push" && message.entry) {
+    const entry = message.entry as { kind: string; label: string; from?: string; data?: Record<string, unknown>; ok?: boolean; ms?: number };
+    traceRecord(entry.kind as Parameters<typeof traceRecord>[0], entry.label, { from: entry.from ?? "desconhecido", data: entry.data, ok: entry.ok, ms: entry.ms });
+    return false;
+  }
   if (message.type === "script:run" && message.scriptId && message.tabId !== undefined) {
     void runUserScript(message.scriptId, message.tabId)
       .then((result) => sendResponse({ ok: true, result }))

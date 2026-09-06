@@ -1,6 +1,7 @@
 import { AgentEvent, AppSettings, TabSummary } from "./types";
 import { runToolCall } from "./tool-runner";
 import { isRestrictedUrl } from "./navigation";
+import { TraceKind, readTrace } from "./trace";
 import { loadSettings } from "./storage";
 
 /**
@@ -111,6 +112,7 @@ async function pump(mine: number, port: number, token: string) {
 }
 
 const LABELS: Record<string, string> = {
+  vela_trace: "leu a trilha",
   vela_read_page: "leu a página",
   vela_act: "agiu na página",
   vela_search: "buscou na web",
@@ -141,6 +143,22 @@ async function execute(command: Command): Promise<string> {
     if (!prompt) return "ERRO [unsupported] vela_ask precisa de um prompt.";
     if (!hooks) return "ERRO [falha] A ponte não foi inicializada.";
     return hooks.ask(prompt);
+  }
+
+  if (command.tool === "vela_trace") {
+    const events = await readTrace({
+      limit: Number(params.limit ?? 120),
+      kinds: Array.isArray(params.kinds) ? params.kinds as TraceKind[] : undefined,
+      search: typeof params.search === "string" ? params.search : undefined,
+    });
+    const wanted = params.onlyFailures ? events.filter((event) => event.ok === false) : events;
+    if (!wanted.length) return "A trilha não tem eventos que batam com esse filtro.";
+    return wanted.map((event) => {
+      const parts = [new Date(event.at).toISOString().slice(11, 23), event.kind, event.label];
+      if (event.ms !== undefined) parts.push(`${event.ms}ms`);
+      if (event.ok === false) parts.push(`FALHOU${event.code ? ` [${event.code}]` : ""}`);
+      return parts.join(" · ");
+    }).join("\n");
   }
 
   if (command.tool === "vela_tabs") {

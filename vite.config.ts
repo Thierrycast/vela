@@ -15,6 +15,7 @@ export default defineConfig({
       input: {
         index: "index.html",
         options: "options.html",
+        debug: "debug.html",
         background: "src/background.ts",
         offscreen: "offscreen.html",
       },

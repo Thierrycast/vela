@@ -2,6 +2,7 @@ import { ActionResult, Autonomy, BrowserAction } from "./types";
 import { isPdf, isRestrictedUrl, restrictionReason, waitForContentScript, waitForNavigation } from "./navigation";
 import { loadSettings } from "./storage";
 import { approvalKey, describeAction, isRisky, requestApproval } from "./approvals";
+import { span } from "./trace";
 
 const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "scroll", "wait"];
 const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool"];
@@ -101,6 +102,17 @@ async function targetLabel(tabId: number, action: BrowserAction) {
 }
 
 export async function executeAction(action: BrowserAction, autonomy: Autonomy): Promise<ActionResult> {
+  const actionSpan = span("action", action.type, { action });
+  const result = await runAction(action, autonomy);
+  actionSpan.end({
+    ok: result.ok,
+    code: result.ok ? undefined : result.code,
+    data: { action, summary: result.summary, noEffect: result.ok && result.summary.includes("sem efeito perceptível") },
+  });
+  return result;
+}
+
+async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<ActionResult> {
   const denied = autonomy === "observe" && !isReadOnly(action);
   const tab = await activeTab();
   if (!tab?.id) return failure("no_tab", "Nenhuma aba ativa disponível.");

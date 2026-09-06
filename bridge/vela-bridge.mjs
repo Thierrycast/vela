@@ -196,6 +196,19 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "vela_trace",
+    description: "Lê a trilha de execução da Vela: requisições ao modelo, chamadas de ferramenta, ações na página e falhas, com duração. Use para descobrir o que ficou lento ou o que falhou, em vez de adivinhar pelo resultado final.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Quantos eventos mais recentes trazer. Padrão 120." },
+        kinds: { type: "array", items: TEXT, description: "Filtra por tipo: turn, user.input, model.request, tool.call, action, error." },
+        onlyFailures: { type: "boolean", description: "Só o que falhou." },
+        search: TEXT,
+      },
+    },
+  },
+  {
     name: "vela_ask",
     description: "Delega uma tarefa inteira à Vela: ela usa o modelo configurado nela e o navegador logado do usuário, executa os passos e devolve a resposta final. Prefira esta ferramenta quando o objetivo é o resultado, não o controle passo a passo.",
     inputSchema: { type: "object", properties: { prompt: { ...TEXT, description: "O objetivo em uma ou duas frases, como você pediria a uma pessoa." } }, required: ["prompt"] },

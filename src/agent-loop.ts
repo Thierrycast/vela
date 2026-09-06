@@ -4,12 +4,18 @@ import { ToolCall, streamChat } from "./provider";
 import { runToolCall } from "./tool-runner";
 import { endTraceSessions } from "./agent";
 import { appendLog, loadSettings } from "./storage";
+import { beginTurn, record as traceRecord, span } from "./trace";
 import { collectBrowserContext, clearAttachments } from "./browser-context";
 import * as conversation from "./conversation";
 
 type Emit = (message: SidecarInbound) => void;
 
 const newId = () => crypto.randomUUID();
+
+/** Argumentos de tool chegam como texto; guardar cru na trilha atrapalha a leitura depois. */
+function safeParse(raw: string): unknown {
+  try { return JSON.parse(raw || "{}"); } catch { return raw.slice(0, 300); }
+}
 
 let running = false;
 let controller: AbortController | null = null;
@@ -54,6 +60,10 @@ export async function submit(text: string, emit: Emit) {
   const settings = await loadSettings();
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
   const maxRounds = Math.min(30, Math.max(2, Math.round(settings.agent.maxRounds || 8)));
+  // Um id por turno costura tudo o que vem depois: rodadas, chamadas de tool, ações e falhas.
+  beginTurn(newId());
+  const turnSpan = span("turn", "turno completo", { autonomy: settings.agent.autonomy, maxRounds });
+  traceRecord("user.input", text.slice(0, 200), { data: { length: text.length, model: profile?.defaultModel } });
   running = true;
   controller = new AbortController();
   emit({ type: "chat:running", running: true });
@@ -64,6 +74,10 @@ export async function submit(text: string, emit: Emit) {
 
   try {
     for (let round = 0; round < maxRounds; round += 1) {
+      const roundSpan = span("model.request", `rodada ${round + 1}`, { round });
+      let firstToken = 0;
+      let chunks = 0;
+      const started = performance.now();
       const assistant: ChatMessage = { id: newId(), role: "assistant", content: "", createdAt: Date.now(), status: "streaming" };
       await addMessage(assistant, emit);
 
@@ -77,6 +91,7 @@ export async function submit(text: string, emit: Emit) {
           await conversation.appendText(assistant.id, event.text);
           emit({ type: "chat:delta", id: assistant.id, text: event.text });
         }
+        if (event.type === "text") { chunks += 1; if (!firstToken) firstToken = Math.round(performance.now() - started); }
         if (event.type === "telemetry") {
           const line = `${event.values["x-omniroute-provider"] ?? "provider"} · ${event.values["x-omniroute-latency-ms"] ?? "latência n/d"} ms`;
           telemetry = [...telemetry.slice(-5), line];
@@ -94,6 +109,9 @@ export async function submit(text: string, emit: Emit) {
         }
       }
 
+      // Tempo até o primeiro token é a métrica que o usuário sente como "demorou para começar";
+      // o total mede o custo da rodada. Separados, dizem coisas diferentes.
+      roundSpan.end({ ok: !failed, data: { round, firstTokenMs: firstToken, chunks, calls: calls.length, chars: assistant.content.length } });
       if (failed || controller.signal.aborted) break;
 
       if (!calls.length) {
@@ -107,7 +125,9 @@ export async function submit(text: string, emit: Emit) {
       emit({ type: "chat:patch", id: assistant.id, patch: { status: "complete", tool_calls: toolCalls } });
 
       for (const call of calls) {
+        const callSpan = span("tool.call", call.name, { arguments: safeParse(call.arguments) });
         const { content, event } = await runToolCall(call, settings);
+        callSpan.end({ ok: event.kind !== "error", data: { name: call.name, arguments: safeParse(call.arguments), result: content.slice(0, 600) } });
         record(event, emit);
         void appendLog({ level: event.kind === "error" ? "error" : "info", event: event.kind === "error" ? "agent.tool_error" : "agent.tool_completed", detail: `${call.name}: ${content.slice(0, 200)}` });
         await addMessage({ id: newId(), role: "tool", tool_call_id: call.id, content, createdAt: Date.now(), status: event.kind === "error" ? "error" : "complete" }, emit);
@@ -119,9 +139,11 @@ export async function submit(text: string, emit: Emit) {
     }
   } catch (error) {
     const message = error instanceof DOMException && error.name === "AbortError" ? "Execução interrompida." : error instanceof Error ? error.message : "Falha inesperada na execução.";
+    traceRecord("error", message, { ok: false, code: "loop" });
     record({ kind: "error", text: message }, emit);
     void appendLog({ level: "error", event: "chat.unhandled_error", detail: message });
   } finally {
+    turnSpan.end({ ok: true });
     running = false;
     controller = null;
     await endTraceSessions();

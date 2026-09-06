@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, RotateCcw, Trash2, Upload } from "lucide-react";
+import { Activity, Download, RotateCcw, Trash2, Upload } from "lucide-react";
 import { AppSettings, LogEntry } from "./types";
 import { clearLogs, loadLogs } from "./storage";
 import { ActionStats, clearActionStats, loadActionStats } from "./action-stats";
 import { StorageSlice, buildBackup, clearSlice, formatBytes, measureStorage, resetPreferences, restoreBackup } from "./maintenance";
+import { clearTrace, readTrace, toJsonl, traceSize } from "./trace";
 import { Select } from "./select";
 
 const ROUND_OPTIONS = [
@@ -34,12 +35,14 @@ export function AdvancedPanel({ settings, update }: { settings: AppSettings; upd
   const [slices, setSlices] = useState<StorageSlice[]>([]);
   const [includeKeys, setIncludeKeys] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  const [trace, setTrace] = useState<{ events: number; bytes: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = () => {
     void loadLogs().then(setLogs);
     void loadActionStats().then(setStats);
     void measureStorage().then(setSlices);
+    void traceSize().then(setTrace);
   };
   useEffect(refresh, []);
 
@@ -66,6 +69,17 @@ export function AdvancedPanel({ settings, update }: { settings: AppSettings; upd
     }
   };
 
+  const exportarTrilha = async () => {
+    const events = await readTrace();
+    const url = URL.createObjectURL(new Blob([toJsonl(events)], { type: "application/x-ndjson" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `vela-trace-${new Date().toISOString().slice(0, 10)}.jsonl`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setNotice({ tone: "ok", text: `${events.length} evento(s) exportado(s).` });
+  };
+
   const wipe = async (slice: StorageSlice) => {
     await clearSlice(slice.key);
     refresh();
@@ -90,6 +104,25 @@ export function AdvancedPanel({ settings, update }: { settings: AppSettings; upd
           <button className="secondary-button" onClick={() => void clearActionStats().then(refresh)}>Zerar contagem</button>
         </Row>
       </>}
+    </div>
+
+    <h2 className="subsection">Trilha de execução</h2>
+    <p className="picker-intro">Cada requisição, chamada de ferramenta, ação na página e falha, com duração. É a matéria-prima para ajustar o que está lento ou errando — e não sai do seu navegador.</p>
+    <div className="settings-group">
+      <Row label="Eventos gravados" description="A trilha guarda os 20 mil mais recentes e descarta o resto.">
+        <span className="status-badge">{trace ? `${trace.events} eventos · ${formatBytes(trace.bytes)}` : "—"}</span>
+      </Row>
+      <Row label="Visor em tempo real" description="Abre numa aba e mostra os eventos aparecendo, agrupados por turno, com filtro e busca.">
+        <button className="secondary-button" onClick={() => void chrome.tabs?.create({ url: chrome.runtime.getURL("debug.html") })}>
+          <Activity size={14} /> Abrir a trilha
+        </button>
+      </Row>
+      <Row label="Exportar" description="Uma linha JSON por evento — o formato que ferramentas de análise leem direto.">
+        <button className="secondary-button" onClick={() => void exportarTrilha()}><Download size={14} /> Exportar JSONL</button>
+      </Row>
+      <Row label="Apagar a trilha">
+        <button className="secondary-button" onClick={() => void clearTrace().then(refresh)}><Trash2 size={14} /> Apagar</button>
+      </Row>
     </div>
 
     <h2 className="subsection">Limites da execução</h2>
