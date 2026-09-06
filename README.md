@@ -70,6 +70,13 @@ e usada; headless só quando a medição é automatizada e não há nada para ol
 Ao encerrar, matar **só o processo daquela porta** (`netstat -ano` → `taskkill /PID`), nunca
 `taskkill /IM chrome.exe`, que derruba o navegador pessoal junto.
 
+## Trocar de modelo
+
+O nome do modelo na barra de envio abre a lista do próprio gateway, com busca — sem sair da
+conversa. Sem digitar nada aparecem o modelo atual e os cinco últimos usados, que cobrem o dia a
+dia; a busca existe porque uma lista de mil e quatrocentos modelos não se navega rolando. A troca
+vale para o provider ativo e é a mesma preferência que aparece em Configurações → Providers.
+
 ## O que a Vela sabe fazer sozinha
 
 **Achar na página.** Quando ela sabe o texto do que procura, chama `find` em vez de rolar: a

@@ -8,6 +8,7 @@ import { useSettings, useTheme } from "./use-settings";
 import { ActivityTimeline, AgentStatus, AmbientEdge, ApprovalCard, ContextChip, DeveloperDetails, DictationButton, LiveVoiceButton, TakeoverCard, VelaOrb, VelaState } from "./vela-components";
 import { AssistantActions, MessageEditor, UserActions } from "./message-actions";
 import { VoiceStage } from "./voice-stage";
+import { ModelPicker } from "./model-picker";
 import { Markdown } from "./markdown";
 import { VelaMark } from "./vela-mark";
 import { Select } from "./select";
@@ -282,9 +283,7 @@ function App() {
           <LiveVoiceButton active={voiceState !== "idle" && !dictating} onClick={toggleLive} disabled={!voiceReady} />
           <Select compact label="Autonomia" value={settings.agent.autonomy} options={AUTONOMY_OPTIONS}
             onChange={(autonomy) => update((current) => ({ agent: { ...current.agent, autonomy } }))} />
-          <button className="model-label" onClick={openOptions} title={configured ? `${activeProvider?.name} · ${activeProvider?.defaultModel} — clique para trocar` : "Configure um provider nas opções"}>
-            <span className={`status-dot ${configured ? "" : "off"}`} />{activeProvider?.defaultModel || "sem modelo"}
-          </button>
+          <ModelPicker settings={settings} update={update} configured={configured} />
           <div className="composer-actions">
             {running
               ? <button className="send-button stop" onClick={() => post({ type: "chat:abort" })} aria-label="Parar"><Square size={13} fill="currentColor" /></button>

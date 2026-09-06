@@ -435,6 +435,20 @@ contexto WebGL sairia caro pelo que se vê. Shader fica para o painel, onde o cu
 `ShaderVisual.ok` diz se o programa compilou, para o chamador cair no renderer 2D em vez de
 mostrar um retângulo vazio; `webglcontextlost` é tratado e o contexto se refaz sozinho.
 
+### `flex-wrap` quebra antes de encolher
+
+A barra de envio era `nowrap` sem rolagem: abaixo de ~400 px o botão Enviar saía da área visível
+e a conversa ficava sem como ser enviada — e a barra lateral do Chrome é redimensionável, então
+essa largura acontece.
+
+Passou a quebrar linha, mas quebrar sozinho não bastou: com `flex-wrap`, um item cujo tamanho
+natural não cabe vai para a linha de baixo **antes** de encolher, e era o nome do modelo que
+empurrava Enviar para fora da primeira linha mesmo sobrando espaço. `flex: 1 1 0` no seletor faz
+o nome ceder e o botão ficar.
+
+Medido no painel: 380 px em uma linha só; 226 px em duas, com Enviar sempre na primeira e sem
+rolagem horizontal.
+
 ### Classe de estado é do componente, não do app
 
 `.state-speaking { box-shadow: 0 0 0 5px … }` era resíduo do orb feito em CSS puro, escrito sem

@@ -169,3 +169,17 @@ console.log("\n=== prompt enviado ===");
 console.log("primeira mensagem:", body.messages[0].role, "|", body.messages[0].content.slice(0, 80).replace(/\n/g, " "), "…");
 console.log("última mensagem:", body.messages[body.messages.length - 1].role, "|", body.messages[body.messages.length - 1].content.replace(/\n/g, " ").slice(0, 140));
 console.log("menciona autonomia observar:", /MODO OBSERVAR/.test(body.messages[0].content));
+
+// 10. A lista de conversas segue o uso, não a criação: quem recebeu mensagem por último sobe.
+console.log("\n=== ordem das conversas recentes ===");
+await conversation.reset();
+await conversation.append({ id: "m1", role: "user", content: "primeira conversa", createdAt: Date.now(), status: "complete" });
+await conversation.reset();
+await conversation.append({ id: "m2", role: "user", content: "segunda conversa", createdAt: Date.now(), status: "complete" });
+const primeiraPassada = await conversation.list();
+console.log("depois de criar as duas:", primeiraPassada.map((item) => item.title));
+// Voltar à antiga e escrever nela precisa trazê-la de volta ao topo.
+await conversation.open(primeiraPassada[1].id);
+await new Promise((resolve) => setTimeout(resolve, 5));
+await conversation.append({ id: "m3", role: "user", content: "mais uma na antiga", createdAt: Date.now(), status: "complete" });
+console.log("depois de escrever na antiga:", (await conversation.list()).map((item) => item.title));
