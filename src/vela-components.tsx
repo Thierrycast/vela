@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
-import { Check, ChevronDown, Mic, Radio } from "lucide-react";
+import { AudioLines, Check, ChevronDown, Mic, Radio } from "lucide-react";
 import { VelaOrbRenderer } from "./orb-renderer";
 import { AmbientEdgeVisual } from "./voice-visuals";
 import { MotionState } from "./motion-tokens";
@@ -62,7 +62,7 @@ export function DictationButton({ active = false, onClick, disabled = false }: {
 }
 
 export function LiveVoiceButton({ active = false, onClick, disabled = false }: { active?: boolean; onClick?: () => void; disabled?: boolean }) {
-  return <button className={`live-button ${active ? "active" : ""}`} onClick={onClick} disabled={disabled} aria-label={active ? "Parar Live Voice" : "Iniciar Live Voice"} title="Live Voice"><VelaOrb state={active ? "listening" : "idle"} size={15} /> <span>Live</span></button>;
+  return <button className={`live-button ${active ? "active" : ""}`} onClick={onClick} disabled={disabled} aria-label={active ? "Parar Live Voice" : "Iniciar Live Voice"} title="Live Voice"><AudioLines size={16} /> <span>Live</span></button>;
 }
 
 export function ApprovalCard({ summary, detail, onDecide }: { summary: string; detail: string; onDecide: (decision: "allow" | "deny" | "allow-session") => void }) {

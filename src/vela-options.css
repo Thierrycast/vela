@@ -30,3 +30,6 @@
 .setting-control .icon-danger{width:26px;height:26px;display:grid;place-items:center;border-radius:6px;flex:none}
 .setting-control .icon-danger:hover{background:color-mix(in srgb,var(--danger) 14%,transparent)}
 .setting-control .icon-danger[hidden]{display:grid!important;visibility:hidden;pointer-events:none}
+
+/* O grupo de diagnóstico colava no grid de campos do provider logo acima. */
+.provider-section .settings-group{margin-top:34px}

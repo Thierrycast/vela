@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { FileText, Layers, Menu, Paperclip, Plus, Search, Send, Settings2, Square, WifiOff } from "lucide-react";
 import { AgentEvent, ChatMessage } from "./types";
@@ -43,6 +43,7 @@ function App() {
   const [connected, setConnected] = useState(true);
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuLeaving, setMenuLeaving] = useState(false);
   const [activityOpen, setActivityOpen] = useState(true);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [dictating, setDictating] = useState(false);
@@ -60,6 +61,12 @@ function App() {
   const menuRef = useRef<HTMLElement>(null);
 
   useTheme(settings);
+
+  /** Fechar com animação exige manter montado até o fim dela; por isso o estado de saída. */
+  const closeMenu = useCallback(() => {
+    setMenuLeaving(true);
+    setTimeout(() => { setMenuOpen(false); setMenuLeaving(false); }, 130);
+  }, []);
 
   useEffect(() => {
     const apply = (message: SidecarInbound) => {
@@ -95,13 +102,13 @@ function App() {
       const target = event.target as Node;
       if (menuRef.current?.contains(target)) return;
       if ((target as HTMLElement).closest?.("[aria-label='Menu']")) return;
-      setMenuOpen(false);
+      closeMenu();
     };
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeMenu(); };
     document.addEventListener("pointerdown", closeOnOutside);
     document.addEventListener("keydown", closeOnEscape);
     return () => { document.removeEventListener("pointerdown", closeOnOutside); document.removeEventListener("keydown", closeOnEscape); };
-  }, [menuOpen]);
+  }, [menuOpen, closeMenu]);
 
   useEffect(() => { streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight, behavior: "smooth" }); }, [messages.length, running, approval, takeover]);
 
@@ -124,8 +131,13 @@ function App() {
     // Só limpa o campo se a mensagem realmente saiu: com a porta caída, apagar seria perder o texto.
     if (post({ type: "chat:submit", text })) setInput("");
   };
-  const newChat = () => { post({ type: "chat:new" }); setMenuOpen(false); };
-  const openMenu = () => { const next = !menuOpen; setMenuOpen(next); if (next) post({ type: "chat:history-request" }); };
+  const newChat = () => { post({ type: "chat:new" }); closeMenu(); };
+  const openMenu = () => {
+    if (menuOpen) { closeMenu(); return; }
+    setMenuLeaving(false);
+    setMenuOpen(true);
+    post({ type: "chat:history-request" });
+  };
   const openOptions = () => { if (typeof chrome !== "undefined") chrome.runtime?.openOptionsPage?.(); };
 
   const toggleLive = () => {
@@ -179,10 +191,10 @@ function App() {
       </div>
     </header>
     {!connected && <div className="offline-banner"><WifiOff size={ICON.chip} /> Reconectando ao agente…</div>}
-    {menuOpen && <aside className="popover" ref={menuRef}>
+    {menuOpen && <aside className={`popover ${menuLeaving ? "leaving" : ""}`} ref={menuRef}>
       <span className="popover-label">Conversas recentes</span>
       {history.length > 0
-        ? history.slice(0, 10).map((item) => <button key={item.id} className="popover-history" onClick={() => { post({ type: "chat:open", id: item.id }); setMenuOpen(false); }}>{item.title}</button>)
+        ? history.slice(0, 10).map((item) => <button key={item.id} className="popover-history" onClick={() => { post({ type: "chat:open", id: item.id }); closeMenu(); }}>{item.title}</button>)
         : <p className="popover-empty">Nenhuma tarefa anterior ainda.</p>}
     </aside>}
 
@@ -238,9 +250,9 @@ function App() {
           <LiveVoiceButton active={voiceState !== "idle" && !dictating} onClick={toggleLive} disabled={!voiceReady} />
           <Select compact label="Autonomia" value={settings.agent.autonomy} options={AUTONOMY_OPTIONS}
             onChange={(autonomy) => update((current) => ({ agent: { ...current.agent, autonomy } }))} />
-          <span className="model-label" title={configured ? `${activeProvider?.name} · ${activeProvider?.defaultModel}` : "Configure um provider nas opções"}>
+          <button className="model-label" onClick={openOptions} title={configured ? `${activeProvider?.name} · ${activeProvider?.defaultModel} — clique para trocar` : "Configure um provider nas opções"}>
             <span className={`status-dot ${configured ? "" : "off"}`} />{activeProvider?.defaultModel || "sem modelo"}
-          </span>
+          </button>
           <div className="composer-actions">
             {running
               ? <button className="send-button stop" onClick={() => post({ type: "chat:abort" })} aria-label="Parar"><Square size={13} fill="currentColor" /></button>
