@@ -1,5 +1,25 @@
 <!doctype html>
 <html lang="pt-BR">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Vela — painel (review)</title></head>
-  <body><div id="root"></div><script type="module" src="./panel.ts"></script></body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vela — painel (review)</title>
+    <style>
+      /* O painel é uma barra lateral do Chrome, nunca uma página inteira. Sem esta moldura
+         o review julgaria proporções que o produto não tem. Largura ajustável por ?largura=. */
+      html, body { margin: 0; height: 100%; background: #05070800; }
+      body { display: flex; justify-content: flex-end; }
+      #root {
+        width: var(--largura-do-painel, 380px);
+        height: 100vh;
+        border-left: 1px solid #252c30;
+        overflow: hidden;
+        flex: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./panel.ts"></script>
+  </body>
 </html>

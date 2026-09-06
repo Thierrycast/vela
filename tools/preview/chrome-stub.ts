@@ -9,7 +9,14 @@ import { AgentEvent, ChatMessage, defaultSettings } from "../../src/types";
 
 type Listener = (message: unknown) => void;
 
-const scenario = new URLSearchParams(location.search).get("estado") ?? "conversa";
+const params = new URLSearchParams(location.search);
+const scenario = params.get("estado") ?? "conversa";
+
+// A barra lateral do Chrome é redimensionável; o review pode fixar a largura que quiser.
+const larguraPedida = Number(params.get("largura"));
+if (Number.isFinite(larguraPedida) && larguraPedida >= 260 && larguraPedida <= 640) {
+  document.documentElement.style.setProperty("--largura-do-painel", `${larguraPedida}px`);
+}
 
 const settings = {
   ...defaultSettings,
@@ -35,10 +42,13 @@ const events: AgentEvent[] = scenario === "vazio" ? [] : [
   { kind: "error", text: "O snapshot mudou. Chame extractPage de novo antes de agir." },
 ];
 
+// Mesmo formato que attachmentText() produz: cabeçalho, quebra de linha, texto.
+const SAMPLE_ATTACHMENT = "Trecho selecionado em “Loja Exemplo” (https://loja.exemplo.com):\nO frete grátis vale para pedidos acima de R$ 299 em todo o Brasil.";
+
 const panelMessages: unknown[] = [
   { type: "chat:snapshot", messages: conversation, events, telemetry: ["omniroute · 842 ms"], running: scenario === "executando" },
   { type: "chat:session", title: scenario === "vazio" ? "" : "pesquise notebooks bons para de", tabCount: 3 },
-  { type: "chat:attachments", items: scenario === "vazio" ? [] : ["Trecho selecionado em “Loja Exemplo”: o frete grátis vale para pedidos acima de R$ 299."] },
+  { type: "chat:attachments", items: scenario === "vazio" ? [] : [SAMPLE_ATTACHMENT] },
 ];
 
 if (scenario === "aprovacao") {
