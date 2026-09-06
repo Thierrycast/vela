@@ -9,7 +9,6 @@ import * as conversation from "./conversation";
 
 type Emit = (message: SidecarInbound) => void;
 
-const MAX_ROUNDS = 8;
 const newId = () => crypto.randomUUID();
 
 let running = false;
@@ -54,6 +53,7 @@ export async function submit(text: string, emit: Emit) {
   if (running) return;
   const settings = await loadSettings();
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
+  const maxRounds = Math.min(30, Math.max(2, Math.round(settings.agent.maxRounds || 8)));
   running = true;
   controller = new AbortController();
   emit({ type: "chat:running", running: true });
@@ -63,7 +63,7 @@ export async function submit(text: string, emit: Emit) {
   await clearAttachments();
 
   try {
-    for (let round = 0; round < MAX_ROUNDS; round += 1) {
+    for (let round = 0; round < maxRounds; round += 1) {
       const assistant: ChatMessage = { id: newId(), role: "assistant", content: "", createdAt: Date.now(), status: "streaming" };
       await addMessage(assistant, emit);
 
@@ -113,8 +113,8 @@ export async function submit(text: string, emit: Emit) {
         await addMessage({ id: newId(), role: "tool", tool_call_id: call.id, content, createdAt: Date.now(), status: event.kind === "error" ? "error" : "complete" }, emit);
       }
 
-      if (round === MAX_ROUNDS - 1) {
-        await addMessage({ id: newId(), role: "assistant", content: `Atingi o limite de ${MAX_ROUNDS} etapas nesta tarefa. Peça para continuar se quiser que eu siga.`, createdAt: Date.now(), status: "complete" }, emit);
+      if (round === maxRounds - 1) {
+        await addMessage({ id: newId(), role: "assistant", content: `Atingi o limite de ${maxRounds} etapas nesta tarefa. Peça para continuar se quiser que eu siga.`, createdAt: Date.now(), status: "complete" }, emit);
       }
     }
   } catch (error) {

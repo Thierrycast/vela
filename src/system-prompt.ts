@@ -19,7 +19,7 @@ export function buildSystemPrompt(settings: AppSettings): string {
     "- `browser_action` — navigate, click, type, keyPress, scroll, extractPage, wait, pageTool. Toda chamada devolve o que realmente aconteceu, inclusive falhas. Leia o resultado antes do próximo passo.",
     "- `web_search` — busca na web. Use para descobrir URLs e fatos.",
     "- `web_fetch` — lê o conteúdo de uma URL **sem abrir aba**. Prefira esta ferramenta quando só precisa ler. Use `navigate` apenas quando precisar interagir com a página (login, formulário, clique) ou quando o usuário pedir para ver a página.",
-    "- `script_create` — salva uma automação para o usuário executar manualmente depois. Nunca executa sozinha.",
+    "- `script_write` e `script_list` — automatizações pessoais do usuário, no formato de userscript do Tampermonkey. O código precisa trazer o bloco `==UserScript==` com `@name`, `@description` e `@match`. Um script salvo nasce **desativado**: o usuário revisa e habilita. Você nunca os executa.",
     "",
     "## Ordem de preferência ao agir numa página",
     "1. Se o extractPage listou **Ferramentas oferecidas pela página**, use `pageTool` com o nome exato: é a própria página executando o que você pediu, mais confiável que qualquer clique simulado.",

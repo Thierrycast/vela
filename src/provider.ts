@@ -66,12 +66,28 @@ const requestUserTool = {
   },
 };
 
-const scriptCreateTool = {
+const scriptWriteTool = {
   type: "function",
   function: {
-    name: "script_create",
-    description: "Salva uma automatização pessoal para execução manual posterior. Nunca executa automaticamente.",
-    parameters: { type: "object", properties: { name: { type: "string" }, description: { type: "string" }, code: { type: "string" }, matches: { type: "array", items: { type: "string" } } }, required: ["name", "code"] },
+    name: "script_write",
+    description: "Cria ou reescreve uma automatização pessoal do usuário. O código deve começar com o bloco ==UserScript== (mesmo formato do Tampermonkey) declarando @name, @description, @version e @match. Scripts nunca rodam sozinhos: ficam guardados para o usuário executar quando quiser.",
+    parameters: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "Código completo, incluindo o cabeçalho ==UserScript==." },
+        replaces: { type: "string", description: "Nome exato de um script existente para substituir. Omita para criar um novo." },
+      },
+      required: ["code"],
+    },
+  },
+};
+
+const scriptListTool = {
+  type: "function",
+  function: {
+    name: "script_list",
+    description: "Lista as automatizações salvas do usuário, com nome, descrição, versão e alvos. Use antes de editar para saber o nome exato.",
+    parameters: { type: "object", properties: {} },
   },
 };
 
@@ -79,7 +95,7 @@ type ToolDefinition = { type: string; function: { name: string; description: str
 
 export function buildTools(settings: AppSettings): ToolDefinition[] {
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
-  const tools: ToolDefinition[] = [browserActionTool, webSearchTool, requestUserTool, scriptCreateTool];
+  const tools: ToolDefinition[] = [browserActionTool, webSearchTool, requestUserTool, scriptWriteTool, scriptListTool];
   if (profile?.capabilities.webFetch) tools.splice(2, 0, webFetchTool);
   return tools;
 }

@@ -2,7 +2,8 @@ import { ActionResult, AgentEvent, AppSettings, BrowserAction } from "./types";
 import { ToolCall, fetchUrl, searchProvider } from "./provider";
 import { executeAction } from "./agent";
 import { recordAction } from "./action-stats";
-import { saveScript } from "./script-store";
+import { findScriptByName, listScripts, saveScript } from "./script-store";
+import { parseMetadata } from "./user-script";
 import { requestTakeover } from "./approvals";
 
 type ToolArguments = {
@@ -11,7 +12,7 @@ type ToolArguments = {
   deltaX?: number; deltaY?: number; milliseconds?: number; extractMode?: "outline" | "text"; offset?: number;
   toolName?: string; toolArguments?: unknown;
   query?: string; max_results?: number; max_length?: number; reason?: string; expected?: string;
-  name?: string; description?: string; code?: string; matches?: string[];
+  code?: string; replaces?: string;
 };
 
 const SEARCH_BUDGET = 4000;
@@ -81,16 +82,30 @@ export async function runToolCall(call: ToolCall, settings: AppSettings): Promis
         : { content: "ERRO [denied] Não há interface aberta para pedir intervenção. Explique ao usuário o que ele precisa fazer.", event: { kind: "error", text: "Pedido de intervenção sem painel aberto." } };
     }
 
-    if (call.name === "script_create" && args.name && args.code) {
+    if (call.name === "script_list") {
+      const scripts = await listScripts();
+      if (!scripts.length) return { content: "O usuário ainda não tem nenhum script salvo.", event: { kind: "result", text: "Nenhum script salvo." } };
+      const lines = scripts.map((script) => {
+        const meta = parseMetadata(script.code);
+        return `- ${meta.name} (v${meta.version}${script.enabled ? "" : ", desativado"}) — ${meta.description || "sem descrição"} — alvos: ${meta.matches.join(", ")}`;
+      });
+      return { content: lines.join("\n"), event: { kind: "result", text: `${scripts.length} script(s) salvos.` } };
+    }
+
+    if (call.name === "script_write" && args.code) {
+      if (!/==UserScript==/.test(args.code)) {
+        return { content: "ERRO [unsupported] O código precisa começar com o bloco ==UserScript== declarando @name, @description e @match.", event: { kind: "error", text: "Script sem cabeçalho de metadados." } };
+      }
+      const meta = parseMetadata(args.code);
+      const existing = args.replaces ? await findScriptByName(args.replaces) : await findScriptByName(meta.name);
       const now = Date.now();
-      const script = {
-        id: crypto.randomUUID(), name: args.name.slice(0, 120),
-        description: args.description?.slice(0, 500) ?? "Criado pela Vela.",
-        matches: args.matches?.length ? args.matches.slice(0, 20) : ["<all_urls>"],
-        code: args.code, enabled: true, createdAt: now, updatedAt: now,
-      };
+      const script = existing
+        ? { ...existing, code: args.code, updatedAt: now }
+        : { id: crypto.randomUUID(), code: args.code, enabled: false, createdAt: now, updatedAt: now };
       await saveScript(script);
-      const text = `Script “${script.name}” salvo em Configurações → Scripts para revisão e execução manual.`;
+      const text = existing
+        ? `Script “${meta.name}” atualizado. O usuário pode revisar e executar em Configurações → Scripts.`
+        : `Script “${meta.name}” salvo, ainda desativado. O usuário precisa revisar e habilitar em Configurações → Scripts antes de executar.`;
       return { content: text, event: { kind: "result", text } };
     }
 

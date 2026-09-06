@@ -70,6 +70,22 @@ e usada; headless só quando a medição é automatizada e não há nada para ol
 Ao encerrar, matar **só o processo daquela porta** (`netstat -ano` → `taskkill /PID`), nunca
 `taskkill /IM chrome.exe`, que derruba o navegador pessoal junto.
 
+## Scripts do usuário
+
+Em Configurações → Scripts fica a vitrine dos userscripts deste perfil. Cada cartão mostra nome,
+descrição, alvos e versão; clicar abre o editor em tela cheia, que salva sozinho enquanto você
+digita. O formato é o do Tampermonkey — o bloco `==UserScript==` no topo do código é quem define
+`@name`, `@description`, `@match` e `@run-at`.
+
+A Vela cria e reescreve esses scripts a pedido (`script_write`), mas **nunca os executa**: um
+script salvo nasce desativado, e rodar é sempre um clique seu em Executar na aba atual.
+
+## Backup das configurações
+
+Configurações → Avançado exporta preferências, providers e scripts num JSON. **A chave de API
+fica de fora por padrão** — ligue "Incluir as chaves" só se for guardar o arquivo como se fosse
+uma senha. Restaurar um backup sem chave não apaga a que já está configurada na máquina.
+
 ## Revisar a interface fora da extensão
 
 Ferramentas de review de interface não conseguem abrir páginas `chrome-extension://`. Para isso

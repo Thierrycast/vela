@@ -33,6 +33,7 @@ export type AppSettings = {
     showControlBorder: boolean;
     showTargetHighlights: boolean;
     cursorSpeed: CursorSpeed;
+    maxRounds: number;
   };
   context: { currentPage: boolean; selection: boolean; sessionTabs: boolean; outsideTabs: boolean };
   voice: { transcriptionModel: string; speechModel: string; speechVoice: string };
@@ -114,7 +115,7 @@ export const defaultSettings: AppSettings = {
     enabled: true,
     capabilities: { streaming: true, tools: true, vision: true, audio: false, webFetch: false },
   }],
-  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural" },
+  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural", maxRounds: 8 },
   context: { currentPage: true, selection: true, sessionTabs: true, outsideTabs: false },
   voice: { transcriptionModel: "whisper-1", speechModel: "tts-1", speechVoice: "alloy" },
 };

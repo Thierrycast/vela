@@ -58,10 +58,68 @@ if (scenario === "suavez") {
   panelMessages.push({ type: "chat:takeover", reason: "A loja pede login para concluir o pedido.", expected: "Entre na sua conta e clique em Retomar." });
 }
 
+const userScript = (lines: string[]) => lines.join("\n");
+
+const sampleScripts = [
+  {
+    id: "s1",
+    enabled: true,
+    createdAt: Date.now() - 12 * 86_400_000,
+    updatedAt: Date.now() - 3 * 3_600_000,
+    code: userScript([
+      "// ==UserScript==",
+      "// @name         Preço por grama",
+      "// @version      1.4",
+      "// @description  Calcula e mostra o preço por grama ao lado de cada produto da listagem.",
+      "// @match        https://loja.exemplo.com/*",
+      "// @run-at       document-idle",
+      "// ==/UserScript==",
+      "",
+      "const cards = document.querySelectorAll(\".produto\");",
+      "return cards.length;",
+    ]),
+  },
+  {
+    id: "s2",
+    enabled: false,
+    createdAt: Date.now() - 2 * 86_400_000,
+    updatedAt: Date.now() - 40 * 60_000,
+    code: userScript([
+      "// ==UserScript==",
+      "// @name         Limpar distrações",
+      "// @version      1.0",
+      "// @description  Esconde banners, pop-ups de newsletter e barras fixas em qualquer página.",
+      "// @match        <all_urls>",
+      "// ==/UserScript==",
+      "",
+      "return document.title;",
+    ]),
+  },
+  {
+    id: "s3",
+    enabled: true,
+    createdAt: Date.now() - 30 * 86_400_000,
+    updatedAt: Date.now() - 9 * 86_400_000,
+    code: userScript([
+      "// ==UserScript==",
+      "// @name         Copiar tabela como CSV",
+      "// @version      2.1",
+      "// @author       Vela",
+      "// @description  Adiciona um botão que exporta a primeira tabela da página em CSV.",
+      "// @match        https://relatorios.exemplo.com/*",
+      "// @match        https://painel.exemplo.com/*",
+      "// ==/UserScript==",
+      "",
+      "return \"CSV pronto\";",
+    ]),
+  },
+];
+
 const store: Record<string, unknown> = {
   "vela:settings": settings,
   "vela:brand-renamed": true,
   "vela:logs": events.map((event, index) => ({ id: String(index), level: event.kind === "error" ? "error" : "info", event: event.kind === "error" ? "agent.tool_error" : "agent.tool_completed", createdAt: Date.now() - index * 60_000 })),
+  "vela:user-scripts": sampleScripts,
   "vela:action-stats": { total: 46, noEffect: 4, failures: 3, byCode: { stale_snapshot: 2, element_not_found: 1 }, byType: { click: 22, type: 9, extractPage: 15 }, since: Date.now() - 86_400_000 },
 };
 
@@ -104,7 +162,11 @@ const listeners: Listener[] = [];
   },
   storage: {
     local: {
-      get: async (key: string) => (key in store ? { [key]: store[key] } : {}),
+      get: async (key: string | string[] | null) => {
+        if (key === null || key === undefined) return { ...store };
+        const keys = Array.isArray(key) ? key : [key];
+        return Object.fromEntries(keys.filter((item) => item in store).map((item) => [item, store[item]]));
+      },
       set: async (values: Record<string, unknown>) => { Object.assign(store, values); },
       remove: async (key: string) => { delete store[key]; },
     },

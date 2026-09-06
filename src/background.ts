@@ -1,6 +1,7 @@
 import { ChatMessage } from "./types";
 import { adoptTab, endSession, ensureSession, forgetTab, getSession, renameSession } from "./session";
 import { listScripts } from "./script-store";
+import { parseMetadata } from "./user-script";
 import { SIDECAR_PORT, SidecarInbound, SidecarOutbound, VoiceState } from "./messages";
 import { LensIntent, attachmentText, lensPrompt } from "./prompts";
 import { addAttachment, listAttachments } from "./browser-context";
@@ -85,7 +86,7 @@ async function runUserScript(scriptId: string, tabId: number) {
   if (!script || !script.enabled) throw new Error("Script inexistente ou desativado.");
   if (!script.code.trim() || script.code.length > 250_000) throw new Error("O script precisa ter código e no máximo 250 KB.");
   const tab = await chrome.tabs.get(tabId);
-  if (!tab.url || !scriptMatches(script.matches, tab.url)) throw new Error("O script não corresponde à URL atual.");
+  if (!tab.url || !scriptMatches(parseMetadata(script.code).matches, tab.url)) throw new Error("O script não corresponde à URL atual.");
   return chrome.scripting.executeScript({ target: { tabId }, func: (source: string) => { const result = new Function(source)(); if (result === undefined) return "Executado."; try { return JSON.stringify(result); } catch { return String(result); } }, args: [script.code] });
 }
 

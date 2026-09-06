@@ -199,6 +199,33 @@ o `ref_1_0` de um iframe. Ao agir, o prefixo é removido e a mensagem roteada pa
 A UI (Lens, Pulse, Trace) fica guardada atrás de `window.top === window.self`: sem isso um site
 com 12 iframes de anúncio ganharia 12 botões da Vela.
 
+## Scripts do usuário no formato do Tampermonkey
+
+Um script é **só código**. Nome, descrição, versão, autor e alvos vivem no bloco
+`==UserScript==` dentro do próprio arquivo, lido por `user-script.ts` — o mesmo formato do
+Tampermonkey e do Greasemonkey. A alternativa (guardar `name`/`matches` em campos separados do
+registro) dessincroniza na primeira edição: a IA escreve um cabeçalho, o campo continua com o
+nome velho, e a vitrine passa a mentir. `script-store.ts` migra os registros do formato antigo
+recompondo o cabeçalho a partir dos campos soltos.
+
+A vitrine (`scripts-panel.tsx`) é uma grade de cartões; clicar abre o editor em tela cheia com
+numeração de linha, Tab que indenta e autosave de 500 ms. `script_write` e `script_list` deixam
+o modelo criar e reescrever esses mesmos textos — mas **um script salvo nasce desativado** e a
+Vela nunca o executa: quem clica em Executar é o usuário. `background.ts` ainda confere o
+`@match` contra a URL da aba antes de rodar.
+
+## Opções → Avançado
+
+Além do diagnóstico de ações, a seção reúne o que só faz sentido quando algo dá errado ou muda
+de máquina: teto de etapas por tarefa (`agent.maxRounds`, lido pelo `agent-loop`), o espaço
+ocupado por categoria com botão de limpeza por fatia, e backup/restauração em JSON
+(`maintenance.ts`).
+
+Duas decisões de segurança nesse fluxo: a chave de API **fica fora do backup por padrão** — um
+JSON na pasta de downloads não é lugar de credencial — e restaurar um arquivo sem chave **não
+apaga** a que já está configurada, senão importar um backup limparia o acesso sem avisar.
+"Restaurar padrões" também preserva os providers.
+
 ## Medir antes de decidir sobre o CDP
 
 `action-stats.ts` conta o desfecho real de cada ação: total, quantas saíram **sem efeito
