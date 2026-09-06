@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { AudioLines, Check, ChevronDown, Mic, Radio } from "lucide-react";
 import { VelaOrbRenderer } from "./orb-renderer";
 import { AmbientEdgeVisual, VISUALS } from "./voice-visuals";
-import { VoiceVisual } from "./gl-visual";
+import { VoiceVisual, shadersAvailable } from "./gl-visual";
 import { MotionState } from "./motion-tokens";
 import { VoiceVisualMetrics } from "./audio-metrics";
 
@@ -17,7 +17,10 @@ export function VelaOrb({ state = "idle", size = 34, metrics, visual }: { state?
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     // Abaixo de 24px o shader é desperdício: nesse tamanho nada do detalhe aparece.
     const entry = size >= 24 ? VISUALS.find((item) => item.id === visual) : undefined;
-    const candidate = entry?.create(canvasRef.current, { reducedMotion: reduced });
+    // Sonda num canvas descartável: pedir "webgl" aqui e falhar deixaria este canvas incapaz de
+    // receber o contexto 2D do renderer de reserva.
+    const wanted = entry && (!entry.webgl || shadersAvailable()) ? entry : undefined;
+    const candidate = wanted?.create(canvasRef.current, { reducedMotion: reduced });
     const usable = candidate && (!("ok" in candidate) || (candidate as { ok: boolean }).ok);
     if (candidate && !usable) candidate.destroy();
     const renderer = usable ? candidate : new VelaOrbRenderer(canvasRef.current, { reducedMotion: reduced });

@@ -1,4 +1,6 @@
 import { VelaOrbRenderer } from "./orb-renderer";
+import { VISUALS } from "./voice-visuals";
+import { VoiceVisual, shadersAvailable } from "./gl-visual";
 import { VoiceVisualMetrics } from "./audio-metrics";
 import { MotionState } from "./motion-tokens";
 
@@ -37,8 +39,10 @@ type PulseHandlers = { onStop: () => void; onMute: () => void; onApprove: (id: s
 export class PulsePanel {
   private readonly root: ShadowRoot;
   private readonly panel: HTMLDivElement;
-  private readonly canvas: HTMLCanvasElement;
-  private readonly renderer: VelaOrbRenderer;
+  private canvas: HTMLCanvasElement;
+  private visualId = "particle-orb";
+  private motion: MotionState = "idle";
+  private renderer: VoiceVisual | null = null;
   private readonly stateLabel: HTMLSpanElement;
   private readonly transcript: HTMLParagraphElement;
   private readonly cardSlot: HTMLDivElement;
@@ -59,7 +63,7 @@ export class PulsePanel {
     this.panel.hidden = true;
     this.panel.innerHTML = `
       <div class="head"><b>Pulse</b><span class="mini-row"><span class="mini-state"></span></span><span class="controls"><button class="min" aria-label="Minimizar">—</button><button class="close" aria-label="Fechar">×</button></span></div>
-      <div class="body"><canvas class="orb" width="64" height="64" style="width:64px;height:64px"></canvas><span class="state">Live Voice</span><p class="transcript"></p></div>
+      <div class="body"><canvas class="orb" width="96" height="96" style="width:96px;height:96px"></canvas><span class="state">Live Voice</span><p class="transcript"></p></div>
       <div class="actions"><button class="mute">Microfone</button><button class="stop">Encerrar</button></div>
       <div class="cards"></div>`;
 
@@ -71,8 +75,7 @@ export class PulsePanel {
     this.transcript = this.panel.querySelector(".transcript") as HTMLParagraphElement;
     this.cardSlot = this.panel.querySelector(".cards") as HTMLDivElement;
     this.miniLabel = this.panel.querySelector(".mini-state") as HTMLSpanElement;
-    this.renderer = new VelaOrbRenderer(this.canvas, { reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches });
-    this.renderer.start();
+
 
     this.panel.querySelector(".close")?.addEventListener("click", () => { this.hide(); handlers.onStop(); });
     this.panel.querySelector(".stop")?.addEventListener("click", () => { this.hide(); handlers.onStop(); });
@@ -134,17 +137,46 @@ export class PulsePanel {
     this.applyPosition();
   }
 
-  show() { this.panel.hidden = false; this.renderer.resize(); }
+  show() { this.panel.hidden = false; this.mountRenderer(); this.renderer?.resize(); }
   hide() { this.panel.hidden = true; this.clearCards(); }
 
   setState(state: MotionState, label: string) {
-    this.renderer.setState(state);
+    this.motion = state;
+    this.renderer?.setState(state);
     this.stateLabel.textContent = label;
     this.miniLabel.textContent = label;
     this.panel.classList.toggle("waiting", state === "waiting");
   }
 
-  setMetrics(metrics: VoiceVisualMetrics) { this.renderer.setMetrics(metrics); }
+  setMetrics(metrics: VoiceVisualMetrics) { this.renderer?.setMetrics(metrics); }
+
+  /** Só registra a escolha; quem monta é `mountRenderer`, no momento em que o painel aparece. */
+  setVisual(id: string) { this.visualId = id; }
+
+  /**
+   * Monta o renderer uma vez por exibição. Cai no orb de partículas quando o visual escolhido
+   * não existe ou o shader não sobe nesta página — a presença da Vela não pode sumir porque a
+   * GPU recusou.
+   */
+  private mountRenderer() {
+    if (this.renderer) return;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const entry = VISUALS.find((item) => item.id === this.visualId);
+    if (entry && (!entry.webgl || shadersAvailable())) {
+      const candidate = entry.create(this.canvas, { reducedMotion: reduced });
+      if (!("ok" in candidate) || (candidate as { ok: boolean }).ok) {
+        this.renderer = candidate;
+        candidate.setState(this.motion);
+        candidate.resize();
+        candidate.start();
+        return;
+      }
+      candidate.destroy();
+    }
+    this.renderer = new VelaOrbRenderer(this.canvas, { reducedMotion: reduced });
+    this.renderer.setState(this.motion);
+    this.renderer.start();
+  }
   setTranscript(text: string) { this.transcript.textContent = text; }
   private clearCards() { this.cardSlot.replaceChildren(); }
 

@@ -21,7 +21,7 @@ function start() {
 
   traceLayer.setPauseHandler(() => send({ type: "agent:pause" }));
 
-  chrome.runtime.onMessage.addListener((message: { type: string; action?: BrowserAction; actionId?: string; trace?: TraceConfig; ghost?: boolean; state?: string; motion?: string; sessionTitle?: string; metrics?: VoiceVisualMetrics; text?: string; id?: string; summary?: string; detail?: string; reason?: string; expected?: string }, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message: { type: string; action?: BrowserAction; actionId?: string; trace?: TraceConfig; ghost?: boolean; state?: string; motion?: string; sessionTitle?: string; metrics?: VoiceVisualMetrics; text?: string; id?: string; summary?: string; detail?: string; reason?: string; expected?: string; visual?: string }, _sender, sendResponse) => {
     if (message.type === "agent:ping") { sendResponse({ ok: true }); return false; }
 
     if (message.type === "trace:session") {
@@ -48,7 +48,7 @@ function start() {
     if (isTopFrame && message.type.startsWith("pulse:")) {
       const panel = ensurePulse();
       if (message.type === "pulse:hide") panel.hide();
-      if (message.type === "pulse:show") { panel.show(); panel.setState("listening", message.state ?? "Ouvindo"); }
+      if (message.type === "pulse:show") { if (message.visual) panel.setVisual(message.visual); panel.show(); panel.setState("listening", message.state ?? "Ouvindo"); }
       if (message.type === "pulse:set-state") panel.setState((message.motion ?? "listening") as MotionState, message.state ?? "Vela");
       if (message.type === "pulse:metrics" && message.metrics) panel.setMetrics(message.metrics);
       if (message.type === "pulse:transcript") panel.setTranscript(message.text ?? "");

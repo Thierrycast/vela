@@ -10,7 +10,7 @@ import * as agentLoop from "./agent-loop";
 import * as conversation from "./conversation";
 import { injectIntoActiveTab, syncContentScriptRegistration } from "./injection";
 import { bridgeStatus, configureBridge, onKeepAliveAlarm, syncBridge } from "./bridge";
-import { SETTINGS_KEY } from "./storage";
+import { SETTINGS_KEY, loadSettings } from "./storage";
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -172,7 +172,12 @@ async function startVoice(mode: "live" | "dictation") {
     await ensureVoiceRuntime();
     voiceMode = mode;
     void chrome.runtime.sendMessage({ type: "voice:start", mode }).catch(() => undefined);
-    if (mode === "live") void notifyTabs({ type: "pulse:show", state: "Ouvindo" });
+    if (mode === "live") {
+      // A preferência viaja junto: o content script não lê settings, e pedir depois deixaria o
+      // Pulse aparecendo com um visual e trocando para outro na frente do usuário.
+      const settings = await loadSettings();
+      void notifyTabs({ type: "pulse:show", state: "Ouvindo", visual: settings.voice.visual });
+    }
   } catch (error) {
     voiceMode = "off";
     broadcast({ type: "voice:error", message: error instanceof Error ? error.message : "Falha ao iniciar a voz." });

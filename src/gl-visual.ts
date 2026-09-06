@@ -203,6 +203,19 @@ const parseColor = (hex: string): [number, number, number] => {
 export type ShaderVisualOptions = { signal?: string; accent?: string; reducedMotion?: boolean };
 
 /**
+ * WebGL disponível? Testado num canvas descartável de propósito: um canvas só aceita um tipo de
+ * contexto para sempre, então sondar no canvas real o queimaria para o renderer 2D de reserva.
+ */
+export function shadersAvailable(): boolean {
+  try {
+    const probe = document.createElement("canvas");
+    return !!probe.getContext("webgl", { failIfMajorPerformanceCaveat: false });
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Um quad que cobre a tela e um fragment shader. Não há geometria, câmera nem cena — por isso
  * uma biblioteca 3D não se paga aqui: seria um runtime inteiro para desenhar um retângulo.
  */

@@ -299,6 +299,21 @@ Ouvir e falar ficam em extremos opostos de temperatura — azul frio contra âmb
 quem está falando é a informação mais importante da tela, e matizes vizinhos não separam isso.
 O estado `acting` usa exatamente o ciano da moldura de controle: são o mesmo momento.
 
+### Um canvas aceita um contexto e nunca mais outro
+
+Depois de `getContext("2d")`, pedir `"webgl"` no mesmo elemento devolve `null` para sempre. Isso
+quebrou o Pulse de um jeito silencioso: ele criava o orb de partículas no construtor, e a troca
+para o shader escolhido falhava sem erro nenhum — só continuava mostrando o renderer antigo.
+
+A correção não foi trocar o elemento (frágil), foi **não criar renderer no construtor**: o Pulse
+monta o visual uma vez, em `show()`, quando a preferência já é conhecida. Pelo mesmo motivo
+existe `shadersAvailable()`, que sonda num canvas descartável — sondar no canvas real o
+queimaria para o renderer 2D de reserva.
+
+O custo de levar os shaders ao content script é real: `content.js` foi de 33 KB para 56 KB
+(18,7 KB gzip). É o preço de o Pulse poder usar qualquer visual escolhido; a infra WebGL é o
+grosso, não os shaders em si, então recortar a tabela economizaria pouco.
+
 ### Onde cada um pode rodar
 
 O Pulse vive **dentro da página do usuário**: shader ali gasta a GPU do site que ele está usando.

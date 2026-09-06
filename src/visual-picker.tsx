@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { VISUALS, VisualId } from "./voice-visuals";
-import { VoiceVisual } from "./gl-visual";
+import { VoiceVisual, shadersAvailable } from "./gl-visual";
 import { MotionState } from "./motion-tokens";
 import { VoiceVisualMetrics } from "./audio-metrics";
 
@@ -35,7 +35,9 @@ export function VisualPicker({ value, onChange }: { value: string; onChange: (vi
 function VisualPreview({ id }: { id: VisualId }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const visualRef = useRef<VoiceVisual | null>(null);
-  const [failed, setFailed] = useState(false);
+  // O aviso de falha é alternado por ref: virar estado obrigaria a chamar setState dentro do
+  // efeito, e a mensagem não participa de mais nada no render.
+  const noticeRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -43,8 +45,10 @@ function VisualPreview({ id }: { id: VisualId }) {
     const entry = VISUALS.find((item) => item.id === id);
     if (!entry) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const show = (visible: boolean) => { if (noticeRef.current) noticeRef.current.hidden = !visible; };
+    if (entry.webgl && !shadersAvailable()) { show(true); return; }
     const visual = entry.create(canvas, { reducedMotion: reduced });
-    setFailed("ok" in visual && !(visual as { ok: boolean }).ok);
+    show("ok" in visual && !(visual as { ok: boolean }).ok);
     visual.start();
     visualRef.current = visual;
 
@@ -72,6 +76,6 @@ function VisualPreview({ id }: { id: VisualId }) {
 
   return <span className="visual-stage">
     <canvas ref={canvasRef} />
-    {failed && <em>sem WebGL</em>}
+    <em ref={noticeRef} hidden>sem WebGL</em>
   </span>;
 }
