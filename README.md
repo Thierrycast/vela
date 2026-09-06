@@ -91,7 +91,11 @@ A página inicial lista as superfícies e os estados:
 | `/panel.html?estado=suavez` | tomada de controle |
 | `/options.html` | configurações, todas as seções |
 
-O painel foi desenhado para ~380 px de largura — vale ajustar o viewport da ferramenta.
+O painel vem contido em largura de barra lateral (380 px) e **centralizado** — encostado numa
+borda ele sai do recorte quando a ferramenta captura um viewport mais estreito que a janela.
+Para outra largura, `?largura=440` (aceita 260 a 640). As configurações abrem em tela cheia,
+que é como elas realmente aparecem.
+
 O dublê vive em `tools/preview/chrome-stub.ts`; novos estados entram lá.
 
 ## Scripts
