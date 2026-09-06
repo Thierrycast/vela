@@ -1,4 +1,4 @@
-import { STATE_MOOD, ShaderVisual, ShaderVisualOptions, VoiceVisual } from "./gl-visual";
+import { STATE_CHARACTER, STATE_MOOD, ShaderVisual, ShaderVisualOptions, VoiceVisual } from "./gl-visual";
 import { VelaOrbRenderer } from "./orb-renderer";
 import { MotionState } from "./motion-tokens";
 import { VoiceVisualMetrics, emptyVoiceMetrics } from "./audio-metrics";
@@ -13,33 +13,41 @@ import { VoiceVisualMetrics, emptyVoiceMetrics } from "./audio-metrics";
 const LIQUID_BLOB = `
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / min(uResolution.x, uResolution.y);
+  // Erro parte a silhueta em fatias que se afastam.
+  uv = shatterAt(uv, uShatter);
 
-  // Respiração sem período. A energia entra no tamanho, nunca no relógio.
   float breath = wander(3.7, 0.11) * 0.02;
-  float pull = uListening * 0.05 - uAgent * 0.035;
-  float base = 0.30 + breath - pull + uEnergy * 0.085 + uBass * 0.04;
+  float base = 0.30 + breath - uInward * 0.055 + uEnergy * 0.085 + uBass * 0.04;
 
   float flow = uTime * 0.16;
-  vec2 warped = warp(uv * 1.6 + vec2(flow * 0.5, wander(9.1, 0.07) * 0.3), 0.34 + uMid * 0.5, flow);
+  vec2 field = rotate(uv, uSpin);
+  vec2 warped = warp(field * 1.6 + vec2(flow * 0.5, wander(9.1, 0.07) * 0.3), (0.22 + uTurbulence * 0.5) + uMid * 0.4, flow);
 
   float shape = circle(uv, vec2(0.0), base);
   for (int index = 0; index < 4; index++) {
     float seed = float(index) * 7.31;
-    // Cada bolha vagueia no seu próprio campo: nunca voltam ao mesmo arranjo.
-    vec2 center = vec2(wander(seed, 0.13), wander(seed + 41.7, 0.11)) * (0.13 + uMid * 0.16);
+    vec2 orbit = vec2(wander(seed, 0.13), wander(seed + 41.7, 0.11));
+    vec2 center = rotate(orbit, uSpin * 1.4) * (0.13 + uMid * 0.16 + (1.0 - uCohesion) * 0.34);
     float radius = (0.085 + drift(seed + 3.3, 0.09) * 0.05) * (0.75 + uHigh * 0.85);
-    shape = smoothMin(shape, circle(uv, center, radius), 0.12 + uEnergy * 0.07);
+    shape = smoothMin(shape, circle(uv, center, radius), (0.03 + uCohesion * 0.11) + uEnergy * 0.06);
   }
-  shape += (fbm(warped * 2.4) - 0.5) * (0.04 + uHigh * 0.07);
+  shape += (fbm(warped * 2.4) - 0.5) * (0.02 + uTurbulence * 0.05 + uHigh * 0.06);
+
+  // O gesto do estado: ondas para dentro quando ouve, para fora quando fala.
+  float ondas = ripple(uv, 2.6, 24.0) * (uWaveIn * -1.0 + uWaveOut) * (0.006 + uEnergy * 0.014);
+  shape += ondas;
 
   float body = smoothstep(0.012, -0.012, shape);
-  float rim = smoothstep(0.07, 0.0, abs(shape)) * (0.45 + uEnergy * 1.0);
-  float glow = exp(-max(shape, 0.0) * 12.0) * (0.3 + uEnergy * 0.8);
+  float rim = smoothstep(0.07, 0.0, abs(shape)) * (0.45 + uEnergy * 1.1);
+  float glow = exp(-max(shape, 0.0) * 12.0) * (0.22 + uEnergy * 0.5);
 
   float depth = fbm(warped * 3.0 + flow);
-  vec3 tint = mix(uMood, uAccent, uAgent * 0.4);
-  vec3 inner = mix(tint, tint * vec3(1.25, 1.1, 1.35), clamp(depth, 0.0, 1.0));
-  vec3 color = inner * (0.4 + depth * 0.8) * body + tint * rim * 0.95 + tint * glow * 0.6;
+  float faixas = bandsAt(field, 4.0) * 0.5 + 0.5;
+
+  // Densidade, não claridade: energia escurece e satura o miolo.
+  vec3 nucleo = uMood * (0.95 - uEnergy * 0.42) * (0.55 + depth * 0.5) * (1.0 + faixas * uBands * 0.28);
+  vec3 borda = uMood * (1.15 + uEnergy * 0.35);
+  vec3 color = nucleo * body + borda * rim * 0.9 + uMood * glow * 0.45;
 
   float alpha = clamp(body + rim * 0.8 + glow * 0.5, 0.0, 1.0) * uAlpha;
   gl_FragColor = vec4(color * alpha, alpha);
@@ -51,21 +59,23 @@ const ENERGY_FIELD = `
 void main() {
   vec2 uv = gl_FragCoord.xy / uResolution;
   vec2 aspect = vec2(uResolution.x / uResolution.y, 1.0);
-  vec2 point = (uv - 0.5) * aspect;
+  vec2 point = rotate((uv - 0.5) * aspect, uSpin * 0.35);
+  point = shatterAt(point, uShatter * 0.6);
   float flow = uTime * 0.09;
 
   vec2 wanderOffset = vec2(wander(2.3, 0.06), wander(17.7, 0.05)) * 0.4;
-  vec2 warped = warp(point * 2.2 + wanderOffset + vec2(flow, flow * 0.4), 0.75 + uBass * 1.1, flow);
+  vec2 warped = warp(point * 2.2 + wanderOffset + vec2(flow, flow * 0.4), 0.4 + uTurbulence * 0.7 + uBass * 0.9, flow);
   float field = fbm(warped * 1.8 + vec2(0.0, flow * 1.6));
   float ridge = abs(field - 0.5) * 2.0;
-  float veil = pow(1.0 - ridge, 2.4 + uMid * 2.0);
+  float veil = pow(1.0 - ridge, 1.6 + (1.0 - uTurbulence) * 2.4 + uMid * 1.6);
+  veil *= 1.0 + ripple(point, 2.0, 14.0) * (uWaveIn * -1.0 + uWaveOut) * 0.25;
+  veil *= 1.0 + bandsAt(point, 3.0) * uBands * 0.3;
 
-  float center = 1.0 - smoothstep(0.0, 0.95, length(point));
-  float intensity = veil * center * (0.26 + uEnergy * 1.6);
+  float reach = 0.95 - uInward * 0.28;
+  float center = 1.0 - smoothstep(0.0, reach, length(point));
+  float intensity = veil * center * (0.24 + uEnergy * 1.35);
 
-  vec3 color = mix(uMood, uMood * vec3(1.4, 0.85, 1.3), clamp(field * 0.8, 0.0, 1.0));
-  color += uMood * pow(veil, 6.0) * uHigh * 0.9;
-
+  vec3 color = uMood * (1.05 - uEnergy * 0.3) + uMood * pow(veil, 6.0) * uHigh * 0.7;
   float alpha = clamp(intensity, 0.0, 1.0) * uAlpha;
   gl_FragColor = vec4(color * alpha, alpha);
 }
@@ -81,23 +91,30 @@ vec3 blob(vec2 point, vec2 center, vec3 color, float radius, float strength) {
 void main() {
   vec2 uv = gl_FragCoord.xy / uResolution;
   vec2 aspect = vec2(uResolution.x / uResolution.y, 1.0);
-  vec2 point = (uv - 0.5) * aspect;
+  vec2 point = rotate((uv - 0.5) * aspect, uSpin * 0.25);
+  point = shatterAt(point, uShatter * 0.5);
   float flow = uTime * 0.07;
 
-  vec2 wanderOffset = (vec2(fbm(point * 1.2 + flow), fbm(point * 1.2 - flow + 3.1)) - 0.5) * (0.22 + uMid * 0.35);
+  vec2 wanderOffset = (vec2(fbm(point * 1.2 + flow), fbm(point * 1.2 - flow + 3.1)) - 0.5) * (0.12 + uTurbulence * 0.3 + uMid * 0.3);
   vec2 field = point + wanderOffset;
 
-  vec3 warm = mix(uMood, vec3(0.98, 0.5, 0.28), 0.4);
-  vec3 cool = mix(uMood, vec3(0.24, 0.5, 0.95), 0.3);
-  float lift = 0.32 + uEnergy * 1.2;
+  float lift = (0.3 + uEnergy * 0.85) * (1.0 + ripple(point, 1.8, 10.0) * (uWaveIn * -1.0 + uWaveOut) * 0.2);
+  float spread = 0.42 - uInward * 0.14;
+  float size = 0.44 - uInward * 0.08;
+
+  vec3 quente = uMood * vec3(1.25, 0.9, 0.7);
+  vec3 fria = uMood * vec3(0.7, 0.95, 1.2);
 
   vec3 color = vec3(0.0);
-  color += blob(field, vec2(wander(1.1, 0.09), wander(5.4, 0.08)) * 0.42, cool, 0.44, lift);
-  color += blob(field, vec2(wander(13.2, 0.07), wander(23.8, 0.1)) * 0.4, warm, 0.40, lift * (0.6 + uAgent * 0.7));
-  color += blob(field, vec2(wander(31.6, 0.11), wander(47.2, 0.06)) * 0.34, mix(cool, warm, 0.5), 0.34, lift * 0.8);
+  color += blob(field, vec2(wander(1.1, 0.09), wander(5.4, 0.08)) * spread, fria, size, lift);
+  color += blob(field, vec2(wander(13.2, 0.07), wander(23.8, 0.1)) * spread, quente, size * 0.9, lift * (0.6 + uAgent * 0.7));
+  color += blob(field, vec2(wander(31.6, 0.11), wander(47.2, 0.06)) * spread * 0.8, uMood, size * 0.78, lift * 0.8);
   color += blob(field, vec2(wander(59.3, 0.05) * 0.2, -0.45 + uBass * 0.12), uMood, 0.5, lift * (0.4 + uListening * 0.9));
 
-  float grain = (hash(gl_FragCoord.xy + uTime) - 0.5) * 0.02;
+  // Satura em vez de estourar: sem isto, dois focos somados passam de 1.0 e viram branco.
+  color = color / (1.0 + color * (0.35 + uEnergy * 0.55));
+
+  float grain = (hash(gl_FragCoord.xy + uTime) - 0.5) * (0.012 + uTurbulence * 0.03);
   float alpha = clamp(max(max(color.r, color.g), color.b), 0.0, 1.0) * uAlpha;
   gl_FragColor = vec4((color + grain) * alpha, alpha);
 }
@@ -107,20 +124,26 @@ void main() {
 const SOFT_ORB = `
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / min(uResolution.x, uResolution.y);
+  uv = shatterAt(uv, uShatter);
   float flow = uTime * 0.13;
-  float radius = 0.31 + wander(2.9, 0.10) * 0.016 + uEnergy * 0.07 - uListening * 0.028;
+  float radius = 0.31 + wander(2.9, 0.10) * 0.016 + uEnergy * 0.07 - uInward * 0.035;
 
-  float angle = atan(uv.y, uv.x);
-  // A borda ondula por ruído no ângulo e no tempo: sem senoide, sem simetria denunciando o loop.
+  vec2 field = rotate(uv, uSpin);
+  float angle = atan(field.y, field.x);
   float wobble = fbm(vec2(cos(angle), sin(angle)) * 2.4 + flow) - 0.5;
-  float distance = length(uv) - radius - wobble * (0.045 + uMid * 0.1);
+  float distance = length(uv) - radius - wobble * (0.02 + uTurbulence * 0.055 + uMid * 0.08);
+  distance += ripple(uv, 2.2, 20.0) * (uWaveIn * -1.0 + uWaveOut) * (0.005 + uEnergy * 0.012);
 
-  float body = smoothstep(0.008, -0.02, distance);
-  float sheen = smoothstep(0.05, -0.34, uv.y + fbm(uv * 3.0 + flow) * 0.2);
-  float glow = exp(-max(distance, 0.0) * 9.0) * (0.35 + uEnergy * 0.9);
+  float edge = mix(0.075, 0.008, uCohesion);
+  float body = smoothstep(edge, -0.02, distance);
+  // O brilho interno para de puxar para o branco: vira um tom claro da própria cor.
+  float sheen = smoothstep(0.05, -0.34, field.y + fbm(field * 3.0 + flow) * 0.2);
+  float glow = exp(-max(distance, 0.0) * 9.0) * (0.22 + uEnergy * 0.55);
+  float faixas = bandsAt(field, 5.0) * 0.5 + 0.5;
 
-  vec3 deep = uMood * 0.85;
-  vec3 color = mix(deep, mix(uMood, vec3(0.96), 0.7), sheen * 0.55) * body + uMood * glow * 0.55;
+  vec3 nucleo = uMood * (0.9 - uEnergy * 0.38) * (1.0 + faixas * uBands * 0.22);
+  vec3 alto = mix(uMood, uMood * 1.6 + vec3(0.12), 0.55);
+  vec3 color = mix(nucleo, alto, sheen * (0.45 - uEnergy * 0.18)) * body + uMood * glow * 0.5;
   float alpha = clamp(body + glow * 0.55, 0.0, 1.0) * uAlpha;
   gl_FragColor = vec4(color * alpha, alpha);
 }
@@ -202,13 +225,16 @@ export class AmbientEdgeVisual implements VoiceVisual {
     ctx.clearRect(0, 0, width, height);
     ctx.globalCompositeOperation = "lighter";
 
-    const speed = STATE_SPEED[this.state] ?? 0.16;
+    // A borda bebe da mesma tabela dos shaders: um estado tem um caráter só, em qualquer renderer.
+    const character = STATE_CHARACTER[this.state];
+    const speed = (STATE_SPEED[this.state] ?? 0.16) * (0.5 + character.pace * 0.5);
     // Sem microfone aberto não há energia nenhuma, e a borda ficaria apagada justamente quando o
     // agente está trabalhando. O estado sozinho já acende: energia é o que faz a luz respirar.
-    const pulse = noiseAt(this.time * (this.state === "acting" ? 0.55 : 0.34)) * 0.34;
+    const pulse = noiseAt(this.time * (0.22 + character.pace * 0.2)) * (0.18 + character.turbulence * 0.3);
     const stateEnergy = (STATE_ENERGY[this.state] ?? 0.12) * (0.72 + pulse);
     const intensity = stateEnergy + this.current.energy * 0.7;
-    const spread = Math.max(width, height) * (0.5 + this.current.bass * 0.28);
+    // Contrai quando ouve, espalha quando fala — o mesmo inward dos shaders.
+    const spread = Math.max(width, height) * (0.5 - character.inward * 0.12 + this.current.bass * 0.28);
 
     // Dois focos em fases opostas percorrendo o perímetro: a luz nunca "pisca" ao dar a volta.
     for (let index = 0; index < 2; index += 1) {

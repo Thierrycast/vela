@@ -3,6 +3,8 @@ import { Mic, RefreshCw } from "lucide-react";
 import { AppSettings } from "./types";
 import { ConnectionCheck, checkVoiceEndpoint, listVoices } from "./provider";
 import { Select } from "./select";
+import { VisualPicker } from "./visual-picker";
+import { VisualId } from "./voice-visuals";
 
 type MicrophoneState = "unknown" | "granted" | "denied" | "prompt" | "asking" | "error";
 
@@ -76,6 +78,10 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
   return <>
     <h1>Voz</h1>
     <p className="section-intro">A voz fala com um servidor próprio, separado do provider de texto — transcrição e síntese não passam pelo gateway do chat. O runtime continua vivo num documento offscreen mesmo com a sidebar fechada.</p>
+
+    <h2 className="subsection">Aparência da voz</h2>
+    <p className="picker-intro">Como a Vela se mostra enquanto ouve e fala. Cada opção passeia sozinha pelos estados: azul quando é você falando, âmbar quando é ela.</p>
+    <VisualPicker value={voice.visual} onChange={(visual: VisualId) => patch({ visual })} />
 
     <h2 className="subsection">Microfone</h2>
     <div className="settings-group">

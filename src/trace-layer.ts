@@ -6,6 +6,14 @@ export type TraceConfig = { cursor: boolean; border: boolean; highlight: boolean
 const ARRIVAL_TOLERANCE = 6;
 const TRAVEL_DEADLINE: Record<CursorSpeed, number> = { natural: 450, fast: 220, instant: 0 };
 
+/**
+ * As cores desta camada são as mesmas de `STATE_MOOD` em gl-visual.ts: ciano é o estado
+ * `acting` e âmbar é o `waiting`. A moldura acesa e o visual de voz descrevem o mesmo momento,
+ * então precisam falar a mesma língua — se um mudar de tom, o outro muda junto.
+ *
+ * Ficam literais aqui porque este arquivo vira CSS dentro de um shadow root na página do
+ * usuário, onde não há tokens nem imports para resolver.
+ */
 const STYLE = `
 .border{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity 380ms cubic-bezier(.2,.8,.2,1);z-index:0}
 .border.on{opacity:1}

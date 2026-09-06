@@ -2,24 +2,30 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { AudioLines, Check, ChevronDown, Mic, Radio } from "lucide-react";
 import { VelaOrbRenderer } from "./orb-renderer";
-import { AmbientEdgeVisual } from "./voice-visuals";
+import { AmbientEdgeVisual, VISUALS } from "./voice-visuals";
+import { VoiceVisual } from "./gl-visual";
 import { MotionState } from "./motion-tokens";
 import { VoiceVisualMetrics } from "./audio-metrics";
 
 export type VelaState = MotionState;
 
-export function VelaOrb({ state = "idle", size = 34, metrics }: { state?: VelaState; size?: number; metrics?: VoiceVisualMetrics }) {
+export function VelaOrb({ state = "idle", size = 34, metrics, visual }: { state?: VelaState; size?: number; metrics?: VoiceVisualMetrics; visual?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rendererRef = useRef<VelaOrbRenderer | null>(null);
+  const rendererRef = useRef<VoiceVisual | null>(null);
   useEffect(() => {
     if (!canvasRef.current) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const renderer = new VelaOrbRenderer(canvasRef.current, { reducedMotion: reduced });
+    // Abaixo de 24px o shader é desperdício: nesse tamanho nada do detalhe aparece.
+    const entry = size >= 24 ? VISUALS.find((item) => item.id === visual) : undefined;
+    const candidate = entry?.create(canvasRef.current, { reducedMotion: reduced });
+    const usable = candidate && (!("ok" in candidate) || (candidate as { ok: boolean }).ok);
+    if (candidate && !usable) candidate.destroy();
+    const renderer = usable ? candidate : new VelaOrbRenderer(canvasRef.current, { reducedMotion: reduced });
     renderer.start(); rendererRef.current = renderer;
     const observer = new ResizeObserver(() => renderer.resize()); observer.observe(canvasRef.current);
     const visibility = new IntersectionObserver(([entry]) => renderer.setVisible(entry.isIntersecting)); visibility.observe(canvasRef.current);
     return () => { observer.disconnect(); visibility.disconnect(); renderer.destroy(); rendererRef.current = null; };
-  }, []);
+  }, [visual, size]);
   useEffect(() => { rendererRef.current?.setState(state); }, [state]);
   useEffect(() => { if (metrics) rendererRef.current?.setMetrics(metrics); }, [metrics]);
   return <canvas ref={canvasRef} className={`vela-orb-canvas state-${state}`} style={{ width: size, height: size }} aria-label={`Vela: ${state}`} role="img" />;

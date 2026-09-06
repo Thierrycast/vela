@@ -45,6 +45,8 @@ export type AppSettings = {
     speechModel: string;
     speechVoice: string;
     streamingUrl: string;
+    /** Qual visual representa a Vela quando ela ouve e fala. Ver voice-visuals.ts. */
+    visual: string;
   };
 };
 
@@ -134,5 +136,6 @@ export const defaultSettings: AppSettings = {
     speechModel: "tts-1",
     speechVoice: "",
     streamingUrl: "ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream",
+    visual: "liquid-blob",
   },
 };

@@ -201,7 +201,7 @@ function App() {
     <section className="conversation" ref={streamRef}>
       {bubbles.length === 0
         ? <div className="welcome">
-            <div className="welcome-mark"><VelaOrb state={agentState} size={28} /></div>
+            <div className="welcome-mark"><VelaOrb state={agentState} size={64} visual={settings.voice.visual} /></div>
             <h1>Como posso ajudar?</h1>
             <p>{configured ? "Converse, pesquise e deixe o agente cuidar do navegador." : "Configure um provider nas opções para começar."}</p>
             <div className="suggestions">

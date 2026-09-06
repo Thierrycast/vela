@@ -20,21 +20,54 @@ export type VoiceVisual = {
  * visual não dizia nada sobre o que estava acontecendo — só que algo estava.
  */
 export const STATE_MOOD: Record<MotionState, [number, number, number]> = {
-  idle: [0.35, 0.84, 0.80],
-  listening: [0.35, 0.88, 0.99],
-  thinking: [0.55, 0.52, 0.95],
-  speaking: [0.45, 0.88, 0.72],
-  acting: [0.99, 0.72, 0.35],
-  waiting: [0.95, 0.76, 0.38],
-  paused: [0.55, 0.60, 0.62],
-  error: [0.95, 0.42, 0.42],
-  complete: [0.52, 0.92, 0.62],
+  idle: [0.32, 0.55, 0.58],
+  // Quem está falando é a informação mais importante da tela, então "você" e "ela" ficam em
+  // extremos opostos de temperatura: azul frio contra âmbar quente. Matizes vizinhos não servem.
+  listening: [0.20, 0.58, 1.00],
+  thinking: [0.60, 0.38, 0.94],
+  speaking: [1.00, 0.64, 0.20],
+  // Agindo usa exatamente o ciano da moldura de controle: são a mesma coisa acontecendo.
+  acting: [0.345, 0.847, 0.804],
+  waiting: [0.93, 0.80, 0.42],
+  paused: [0.48, 0.53, 0.55],
+  error: [0.42, 0.07, 0.15],
+  complete: [0.35, 0.90, 0.55],
 };
 
-/** Ritmo por estado — o que o volume jamais deve controlar. */
-export const STATE_PACE: Record<MotionState, number> = {
-  idle: 0.45, listening: 0.8, thinking: 1.35, speaking: 1.0, acting: 1.6,
-  waiting: 0.6, paused: 0.22, error: 0.5, complete: 1.1,
+/**
+ * O caráter do movimento, por estado. Ritmo é só a velocidade; o resto é o jeito de se mover.
+ *
+ * - `inward` positivo contrai (o usuário fala e a forma absorve), negativo expande (a Vela emite)
+ * - `spin` gira o campo interno sem mexer na silhueta — é o que faz "pensando" parecer pensar
+ * - `turbulence` mede a agitação da superfície
+ * - `cohesion` abaixo de 1 deixa as partes se soltarem: é como o erro se desfaz
+ */
+export type StateCharacter = {
+  pace: number;
+  spin: number;
+  inward: number;
+  turbulence: number;
+  cohesion: number;
+  /** Ondas concêntricas viajando para o centro — a forma absorve o que você diz. */
+  waveIn: number;
+  /** Ondas saindo do centro — a forma emite. */
+  waveOut: number;
+  /** Faixas girando por dentro sem mexer na silhueta. */
+  bands: number;
+  /** Fatias angulares deslocadas: a forma perde a inteireza. */
+  shatter: number;
+};
+
+export const STATE_CHARACTER: Record<MotionState, StateCharacter> = {
+  idle:      { pace: 0.40, spin:  0.08, inward:  0.00, turbulence: 0.22, cohesion: 1.00, waveIn: 0.00, waveOut: 0.10, bands: 0.00, shatter: 0.00 },
+  listening: { pace: 0.85, spin:  0.16, inward:  0.75, turbulence: 0.38, cohesion: 1.00, waveIn: 1.00, waveOut: 0.00, bands: 0.00, shatter: 0.00 },
+  thinking:  { pace: 1.30, spin:  1.00, inward:  0.18, turbulence: 0.42, cohesion: 0.96, waveIn: 0.00, waveOut: 0.00, bands: 1.00, shatter: 0.00 },
+  speaking:  { pace: 1.00, spin:  0.32, inward: -0.65, turbulence: 0.52, cohesion: 1.00, waveIn: 0.00, waveOut: 1.00, bands: 0.00, shatter: 0.00 },
+  acting:    { pace: 1.70, spin:  0.55, inward: -0.28, turbulence: 0.85, cohesion: 0.90, waveIn: 0.00, waveOut: 0.45, bands: 0.55, shatter: 0.00 },
+  waiting:   { pace: 0.55, spin:  0.04, inward:  0.30, turbulence: 0.18, cohesion: 1.00, waveIn: 0.35, waveOut: 0.00, bands: 0.00, shatter: 0.00 },
+  paused:    { pace: 0.20, spin:  0.00, inward:  0.10, turbulence: 0.08, cohesion: 1.00, waveIn: 0.00, waveOut: 0.00, bands: 0.00, shatter: 0.00 },
+  error:     { pace: 0.55, spin: -0.45, inward:  0.15, turbulence: 1.00, cohesion: 0.50, waveIn: 0.00, waveOut: 0.00, bands: 0.00, shatter: 1.00 },
+  complete:  { pace: 1.05, spin:  0.22, inward: -0.42, turbulence: 0.30, cohesion: 1.00, waveIn: 0.00, waveOut: 0.80, bands: 0.00, shatter: 0.00 },
 };
 
 /** Ordem estável: o shader recebe o estado como número e compara com estes índices. */
@@ -71,6 +104,14 @@ uniform vec3 uAccent;
 uniform float uAlpha;
 uniform float uPace;
 uniform vec3 uMood;
+uniform float uSpin;
+uniform float uInward;
+uniform float uTurbulence;
+uniform float uCohesion;
+uniform float uWaveIn;
+uniform float uWaveOut;
+uniform float uBands;
+uniform float uShatter;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
 
@@ -118,6 +159,36 @@ float smoothMin(float first, float second, float radius) {
 }
 
 float circle(vec2 p, vec2 center, float radius) { return length(p - center) - radius; }
+
+/**
+ * Ondas concêntricas viajando para dentro ou para fora. A amplitude é modulada por ruído para a
+ * onda não virar um metrônomo visível.
+ */
+float ripple(vec2 p, float speed, float density) {
+  float distance = length(p);
+  float phase = distance * density - uTime * speed;
+  return sin(phase) * (0.6 + drift(distance * 3.0, 0.8) * 0.7);
+}
+
+/** Faixas girando por dentro: o desenho de "pensando". */
+float bandsAt(vec2 p, float count) {
+  float angle = atan(p.y, p.x);
+  return sin(angle * count + uSpin * 5.0 + drift(angle, 0.5) * 2.0);
+}
+
+/** Desloca fatias angulares em direções aleatórias: a forma deixa de ser uma só. */
+vec2 shatterAt(vec2 p, float amount) {
+  if (amount < 0.001) return p;
+  float slice = floor((atan(p.y, p.x) + 3.14159) / 0.9);
+  vec2 kick = vec2(hash(vec2(slice, 1.7)), hash(vec2(slice, 9.3))) - 0.5;
+  return p + kick * amount * (0.05 + drift(slice, 0.7) * 0.09);
+}
+
+vec2 rotate(vec2 p, float angle) {
+  float s = sin(angle);
+  float c = cos(angle);
+  return mat2(c, -s, s, c) * p;
+}
 `;
 
 type Uniforms = Record<string, WebGLUniformLocation | null>;
@@ -150,7 +221,8 @@ export class ShaderVisual implements VoiceVisual {
   private listening = 0;
   private agent = 0;
   private time = 0;
-  private pace = 1;
+  private spinAngle = 0;
+  private readonly character: StateCharacter = { ...STATE_CHARACTER.idle };
   private readonly mood: [number, number, number] = [0, 0, 0];
   private raf = 0;
   private lastFrame = 0;
@@ -213,7 +285,7 @@ export class ShaderVisual implements VoiceVisual {
     gl.enableVertexAttribArray(position);
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
 
-    for (const name of ["uResolution", "uTime", "uEnergy", "uBass", "uMid", "uHigh", "uSpeaking", "uState", "uListening", "uAgent", "uSignal", "uAccent", "uAlpha", "uPace", "uMood"]) {
+    for (const name of ["uResolution", "uTime", "uEnergy", "uBass", "uMid", "uHigh", "uSpeaking", "uState", "uListening", "uAgent", "uSignal", "uAccent", "uAlpha", "uPace", "uMood", "uSpin", "uInward", "uTurbulence", "uCohesion", "uWaveIn", "uWaveOut", "uBands", "uShatter"]) {
       this.uniforms[name] = gl.getUniformLocation(program, name);
     }
     gl.enable(gl.BLEND);
@@ -263,8 +335,14 @@ export class ShaderVisual implements VoiceVisual {
     if (!this.visible) return;
     const delta = Math.min(48, now - this.lastFrame);
     this.lastFrame = now;
-    this.pace += (STATE_PACE[this.state] - this.pace) * Math.min(1, delta / 1000 * 2.2);
-    this.time += (delta / 1000) * this.pace;
+    // Transição contínua entre caracteres: trocar de estado não pode dar um salto na forma.
+    const target = STATE_CHARACTER[this.state];
+    const blend = Math.min(1, delta / 1000 * 2.2);
+    for (const key of ["pace", "spin", "inward", "turbulence", "cohesion", "waveIn", "waveOut", "bands", "shatter"] as const) {
+      this.character[key] += (target[key] - this.character[key]) * blend;
+    }
+    this.time += (delta / 1000) * this.character.pace;
+    this.spinAngle += (delta / 1000) * this.character.spin;
     this.draw(delta);
     this.raf = requestAnimationFrame(this.render);
   };
@@ -280,9 +358,9 @@ export class ShaderVisual implements VoiceVisual {
     for (const key of ["energy", "bass", "mid", "high", "speaking"] as const) {
       this.current[key] += (this.target[key] - this.current[key]) * (ease || 1);
     }
-    const target = STATE_MOOD[this.state];
+    const mood = STATE_MOOD[this.state];
     for (let channel = 0; channel < 3; channel += 1) {
-      this.mood[channel] += (target[channel] - this.mood[channel]) * Math.min(1, delta / 1000 * 2.6);
+      this.mood[channel] += (mood[channel] - this.mood[channel]) * Math.min(1, delta / 1000 * 2.6);
     }
     const index = STATE_INDEX[this.state];
     this.stateValue += (index - this.stateValue) * Math.min(1, delta / 1000 * 6);
@@ -301,7 +379,15 @@ export class ShaderVisual implements VoiceVisual {
     gl.uniform1f(this.uniforms.uListening, this.listening);
     gl.uniform1f(this.uniforms.uAgent, this.agent);
     gl.uniform1f(this.uniforms.uAlpha, 1);
-    gl.uniform1f(this.uniforms.uPace, this.pace);
+    gl.uniform1f(this.uniforms.uPace, this.character.pace);
+    gl.uniform1f(this.uniforms.uSpin, this.spinAngle);
+    gl.uniform1f(this.uniforms.uInward, this.character.inward);
+    gl.uniform1f(this.uniforms.uTurbulence, this.character.turbulence);
+    gl.uniform1f(this.uniforms.uCohesion, this.character.cohesion);
+    gl.uniform1f(this.uniforms.uWaveIn, this.character.waveIn);
+    gl.uniform1f(this.uniforms.uWaveOut, this.character.waveOut);
+    gl.uniform1f(this.uniforms.uBands, this.character.bands);
+    gl.uniform1f(this.uniforms.uShatter, this.character.shatter);
     gl.uniform3fv(this.uniforms.uMood, this.mood);
     gl.uniform3fv(this.uniforms.uSignal, parseColor(this.options.signal));
     gl.uniform3fv(this.uniforms.uAccent, parseColor(this.options.accent));

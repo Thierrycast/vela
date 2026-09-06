@@ -277,6 +277,28 @@ do seguinte:
 O prelúdio GLSL compartilhado traz ruído por hash, fBm, `domain warping` e `smooth-min` — as
 quatro peças que produzem o aspecto líquido sem simulação de fluido.
 
+### Cada estado tem cor, ritmo e gesto
+
+`STATE_MOOD` e `STATE_CHARACTER` em `gl-visual.ts` são a fonte única. Três regras que custaram
+revisão para aparecer:
+
+- **Volume nunca mexe no tempo.** Havia `uTime * (base + uEnergy * k)` em todo shader, e falar
+  mais alto virava fast-forward. Energia é amplitude; a cadência vem de `pace`, que o estado
+  define.
+- **Volume adensa, não clareia.** Energia entrava somando luz e lavava a cor até quase branco.
+  Agora escurece e satura o núcleo, e o brilho fica só na borda — força se lê por densidade e
+  contraste.
+- **Nada de `sin(uTime)` como oscilador.** É periódico, e o olho acha o loop por mais camadas
+  que se somem. `drift` e `wander` somam ruído em escalas incomensuráveis entre si.
+
+Além de cor e ritmo, cada estado tem um **gesto**: `waveIn` (ondas para o centro, absorvendo),
+`waveOut` (emitindo), `bands` (faixas girando por dentro) e `shatter` (fatias que se soltam).
+Os pesos vêm do TypeScript para o shader não virar uma árvore de condicionais por pixel.
+
+Ouvir e falar ficam em extremos opostos de temperatura — azul frio contra âmbar quente — porque
+quem está falando é a informação mais importante da tela, e matizes vizinhos não separam isso.
+O estado `acting` usa exatamente o ciano da moldura de controle: são o mesmo momento.
+
 ### Onde cada um pode rodar
 
 O Pulse vive **dentro da página do usuário**: shader ali gasta a GPU do site que ele está usando.
