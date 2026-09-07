@@ -94,6 +94,12 @@ procurar.
 **Governar as abas dela.** `tab_manage` lista, foca e fecha as abas do grupo "Vela". Peça "fecha
 as abas que você abriu" e ela fecha; abas suas, fora do grupo, ela recusa.
 
+**Insistir do jeito certo quando o site ignora o clique.** Alguns sites só reagem a evento que o
+navegador marca como real. Com o **Modo preciso** ligado (Configurações → Agente), um clique que
+saiu "sem efeito perceptível" é repetido pelo depurador do Chrome — e a Vela então olha por 700 ms
+se a página reagiu, para dizer a verdade em vez de "cliquei de novo". Nasce desligado porque
+anexar o depurador faz o Chrome exibir uma faixa de aviso; ela some assim que a ação termina.
+
 **Mudar as próprias preferências.** "Troca para a voz do Cadu", "usa o mesh field", "desliga o
 cursor", "aumenta o limite de etapas" — `vela_settings` faz na hora, sem mandar você abrir a tela
 de configurações. Endereço de servidor, chaves e a autonomia ficam fora do alcance dela.

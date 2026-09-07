@@ -165,10 +165,29 @@ optional. This permission will be omitted."* Ou seja, não existe pedir CDP sob 
 do usuário — ou a permissão está em `permissions` desde a instalação, com o aviso de depuração no
 diálogo, ou não existe.
 
-Hoje ela **não** está declarada: a extensão instala sem aviso assustador e o caminho DOM cobre o
-uso. **A escalada em si não foi construída** — o sinal que a dispararia (`"sem efeito perceptível"`
-no resultado do clique) já existe. Quando for construída, a decisão passa a ser do usuário no
-momento da instalação, não no momento do uso.
+Ela está declarada, e a escalada existe: `cdp-actuator.ts` repete a ação por `Input.*` quando o
+caminho DOM não moveu a página. Como a permissão não pode ser opcional, a decisão foi partida em
+duas — o Chrome pede no momento da instalação, e o **Modo preciso** em Configurações → Agente
+decide se a Vela chega a exercê-la. Nasce desligado: permissão declarada não é permissão exercida.
+
+O gatilho é o resultado do próprio caminho DOM: clique com `"sem efeito perceptível"` ou tecla que
+saiu como `"tecla despachada"` (ninguém a consumiu, nada aconteceu). Aí `agent.ts` traduz o `ref`
+em coordenada de viewport (`agent:locate`, que também rola o alvo para a tela), despacha o evento
+confiável e **verifica** com `agent:watch` — 700 ms de `MutationObserver` mais comparação de URL.
+
+Três limites deliberados:
+
+- **Só no frame de cima.** `Input.dispatchMouseEvent` fala em coordenadas da aba; o retângulo lido
+  dentro de um iframe é relativo ao iframe. Somar as origens funciona até o primeiro iframe rolado
+  ou transformado — melhor não escalar do que clicar no lugar errado.
+- **Desanexa sempre**, no `finally`. Enquanto anexado, o Chrome mostra a faixa "a Vela está
+  depurando este navegador"; ela aparece pelo instante da ação, não pela sessão inteira.
+- **Nunca piora o resultado.** Se a escalada falhar, o resultado original volta intacto. Se ela
+  funcionar e ainda assim nada mudar, a resposta diz isso com todas as letras — é o que faz o
+  modelo parar de insistir num alvo que não faz o que ele imagina.
+
+O modo preciso **não** entra na lista branca do `vela_settings`, pela mesma razão que a autonomia
+não entra: quem decide se o depurador pode ser anexado não pode ser a própria agente.
 
 ### Aprovação mora no background
 
@@ -537,10 +556,8 @@ e aí a permissão `debugger` entra no manifest sabendo o que compra.
 
 Registradas para decisão, não esquecidas:
 
-1. **Escalada para CDP ("Modo preciso")** — o caminho DOM está pronto e emite o sinal que a
-   dispararia (`"sem efeito perceptível"`). O `chrome.debugger` já está em
-   `permissions` do manifest — e isso é uma decisão de instalação, não de sessão, porque o Chrome
-   não aceita `debugger` como permissão opcional.
+1. ~~**Escalada para CDP ("Modo preciso")**~~ — resolvida: `cdp-actuator.ts` mais o gatilho em
+   `agent.ts`, ligada em Configurações → Agente.
 2. ~~**Sem atalho de teclado**~~ — resolvido: `Alt+V`, alterável em `chrome://extensions/shortcuts`.
 3. **Aprovação com o painel fechado** só aparece se o Live Voice estiver ligado (é o Pulse que
    a mostra). Sem nenhuma das duas superfícies, a ação é recusada com `unattended`.

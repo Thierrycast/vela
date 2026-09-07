@@ -8,7 +8,8 @@
  * provider, chave de API e a porta da ponte ficam de fora porque mudá-los desliga a Vela ou
  * manda os dados do usuário para outro lugar — e nenhuma frase falada deveria conseguir isso.
  * Autonomia também fica de fora: é o freio que autoriza a própria agente a agir, e quem afrouxa
- * o freio não pode ser quem ele segura.
+ * o freio não pode ser quem ele segura. O modo preciso é da mesma família — ele decide se a Vela
+ * pode anexar o depurador do Chrome — e por isso também só se liga em Configurações.
  */
 import { AppSettings } from "./types";
 import { loadSettings, saveSettings } from "./storage";

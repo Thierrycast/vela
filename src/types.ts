@@ -34,6 +34,8 @@ export type AppSettings = {
     showTargetHighlights: boolean;
     cursorSpeed: CursorSpeed;
     maxRounds: number;
+    /** Repetir a ação por evento confiável (CDP) quando o caminho DOM não surtiu efeito. */
+    preciseMode: boolean;
   };
   context: { currentPage: boolean; selection: boolean; sessionTabs: boolean; outsideTabs: boolean };
   bridge: { enabled: boolean; port: number; token: string; scriptPath: string };
@@ -136,7 +138,7 @@ export const defaultSettings: AppSettings = {
     enabled: true,
     capabilities: { streaming: true, tools: true, vision: true, audio: false, webFetch: false },
   }],
-  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural", maxRounds: 12 },
+  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural", maxRounds: 12, preciseMode: false },
   context: { currentPage: true, selection: true, sessionTabs: true, outsideTabs: false },
   bridge: { enabled: false, port: 8792, token: "", scriptPath: "" },
   voice: {

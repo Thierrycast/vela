@@ -4,6 +4,7 @@ import { loadSettings } from "./storage";
 import { approvalKey, describeAction, isRisky, requestApproval } from "./approvals";
 import { span } from "./trace";
 import { adoptTab } from "./session";
+import { cdpAvailable, preciseClick, preciseKey } from "./cdp-actuator";
 
 const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "screenshot"];
 const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find", "screenshot"];
@@ -136,6 +137,77 @@ async function shrink(dataUrl: string): Promise<string> {
   }
 }
 
+/*
+ * A escalada para o modo preciso.
+ *
+ * O caminho DOM já tentou e a página não se mexeu. Duas explicações cabem: o alvo era mesmo
+ * inerte (um `<div>` decorativo), ou o site exige `event.isTrusted` e ignorou o evento sintético.
+ * Só o segundo caso tem conserto, e o conserto é repetir a ação pelo CDP.
+ *
+ * Três limites deliberados:
+ *
+ * - **Só no frame de cima.** `Input.dispatchMouseEvent` fala em coordenadas do viewport da aba;
+ *   o retângulo lido dentro de um iframe é relativo ao iframe. Somar as duas origens dá certo até
+ *   o primeiro iframe rolado ou transformado — melhor não escalar do que clicar no lugar errado.
+ * - **Verifica depois.** Sem `agent:watch` a resposta seria "cliquei de novo", que não é informação.
+ *   Com ele, ou a página reagiu e isso é dito, ou não reagiu e o modelo para de insistir.
+ * - **Nunca troca a falha por uma pior.** Se a escalada não conseguir nada, devolve o resultado
+ *   original inalterado.
+ */
+const NO_EFFECT = "sem efeito perceptível";
+const KEY_IGNORED = "tecla despachada";
+
+function wantsEscalation(action: BrowserAction, result: ActionResult): boolean {
+  if (!result.ok) return false;
+  if (action.type === "click") return result.summary.includes(NO_EFFECT);
+  if (action.type === "keyPress") return result.summary.includes(KEY_IGNORED);
+  return false;
+}
+
+async function watchPage(tabId: number, milliseconds: number): Promise<{ mutated: boolean; navigated: boolean }> {
+  try {
+    const response = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: "agent:watch", milliseconds }, { frameId: 0 }) as Promise<{ mutated: boolean; navigated: boolean }>,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), milliseconds + 800)),
+    ]);
+    return response ?? { mutated: false, navigated: false };
+  } catch {
+    return { mutated: false, navigated: false };
+  }
+}
+
+async function escalate(tabId: number, action: BrowserAction, result: ActionResult): Promise<ActionResult> {
+  const attempt = span("action", `modo preciso: ${action.type}`, { action });
+
+  let dispatched: { ok: boolean; detail: string };
+  if (action.type === "click") {
+    const point = await chrome.tabs.sendMessage(tabId, { type: "agent:locate", action }, { frameId: 0 })
+      .catch(() => null) as { x: number; y: number } | null;
+    if (!point) {
+      attempt.end({ ok: false, data: { motivo: "o alvo não pôde ser localizado na tela" } });
+      return result;
+    }
+    dispatched = await preciseClick(tabId, point);
+  } else if (action.type === "keyPress") {
+    dispatched = await preciseKey(tabId, action.key);
+  } else {
+    attempt.end({ ok: false, data: { motivo: "ação sem escalada definida" } });
+    return result;
+  }
+
+  if (!dispatched.ok) {
+    attempt.end({ ok: false, data: { detail: dispatched.detail } });
+    return { ...result, summary: `${result.summary} Tentei repetir pelo modo preciso e não deu: ${dispatched.detail}.` };
+  }
+
+  const reaction = await watchPage(tabId, 700);
+  attempt.end({ ok: true, data: { ...reaction, detail: dispatched.detail } });
+
+  if (reaction.navigated) return { ...result, summary: `${result.summary} Repeti pelo modo preciso (evento confiável) e a página navegou; releia com extractPage.` };
+  if (reaction.mutated) return { ...result, summary: `${result.summary} Repeti pelo modo preciso (evento confiável) e a página reagiu; releia com extractPage para ver o que mudou.` };
+  return { ...result, summary: `${result.summary} Repeti pelo modo preciso (evento confiável) e ainda assim nada mudou — este alvo provavelmente não faz o que você espera. Procure outro caminho.` };
+}
+
 export async function executeAction(action: BrowserAction, autonomy: Autonomy): Promise<ActionResult> {
   const actionSpan = span("action", action.type, { action });
   const result = await runAction(action, autonomy);
@@ -225,6 +297,10 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
   }, TIMEOUTS[action.type], frameId);
 
   if (!result?.ok) return result ?? failure("timeout", "Sem resposta da página.");
+
+  if (frameId === 0 && wantsEscalation(action, result) && cdpAvailable() && (await loadSettings()).agent.preciseMode) {
+    return escalate(tab.id, routed, result);
+  }
 
   // Clique pode disparar navegação implícita; sem detectar isso o próximo snapshot vem da página velha.
   if (action.type === "click" || (action.type === "type" && action.submit) || action.type === "keyPress") {

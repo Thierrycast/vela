@@ -21,7 +21,7 @@ function start() {
 
   traceLayer.setPauseHandler(() => send({ type: "agent:pause" }));
 
-  chrome.runtime.onMessage.addListener((message: { type: string; action?: BrowserAction; actionId?: string; trace?: TraceConfig; ghost?: boolean; state?: string; motion?: string; sessionTitle?: string; metrics?: VoiceVisualMetrics; text?: string; id?: string; summary?: string; detail?: string; reason?: string; expected?: string; visual?: string }, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message: { type: string; action?: BrowserAction; actionId?: string; trace?: TraceConfig; ghost?: boolean; state?: string; motion?: string; sessionTitle?: string; metrics?: VoiceVisualMetrics; text?: string; id?: string; summary?: string; detail?: string; reason?: string; expected?: string; visual?: string; milliseconds?: number }, _sender, sendResponse) => {
     if (message.type === "agent:ping") { sendResponse({ ok: true }); return false; }
 
     if (message.type === "trace:session") {
@@ -41,6 +41,35 @@ function start() {
       const label = element ? (element.getAttribute("aria-label") ?? element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
       sendResponse({ label });
       return false;
+    }
+
+    /*
+     * O modo preciso dispara o clique pelo CDP, que fala em coordenadas de viewport — o ref só
+     * existe aqui dentro. Esta mensagem traduz um no outro, e de quebra rola o elemento para a
+     * tela: coordenada de algo fora do viewport aponta para o lugar errado.
+     */
+    if (message.type === "agent:locate" && message.action) {
+      const action = message.action as { ref?: string; selector?: string };
+      const element = action.ref ? resolveRef(action.ref).element : action.selector ? document.querySelector(action.selector) : null;
+      if (!(element instanceof Element)) { sendResponse(null); return false; }
+      element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" as ScrollBehavior });
+      const rect = element.getBoundingClientRect();
+      const visible = rect.width > 0 && rect.height > 0 && rect.top < innerHeight && rect.bottom > 0;
+      sendResponse(visible ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null);
+      return false;
+    }
+
+    /* Observa por um tempo e diz se a página reagiu — é assim que a escalada sabe se valeu. */
+    if (message.type === "agent:watch") {
+      const before = location.href;
+      let mutated = false;
+      const observer = new MutationObserver(() => { mutated = true; });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      setTimeout(() => {
+        observer.disconnect();
+        sendResponse({ mutated, navigated: location.href !== before });
+      }, Math.min(Math.max(Number(message.milliseconds) || 500, 100), 3000));
+      return true;
     }
 
     if (message.type === "agent:get-selection") { sendResponse({ text: (window.getSelection()?.toString() ?? "").trim().slice(0, 4000) }); return false; }

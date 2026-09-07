@@ -29,20 +29,27 @@ function fakePage(): (message: { type: string; action?: BrowserAction }, frameId
       return { ok: true, summary: "lido", snapshotId, content: `# Elementos interativos
 [ref_${snapshotId}_0]<button name="${nome}" />` };
     }
-    if (message.type === "agent:action" && message.action && "ref" in message.action) {
+    if (message.type === "agent:action" && message.action && "ref" in message.action && message.action.ref) {
       return { ok: true, summary: `frame ${frameId} recebeu ${message.action.ref}` };
     }
     if (message.type === "agent:ping") return { ok: true };
+    // O modo preciso pergunta onde o alvo está e, depois, se a página reagiu.
+    if (message.type === "agent:locate") return { x: 120, y: 340 } as unknown as ActionResult;
+    if (message.type === "agent:watch") return { mutated: true, navigated: false } as unknown as ActionResult;
     if (message.type !== "agent:action" || !message.action) return { ok: true };
     const action = message.action;
     if (action.type === "click" && action.ref && !action.ref.startsWith(`ref_${snapshotId}_`)) {
       return { ok: false, code: "stale_snapshot", summary: "O snapshot mudou. Chame extractPage de novo antes de agir." };
     }
+    // O alvo que o caminho DOM não move: é ele que provoca a escalada para o modo preciso.
+    if (action.type === "click" && action.selector === "#inerte") return { ok: true, summary: "Cliquei em button “Inerte” — sem efeito perceptível." };
     if (action.type === "click") return { ok: true, summary: "Cliquei em button “Enviar” — a página reagiu." };
     if (action.type === "type") return { ok: true, summary: "Digitei em textbox “Buscar” (valor agora: “notebook”)." };
     return { ok: true, summary: `Ação ${action.type} concluída.` };
   };
 }
+
+const cdpLog: string[] = [];
 
 function installChrome(store: Record<string, unknown>, page: ReturnType<typeof fakePage>) {
   const navListeners: Array<(details: { tabId: number; frameId: number; url: string }) => void> = [];
@@ -79,6 +86,11 @@ function installChrome(store: Record<string, unknown>, page: ReturnType<typeof f
     },
     runtime: { sendMessage: async () => undefined, lastError: undefined },
     scripting: { executeScript: async () => [{ result: "ok" }] },
+    debugger: {
+      attach: async () => { cdpLog.push("attach"); },
+      detach: async () => { cdpLog.push("detach"); },
+      sendCommand: async (_target: unknown, method: string, params: Record<string, unknown>) => { cdpLog.push(`${method}:${params.type ?? params.key ?? ""}`); },
+    },
   };
 }
 
@@ -88,7 +100,7 @@ const toolCall = (id: string, name: string, args: unknown) =>
 const DONE = "data: [DONE]\n\n";
 
 async function run(name: string, rounds: string[][], settings: Partial<AppSettings> = {}, decision: "allow" | "deny" = "allow") {
-  emitted.length = 0; wire.length = 0; autoDecision = decision;
+  emitted.length = 0; wire.length = 0; cdpLog.length = 0; autoDecision = decision;
   const store: Record<string, unknown> = {
     "vela:settings": { ...defaultSettings, ...settings, providers: [{ ...defaultSettings.providers[0], apiKey: "k", defaultModel: "m" }] },
   };
@@ -205,3 +217,17 @@ await conversation.open(primeiraPassada[1].id);
 await new Promise((resolve) => setTimeout(resolve, 5));
 await conversation.append({ id: "m3", role: "user", content: "mais uma na antiga", createdAt: Date.now(), status: "complete" });
 console.log("depois de escrever na antiga:", (await conversation.list()).map((item) => item.title));
+
+// 13. Escalada para o modo preciso: clique sem efeito vira clique confiável, e a resposta diz o que mudou.
+await run("modo preciso repete o clique inerte", [
+  [delta("Vou clicar."), toolCall("c1", "browser_action", { action: "click", selector: "#inerte" }), DONE],
+  [delta("Agora a página reagiu."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto", preciseMode: true } });
+console.log("CDP:", cdpLog.join(" → ") || "(não escalou)");
+
+// 14. Com o modo preciso desligado, o mesmo clique não anexa depurador nenhum.
+await run("modo preciso desligado não anexa nada", [
+  [delta("Vou clicar."), toolCall("c1", "browser_action", { action: "click", selector: "#inerte" }), DONE],
+  [delta("Não deu."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto", preciseMode: false } });
+console.log("CDP:", cdpLog.join(" → ") || "(não escalou)");
