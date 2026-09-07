@@ -45,6 +45,19 @@ async function addMessage(message: ChatMessage, emit: Emit) {
   emit({ type: "chat:message", message });
 }
 
+/**
+ * Só a captura mais recente continua sendo enviada.
+ *
+ * Imagem custa caro em contexto e duas telas quase idênticas ocupam o dobro sem dizer nada a
+ * mais — e a antiga ainda mente, porque a página já rolou desde então.
+ */
+async function compactImages() {
+  const messages = await conversation.all();
+  for (const message of messages) {
+    if (message.images?.length) await conversation.patch(message.id, { images: undefined, content: "[captura anterior — descartada por estar desatualizada]" });
+  }
+}
+
 /** Snapshots antigos são peso morto: o DOM já mudou e o modelo não deve consultá-los. */
 async function compactSnapshots() {
   const messages = await conversation.all();
@@ -151,11 +164,17 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
           continue;
         }
         const callSpan = span("tool.call", call.name, { arguments: safeParse(call.arguments) });
-        const { content, event } = await runToolCall(call, settings);
+        const { content, event, image } = await runToolCall(call, settings);
         callSpan.end({ ok: event.kind !== "error", data: { name: call.name, arguments: safeParse(call.arguments), result: content.slice(0, 600) } });
         record(event, emit);
         void appendLog({ level: event.kind === "error" ? "error" : "info", event: event.kind === "error" ? "agent.tool_error" : "agent.tool_completed", detail: `${call.name}: ${content.slice(0, 200)}` });
         await addMessage({ id: newId(), role: "tool", tool_call_id: call.id, content, createdAt: Date.now(), status: event.kind === "error" ? "error" : "complete" }, emit);
+        // Resposta de ferramenta é texto puro; a captura entra logo depois como mensagem do
+        // usuário, que é o único papel que aceita imagem.
+        if (image) {
+          await compactImages();
+          await addMessage({ id: newId(), role: "user", content: "[captura da tela visível]", images: [image], createdAt: Date.now(), status: "complete" }, emit);
+        }
       }
 
       if (round === maxRounds - 2) {

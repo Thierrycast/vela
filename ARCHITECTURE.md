@@ -88,6 +88,30 @@ Medido numa página com 180 links de menu e uma lista de contribuições abaixo:
 continha a palavra procurada; `find` devolveu o item certo em uma chamada, e o clique no ref
 funcionou.
 
+### A captura é a exceção, não a leitura padrão
+
+Até aqui a Vela era cega por completo: o contexto era texto, e o que existisse só em pixel —
+legenda dentro de miniatura, gráfico, imagem sem `alt` — simplesmente não chegava. `screenshot`
+resolve esse resto, com três limites deliberados:
+
+- **não é a primeira leitura.** O retrato custa menos e é ele que traz os refs; a captura diz o
+  que a página parece, não o que dá para clicar. O prompt diz isso explicitamente, senão a
+  imagem vira o caminho preguiçoso para tudo.
+- **só a mais recente sobrevive.** Toda captura nova apaga a anterior do histórico. Duas telas
+  quase idênticas dobram o custo sem dizer nada a mais, e a antiga ainda mente, porque a página
+  já rolou desde então.
+- **nenhuma é persistida.** `chrome.storage.local` tem 10 MB; uma tela em base64 come isso
+  sozinha. Ao reabrir a conversa, a imagem não volta — e não deveria.
+
+Duas armadilhas do ambiente: `fetch` de uma `data:` URL é barrado pelo `connect-src` do manifest,
+então o base64 vira bytes na mão antes do `createImageBitmap`; e a redução para 1200 px de
+largura (268 KB → 156 KB, medido) roda no service worker por `OffscreenCanvas`, com o original
+como reserva se qualquer etapa falhar — reduzir é otimização, e otimização não pode custar a
+captura.
+
+OCR local ficou de fora: exigiria um pacote de vários megabytes para fazer pior do que um modelo
+com visão já faz com a mesma imagem.
+
 ### As abas da sessão são dela; as outras são do usuário
 
 `tab_manage` lista, foca e fecha abas — **só as do grupo "Vela"**. Um id de fora é recusado com

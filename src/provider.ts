@@ -18,7 +18,7 @@ const browserActionTool = {
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "wait", "pageTool"] },
+        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "wait", "pageTool"] },
         url: { type: "string", description: "Para navigate." },
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
         ref: { type: "string", description: "Identificador vindo do último extractPage, ex.: ref_3_12." },
@@ -288,13 +288,27 @@ export async function synthesizeSpeech(endpoint: VoiceEndpoint, input: string, m
   return response.blob();
 }
 
-type WireMessage = { role: string; content: string; tool_call_id?: string; tool_calls?: ChatMessage["tool_calls"] };
+type WirePart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type WireMessage = { role: string; content: string | WirePart[]; tool_call_id?: string; tool_calls?: ChatMessage["tool_calls"] };
+
+/**
+ * Mensagem com imagem vira lista de partes, no formato que a API de chat espera. Só `user` a
+ * recebe: `tool` aceita apenas texto, então a captura entra como uma mensagem do usuário logo
+ * depois do resultado da ferramenta que a produziu.
+ */
+function wireContent(message: ChatMessage): string | WirePart[] {
+  if (!message.images?.length) return message.content;
+  return [
+    { type: "text", text: message.content },
+    ...message.images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+  ];
+}
 
 function toWire(settings: AppSettings, messages: ChatMessage[], context: BrowserContext): WireMessage[] {
   const history = messages
     .filter((message) => message.role !== "system")
     .filter((message) => !(message.role === "assistant" && !message.content && !message.tool_calls?.length))
-    .map(({ role, content, tool_call_id, tool_calls }) => ({ role, content, ...(tool_call_id ? { tool_call_id } : {}), ...(tool_calls ? { tool_calls } : {}) }));
+    .map((message) => ({ role: message.role, content: wireContent(message), ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}), ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}) }));
   return [
     { role: "system", content: buildSystemPrompt(settings) },
     ...history,

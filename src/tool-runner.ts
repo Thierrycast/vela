@@ -35,6 +35,7 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
     case "scroll": return { type: "scroll", deltaX: args.deltaX, deltaY: args.deltaY };
     case "extractPage": return { type: "extractPage", mode: args.extractMode, offset: args.offset };
     case "find": return { type: "find", query: args.query, selector: args.selector, limit: args.limit };
+    case "screenshot": return { type: "screenshot" };
     case "wait": return { type: "wait", milliseconds: args.milliseconds ?? 1000 };
     case "pageTool": return args.toolName ? { type: "pageTool", name: args.toolName, arguments: args.toolArguments } : null;
     default: return null;
@@ -51,7 +52,7 @@ function renderActionResult(result: ActionResult): string {
   return parts.join("\n");
 }
 
-export async function runToolCall(call: ToolCall, settings: AppSettings): Promise<{ content: string; event: AgentEvent }> {
+export async function runToolCall(call: ToolCall, settings: AppSettings): Promise<{ content: string; event: AgentEvent; image?: string }> {
   try {
     const args = JSON.parse(call.arguments || "{}") as ToolArguments;
     const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
@@ -64,6 +65,9 @@ export async function runToolCall(call: ToolCall, settings: AppSettings): Promis
       return {
         content: renderActionResult(result),
         event: { kind: result.ok ? "result" : "error", text: result.summary, action },
+        // A imagem sobe separada: resposta de ferramenta é texto, então a captura entra depois,
+        // numa mensagem do usuário.
+        ...(result.ok && result.image ? { image: result.image } : {}),
       };
     }
 

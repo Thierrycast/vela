@@ -79,6 +79,13 @@ vale para o provider ativo e é a mesma preferência que aparece em Configuraç�
 
 ## O que a Vela sabe fazer sozinha
 
+**Olhar a tela.** `screenshot` captura a janela visível e manda a imagem para o modelo — é o
+único caminho para o que existe só em pixel: legenda dentro de miniatura de vídeo, gráfico,
+imagem sem texto alternativo. Não substitui o retrato: o retrato diz o que dá para clicar, a
+captura diz o que a página parece. Só a mais recente fica no contexto, reduzida a 1200px de
+largura (de 268 KB para 156 KB, medido), e nenhuma é salva em disco — foto velha mente sobre
+uma página que já rolou.
+
 **Achar na página.** Quando ela sabe o texto do que procura, chama `find` em vez de rolar: a
 varredura pega o documento inteiro, incluindo o que está fora da tela e dentro de shadow DOM, e
 devolve o elemento já pronto para clicar. Rolar ficou sendo o que é — ler conteúdo novo, não
@@ -290,11 +297,8 @@ lógica aparecem antes de você carregar a extensão.
   ARCHITECTURE.md.
 - Em modo **Assistir** com o painel fechado e sem Live Voice ativo, não há onde pedir aprovação:
   a ação é recusada e o modelo é informado disso.
-- **A Vela não vê a tela.** Não há captura de imagem em lugar nenhum do código: o que vai ao
-  modelo é sempre texto — estrutura, elementos interativos, atributos. Texto que só existe dentro
-  de uma imagem (a legenda de uma miniatura de vídeo, por exemplo) não chega até ela. `find`
-  alcança o que está no DOM mesmo fora da tela, mas não o que está pintado num pixel; OCR sobre
-  captura resolveria esse resto e ainda não existe.
+- A captura de tela mostra **só a parte visível** da janela: o que está abaixo da dobra exige
+  rolar e capturar de novo. E ela é uma foto — o que dá para clicar continua vindo do retrato.
 - **Não existe fila de pedidos.** Um turno por vez: falar por cima interrompe o turno atual e o
   substitui. Se a Vela disser que "colocou na fila", é invenção dela — não há nada guardado para
   depois.

@@ -46,7 +46,9 @@ export async function flush() {
   if (persistTimer) { clearTimeout(persistTimer); persistTimer = 0; }
   if (!cache) return;
   const trimmed = cache
-    .map((item) => ({ ...item, messages: item.messages.slice(-MAX_MESSAGES) }))
+    // Captura não é persistida: uma tela em base64 come o orçamento de `chrome.storage.local`
+    // sozinha, e ao reabrir a conversa ela já estaria mentindo sobre o que está na página.
+    .map((item) => ({ ...item, messages: item.messages.slice(-MAX_MESSAGES).map((message) => message.images ? { ...message, images: undefined } : message) }))
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, MAX_CONVERSATIONS);
   await saveConversations(trimmed);

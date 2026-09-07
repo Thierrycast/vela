@@ -61,8 +61,10 @@ function installChrome(store: Record<string, unknown>, page: ReturnType<typeof f
     },
     notifications: { create: async () => "id" },
     tabs: {
-      query: async () => [{ id: 7, url: "https://exemplo.com", title: "Exemplo", active: true }],
+      query: async () => [{ id: 7, windowId: 1, url: "https://exemplo.com", title: "Exemplo", active: true }],
       remove: async () => undefined,
+      // Um pixel JPEG de mentira: o que importa no teste é o caminho da imagem até a mensagem.
+      captureVisibleTab: async () => "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
       update: async () => { setTimeout(() => navListeners.forEach((fn) => fn({ tabId: 7, frameId: 0, url: "https://destino.com" })), 10); },
       create: async () => ({ id: 8 }),
       get: async () => ({ id: 7, url: "https://exemplo.com" }),
@@ -171,6 +173,17 @@ await run("repetição idêntica é bloqueada", [
   [delta("Ok, vou procurar."), toolCall("c4", "browser_action", { action: "find", query: "continuar" }), DONE],
   [delta("Achei."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// 8.6. A captura vira mensagem do usuário com imagem — resposta de ferramenta não carrega imagem.
+await run("screenshot anexa a imagem ao histórico", [
+  [delta("Vou olhar a tela."), toolCall("c1", "browser_action", { action: "screenshot" }), DONE],
+  [delta("Vi o que precisava."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+{
+  const messages = await conversation.all();
+  const comImagem = messages.filter((item) => item.images?.length);
+  console.log("mensagens com imagem:", comImagem.length, "| papel:", comImagem[0]?.role, "| texto:", JSON.stringify(comImagem[0]?.content));
+}
 
 // 9. O system prompt e o bloco de estado chegam ao provider?
 const body = JSON.parse(wire[0]) as { messages: Array<{ role: string; content: string }> };

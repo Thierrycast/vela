@@ -151,6 +151,8 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
   }
 
   if (action.type === "navigate") return failure("unsupported", "Navegação é tratada fora da página.");
+  // A captura precisa da API de abas, que só existe no background: a página não fotografa a si.
+  if (action.type === "screenshot") return failure("unsupported", "A captura é tratada fora da página.");
 
   const { element, error } = locate(action);
   if (error) return error;

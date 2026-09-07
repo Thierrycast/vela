@@ -5,9 +5,9 @@ import { approvalKey, describeAction, isRisky, requestApproval } from "./approva
 import { span } from "./trace";
 import { adoptTab } from "./session";
 
-const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait"];
-const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find"];
-const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000, pageTool: 20_000 };
+const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "screenshot"];
+const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find", "screenshot"];
+const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, screenshot: 10_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000, pageTool: 20_000 };
 
 export const isReadOnly = (action: BrowserAction) => READ_ONLY.includes(action.type);
 
@@ -102,6 +102,40 @@ async function targetLabel(tabId: number, action: BrowserAction) {
   } catch { return ""; }
 }
 
+/**
+ * Reduz a captura antes de mandá-la ao modelo.
+ *
+ * Numa janela grande a imagem crua passa de 250 KB em base64, e isso viaja em toda rodada
+ * seguinte do turno. Mil e duzentos pixels de largura preservam texto de interface legível — que
+ * é o motivo de capturar — por cerca de metade do peso.
+ */
+const MAX_WIDTH = 1200;
+async function shrink(dataUrl: string): Promise<string> {
+  try {
+    // `fetch` de uma data URL é barrado pelo `connect-src` do manifest — o base64 vira bytes aqui.
+    const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
+    if (bitmap.width <= MAX_WIDTH) { bitmap.close(); return dataUrl; }
+    const scale = MAX_WIDTH / bitmap.width;
+    const canvas = new OffscreenCanvas(MAX_WIDTH, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) { bitmap.close(); return dataUrl; }
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.6 });
+    const buffer = new Uint8Array(await blob.arrayBuffer());
+    let encoded = "";
+    for (const byte of buffer) encoded += String.fromCharCode(byte);
+    return `data:image/jpeg;base64,${btoa(encoded)}`;
+  } catch {
+    // Redimensionar é otimização; falhar aqui não pode custar a captura.
+    return dataUrl;
+  }
+}
+
 export async function executeAction(action: BrowserAction, autonomy: Autonomy): Promise<ActionResult> {
   const actionSpan = span("action", action.type, { action });
   const result = await runAction(action, autonomy);
@@ -155,6 +189,26 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
   }
 
   if (action.type === "extractPage") return readAllFrames(tab.id, action);
+
+  /*
+   * A captura é o único caminho para o que existe só em pixel — legenda dentro de miniatura,
+   * gráfico, imagem sem texto alternativo. Ela não substitui o retrato: o retrato diz o que dá
+   * para clicar, a captura diz o que a página parece. Por isso a resposta manda olhar os dois.
+   *
+   * JPEG a 55% e no máximo uma captura viva no histórico: imagem custa caro em contexto, e duas
+   * telas quase idênticas ocupam o dobro sem dizer nada a mais.
+   */
+  if (action.type === "screenshot") {
+    if (tab.windowId === undefined) return failure("no_tab", "A aba ativa não pertence a nenhuma janela.");
+    try {
+      const raw = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 55 });
+      if (!raw) return failure("unsupported", "O Chrome não devolveu a captura desta aba.");
+      const image = await shrink(raw);
+      return { ok: true, summary: "Capturei a tela visível. Ela mostra só o que está na janela agora — role e capture de novo para ver o resto.", image };
+    } catch (error) {
+      return failure("unsupported", `Não consegui capturar esta aba: ${error instanceof Error ? error.message : "erro desconhecido"}.`);
+    }
+  }
 
   if (!isReadOnly(action) && !NO_CURSOR.includes(action.type)) await beginTrace(tab.id);
 

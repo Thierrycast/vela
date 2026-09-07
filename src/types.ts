@@ -58,6 +58,8 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system" | "tool";
   content: string;
+  /** Capturas da tela anexadas à mensagem, como data URL. Só fazem sentido em `role: "user"`. */
+  images?: string[];
   createdAt: number;
   status?: "streaming" | "complete" | "error";
   tool_call_id?: string;
@@ -72,6 +74,7 @@ export type BrowserAction =
   | { type: "scroll"; deltaX?: number; deltaY?: number }
   | { type: "extractPage"; mode?: "outline" | "text"; offset?: number }
   | { type: "find"; query?: string; selector?: string; limit?: number }
+  | { type: "screenshot" }
   | { type: "pageTool"; name: string; arguments?: unknown }
   | { type: "wait"; milliseconds: number };
 
@@ -83,6 +86,8 @@ export type ActionSuccess = {
   ok: true;
   summary: string;
   content?: string;
+  /** Captura da aba, em data URL, quando a ação foi `screenshot`. */
+  image?: string;
   snapshotId?: number;
   truncated?: boolean;
   nextOffset?: number;
