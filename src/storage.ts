@@ -8,6 +8,7 @@ const BRAND_HEALED_KEY = "vela:brand-renamed";
 const LEGACY_APP_NAMES = ["Browser AI", "browser-ai"];
 const LEGACY_ACCENTS = ["#d97757", "#5250f2"];
 const VOICE_HEALED_KEY = "vela:voice-endpoint";
+const ROUNDS_HEALED_KEY = "vela:rounds-raised";
 const LEGACY_VOICE_MODELS = ["whisper-1", "tts-1", ""];
 /** Vozes do kokoro: boas, mas geram em o dobro do tempo do áudio. */
 const SLOW_VOICES = ["", "alloy", "pf_dora"];
@@ -69,6 +70,13 @@ async function healLegacyBrand(settings: AppSettings): Promise<AppSettings> {
   return healed;
 }
 
+/**
+ * O teto de etapas subiu de 8 para 12 quando o loop de repetição foi resolvido, mas quem já
+ * usava a Vela continuou com 8 salvo — e 8 corta tarefa legítima, como abrir um vídeo depois de
+ * pesquisar. Sobe só quem está exatamente no default antigo: quem escolheu outro número escolheu.
+ */
+const LEGACY_MAX_ROUNDS = 8;
+
 /** A voz ganhou servidor próprio; quem já tinha settings ficou sem endereço e com modelo alheio. */
 async function healVoiceEndpoint(settings: AppSettings): Promise<AppSettings> {
   if (typeof chrome === "undefined" || !chrome.storage?.local) return settings;
@@ -88,7 +96,18 @@ async function healVoiceEndpoint(settings: AppSettings): Promise<AppSettings> {
   return healed;
 }
 
-export const loadSettings = async () => healVoiceEndpoint(await healLegacyBrand(normalizeSettings(await local.get<Partial<AppSettings>>(SETTINGS_KEY, {}))));
+async function healMaxRounds(settings: AppSettings): Promise<AppSettings> {
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return settings;
+  const stored = await chrome.storage.local.get(ROUNDS_HEALED_KEY);
+  if (stored[ROUNDS_HEALED_KEY]) return settings;
+  await chrome.storage.local.set({ [ROUNDS_HEALED_KEY]: true });
+  if (settings.agent.maxRounds !== LEGACY_MAX_ROUNDS) return settings;
+  const healed: AppSettings = { ...settings, agent: { ...settings.agent, maxRounds: defaultSettings.agent.maxRounds } };
+  await local.set(SETTINGS_KEY, healed);
+  return healed;
+}
+
+export const loadSettings = async () => healMaxRounds(await healVoiceEndpoint(await healLegacyBrand(normalizeSettings(await local.get<Partial<AppSettings>>(SETTINGS_KEY, {})))));
 export const saveSettings = (settings: AppSettings) => local.set(SETTINGS_KEY, settings);
 
 export const loadMessages = () => local.get<ChatMessage[]>(MESSAGES_KEY, []);

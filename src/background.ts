@@ -147,7 +147,11 @@ async function speakAnswerAfter(previousId: string | null) {
   const messages = await conversation.all();
   const last = [...messages].reverse().find((item: ChatMessage) => item.role === "assistant" && item.content.trim());
   if (!last || last.id === previousId) {
-    traceRecord("voice", "nada novo para falar", { from: "background", ok: false, code: "sem_resposta", data: { anterior: previousId } });
+    // Turno que termina sem resposta — porque estourou o teto de etapas, por exemplo — deixava a
+    // conversa em silêncio. Numa conversa falada, silêncio é lido como "não me ouviu", e a pessoa
+    // repete o pedido, que abre outro turno, que estoura de novo. Foi o ciclo observado.
+    traceRecord("voice", "turno sem resposta: avisei por voz", { from: "background", ok: false, code: "sem_resposta", data: { anterior: previousId } });
+    void chrome.runtime.sendMessage({ type: "voice:speak", text: "Não consegui concluir essa. Quer que eu tente de outro jeito?" }).catch(() => undefined);
     return;
   }
   void chrome.runtime.sendMessage({ type: "voice:speak", text: last.content }).catch(() => undefined);

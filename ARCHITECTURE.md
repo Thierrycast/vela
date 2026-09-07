@@ -26,6 +26,17 @@ porta `vela:sidecar`, recebe um snapshot e depois eventos.
 Custo: o service worker morre com 30 s de ociosidade e uma aprovação humana demora mais que
 isso. Por isso há um heartbeat de 20 s enquanto houver loop ativo (`background.ts`).
 
+### Repetir não é insistir: a terceira chamada idêntica não roda
+
+Um teste real no YouTube registrou sete `extractPage` seguidos até estourar o teto, quatro vezes
+seguidas. O aviso de repetição existia, mas chegava como **texto** numa conversa em que o modelo
+já estava decidido — e texto não impede a próxima chamada.
+
+Agora a terceira chamada com a mesma ferramenta e os mesmos argumentos **não é executada**: volta
+como `ERRO [repeticao]` dizendo o que fazer no lugar (procurar com `find`, ou explicar ao usuário
+o que trava). A recusa ocupa a mesma posição da resposta da ferramenta, então o modelo lê no fluxo
+normal em vez de precisar mudar de ideia por conta própria.
+
 ### O aviso de limite nunca entra no histórico do modelo
 
 O teto de rodadas existe para o loop não rodar para sempre. Mas a mensagem *"Atingi o limite de
@@ -387,6 +398,18 @@ outra coisa e ouvia de novo o que já tinha ouvido.
 Agora a fala nova aborta o turno em andamento, para a síntese, espera o loop encerrar de verdade
 e entra no lugar. E a resposta só é falada se o turno rendeu uma resposta **nova** — comparando o
 id da última mensagem antes e depois.
+
+### Silêncio, numa conversa falada, é lido como "não me ouviu"
+
+Quando o turno acabava sem resposta em texto — estourou o teto de etapas, por exemplo — a Vela
+simplesmente não falava. Quem está conversando por voz não vê a barra lateral: interpreta o
+silêncio como falha de escuta e repete o pedido, que abre outro turno, que estoura de novo. Foi
+o ciclo registrado no teste: quatro pedidos, quatro estouros, nenhum vídeo aberto.
+
+Agora um turno sem resposta é dito em voz alta. O fim da reprodução também deixou de ser
+calculado por `setTimeout`: quem avisa é o `onended` do último buffer agendado, porque o relógio
+do `AudioContext` e o do `setTimeout` correm separados e a diferença aparecia como o orb
+continuando âmbar depois de a fala ter terminado.
 
 ### A voz é escolhida por velocidade, não por timbre
 

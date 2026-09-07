@@ -290,3 +290,11 @@ lógica aparecem antes de você carregar a extensão.
   ARCHITECTURE.md.
 - Em modo **Assistir** com o painel fechado e sem Live Voice ativo, não há onde pedir aprovação:
   a ação é recusada e o modelo é informado disso.
+- **A Vela não vê a tela.** Não há captura de imagem em lugar nenhum do código: o que vai ao
+  modelo é sempre texto — estrutura, elementos interativos, atributos. Texto que só existe dentro
+  de uma imagem (a legenda de uma miniatura de vídeo, por exemplo) não chega até ela. `find`
+  alcança o que está no DOM mesmo fora da tela, mas não o que está pintado num pixel; OCR sobre
+  captura resolveria esse resto e ainda não existe.
+- **Não existe fila de pedidos.** Um turno por vez: falar por cima interrompe o turno atual e o
+  substitui. Se a Vela disser que "colocou na fila", é invenção dela — não há nada guardado para
+  depois.

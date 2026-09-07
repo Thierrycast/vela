@@ -252,8 +252,20 @@ async function speakStreaming(endpoint: VoiceEndpoint, spoken: string, voice: st
     }
 
     // Espera o fim do que já foi agendado, senão o estado volta a "ocioso" com áudio tocando.
+    //
+    // Quem avisa é o último buffer, por `onended`, e não um `setTimeout` calculado: o relógio do
+    // AudioContext e o do `setTimeout` correm separados, e a diferença aparecia como o orb
+    // continuando âmbar depois de a fala ter acabado. O tempo calculado fica só como rede de
+    // segurança, para o caso de o evento não vir.
+    const ultimo = sources.at(-1);
     const restante = Math.max(0, playAt - context.currentTime) * 1000;
-    await new Promise((resolve) => setTimeout(resolve, restante + 120));
+    const fimDoAudio = traceSpan("voice", "fim da reprodução", { agendado: Math.round(restante) });
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = (via: string) => { if (done) return; done = true; fimDoAudio.end({ ok: true, data: { via } }); resolve(); };
+      if (ultimo) ultimo.onended = () => finish("onended");
+      setTimeout(() => finish("tempo calculado"), restante + 400);
+    });
   } finally {
     self.clearInterval(meterTimer);
     meter.disconnect();

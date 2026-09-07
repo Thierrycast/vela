@@ -163,6 +163,15 @@ await run("vela_settings recusa campo fora da lista", [
   [delta("Não consigo mexer nisso."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
 
+// 8.5. Insistir na mesma chamada não pode continuar rodando: a partir da terceira vez é recusa.
+await run("repetição idêntica é bloqueada", [
+  [delta("Lendo."), toolCall("c1", "browser_action", { action: "extractPage" }), DONE],
+  [delta("Lendo de novo."), toolCall("c2", "browser_action", { action: "extractPage" }), DONE],
+  [delta("E de novo."), toolCall("c3", "browser_action", { action: "extractPage" }), DONE],
+  [delta("Ok, vou procurar."), toolCall("c4", "browser_action", { action: "find", query: "continuar" }), DONE],
+  [delta("Achei."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
 // 9. O system prompt e o bloco de estado chegam ao provider?
 const body = JSON.parse(wire[0]) as { messages: Array<{ role: string; content: string }> };
 console.log("\n=== prompt enviado ===");

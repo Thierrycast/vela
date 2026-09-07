@@ -125,21 +125,19 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
         break;
       }
 
+      // Repetir a mesma chamada com os mesmos argumentos não produz resultado novo — produz o
+      // loop observado: sete extractPage seguidos até estourar o teto de etapas. Avisar não
+      // bastava, porque o aviso chega como texto e o modelo já estava decidido. A partir da
+      // terceira vez a chamada **não roda**: ele recebe uma recusa que diz o que fazer no lugar.
+      const blocked = new Set<string>();
       for (const call of calls) {
         const fingerprint = `${call.name}:${call.arguments}`;
         const seen = (repeats.get(fingerprint) ?? 0) + 1;
         repeats.set(fingerprint, seen);
-        if (seen === 3) {
-          await conversation.append({
-            id: newId(),
-            role: "system",
-            content: `Você já chamou ${call.name} com estes mesmos argumentos três vezes e o resultado não mudou. Isso não vai avançar. Tente outro caminho, ou explique ao usuário o que está impedindo e pergunte como seguir.`,
-            createdAt: Date.now(),
-            status: "complete",
-          });
-          record({ kind: "status", text: `Repetição detectada em ${call.name} — avisei o modelo.` }, emit);
-          traceRecord("tool.call", `repetição improdutiva: ${call.name}`, { ok: false, code: "repeticao", data: { name: call.name, vezes: seen } });
-        }
+        if (seen < 3) continue;
+        blocked.add(call.id);
+        traceRecord("tool.call", `repetição bloqueada: ${call.name}`, { ok: false, code: "repeticao", data: { name: call.name, vezes: seen, arguments: safeParse(call.arguments) } });
+        if (seen === 3) record({ kind: "error", text: `${call.name} repetido sem mudar nada — bloqueei e pedi outro caminho.` }, emit);
       }
 
       const toolCalls = calls.map((call) => ({ id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }));
@@ -147,6 +145,11 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
       emit({ type: "chat:patch", id: assistant.id, patch: { status: "complete", tool_calls: toolCalls } });
 
       for (const call of calls) {
+        if (blocked.has(call.id)) {
+          const recusa = `ERRO [repeticao] Você já chamou ${call.name} com estes mesmos argumentos e o resultado foi o mesmo. Repetir não vai mudar nada. Se procura algo na página, use browser_action com action "find" e o texto que você espera encontrar. Se já tentou isso, explique ao usuário o que está impedindo e pergunte como seguir.`;
+          await addMessage({ id: newId(), role: "tool", tool_call_id: call.id, content: recusa, createdAt: Date.now(), status: "error" }, emit);
+          continue;
+        }
         const callSpan = span("tool.call", call.name, { arguments: safeParse(call.arguments) });
         const { content, event } = await runToolCall(call, settings);
         callSpan.end({ ok: event.kind !== "error", data: { name: call.name, arguments: safeParse(call.arguments), result: content.slice(0, 600) } });
