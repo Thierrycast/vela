@@ -256,6 +256,13 @@ caso o cliente não reconecta, porque insistir só aumenta a fila. Nos outros fe
 tentativas, e aí ele desiste em silêncio: a transcrição final continua inteira sem ele. O endereço
 fica em Configurações → Voz e, em branco, o recurso simplesmente não existe.
 
+Verificado dentro da extensão, com microfone falso alimentado por arquivo
+(`--use-file-for-fake-audio-capture`): o offscreen abre o stream contra o servidor real e o parcial
+chega ao palco em 1,6 s — "abrir o site", depois "abrir o site do banco" — sem nenhum erro de
+console. O que não deu para exercitar sem a chave do provider é o turno completo, isto é o lote
+sobrescrevendo o rascunho e a supressão de eco durante a fala da Vela; essas duas continuam
+verificadas só por leitura.
+
 ### Content script sob demanda, e em build separado
 
 O manifest **não** declara `content_scripts`. `injection.ts` registra em runtime via

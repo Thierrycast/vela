@@ -40,8 +40,8 @@ const STYLE = `
 /* O contorno escuro é o que faz a seta existir sobre página clara; paint-order o joga para trás
    do preenchimento, senão a linha come 1px de cada lado da silhueta e a ponta engorda. */
 .cursor path{stroke:#080c0d;stroke-width:1.2;stroke-linejoin:round;paint-order:stroke fill}
-.cursor.ghost{opacity:.6}
-.cursor.ghost path{fill:#58d8cd1f;stroke:#79e9df;stroke-width:1.3}
+.cursor.ghost{opacity:.72}
+.cursor.ghost path{fill:#58d8cd24;stroke:#3fbfb4;stroke-width:1.5}
 .target{position:fixed;border:2px solid #58d8cd;border-radius:5px;box-shadow:0 0 0 3px #143a3666;transition:opacity 130ms ease;pointer-events:none}
 .ripple{position:fixed;width:18px;height:18px;border:1px solid #79e9df;border-radius:50%;transform:translate(-50%,-50%);animation:ripple 420ms cubic-bezier(.16,1,.3,1) forwards;pointer-events:none}
 @keyframes ripple{to{opacity:0;transform:translate(-50%,-50%) scale(3.2)}}
