@@ -596,6 +596,14 @@ e é **declarado**: o anexo cortado chega ao modelo com `cortado="fim"`, e o que
 como `cortado="inteiro"`. O modelo passa a saber que está vendo um pedaço, que é a diferença entre
 responder com ressalva e responder errado com confiança.
 
+O caminho foi verificado de ponta a ponta sem a caixa nativa de arquivos, que a automação não
+consegue abrir: `DOM.setFileInputFiles` entrega ao input escondido o mesmo `File` que o diálogo do
+Chrome entregaria. Um `.md` curto chega inteiro ao `chrome.storage.session` com o cabeçalho
+`Arquivo anexado "…"`, vira chip na tira de contexto e some ao clicar no ×; um arquivo maior que o
+teto para em 20 000 caracteres com o começo preservado. Com três anexos de 20 000, o bloco do
+prompt sai com o primeiro inteiro, o segundo `cortado="fim"` e o terceiro `cortado="inteiro"`,
+somando 24 288 caracteres.
+
 ## Pendências conhecidas
 
 Registradas para decisão, não esquecidas:
