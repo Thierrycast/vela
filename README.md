@@ -179,6 +179,11 @@ A lista de vozes vem do próprio servidor assim que a seção abre — não é p
 Testar. **Aparência da voz** escolhe como a Vela se mostra ao ouvir e falar, com preview ao vivo
 de cada opção.
 
+A última opção, **Seu shader**, é escrita por você: um editor de fragment shader com prévia ao
+vivo ao lado, os uniforms de som e de estado já disponíveis (`uEnergy`, `uBass`, `uMood`, `uPace`
+e companhia) e o erro do compilador apontando a linha certa do seu código. O que não compila não é
+salvo, para o visual nunca sumir no painel sem explicação.
+
 🔴 **Clique em "Permitir microfone" uma vez.** O runtime de voz roda num documento offscreen, e
 documento offscreen **não consegue exibir o prompt de permissão** — sem essa liberação, feita na
 página de opções, `getUserMedia` falha calado e o botão parece quebrado.

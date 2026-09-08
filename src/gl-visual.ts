@@ -193,6 +193,24 @@ vec2 rotate(vec2 p, float angle) {
 
 type Uniforms = Record<string, WebGLUniformLocation | null>;
 
+/** Linhas do prelúdio, para o número no erro bater com o que a pessoa vê no editor. */
+const PRELUDE_LINES = GLSL_PRELUDE.split("\n").length;
+
+/**
+ * O driver devolve "ERROR: 0:184: '' : syntax error" — a linha é a do arquivo concatenado, e o
+ * prelúdio empurra tudo umas duzentas linhas para baixo. Sem descontar, o número aponta para um
+ * lugar que não existe no editor e a mensagem vira ruído.
+ */
+function tidyLog(raw: string, offset: number): string {
+  return raw
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => line.replace(/(\d+):(\d+)/, (_all, arquivo: string, linha: string) => `${arquivo}:${Math.max(1, Number(linha) - offset)}`))
+    .slice(0, 4)
+    .join("\n")
+    .trim();
+}
+
 const parseColor = (hex: string): [number, number, number] => {
   const value = hex.replace("#", "");
   const full = value.length === 3 ? value.split("").map((char) => char + char).join("") : value;
@@ -241,6 +259,12 @@ export class ShaderVisual implements VoiceVisual {
   private lastFrame = 0;
   private visible = true;
   private failed = false;
+  /*
+   * O log do compilador era descartado. Para os cinco shaders de fábrica isso não fazia falta —
+   * eles compilam ou o build está quebrado. Para um shader escrito pelo usuário, a mensagem de
+   * erro é o produto: sem ela, o visual cai para o de reserva e ninguém descobre o porquê.
+   */
+  private log = "";
 
   constructor(canvas: HTMLCanvasElement, fragment: string, options: ShaderVisualOptions = {}) {
     this.canvas = canvas;
@@ -253,6 +277,9 @@ export class ShaderVisual implements VoiceVisual {
 
   /** Quem chama precisa saber se o shader subiu, para cair no renderer 2D em vez de mostrar nada. */
   get ok() { return !this.failed && !!this.program; }
+
+  /** O que o compilador reclamou, quando `ok` é falso. Vazio quando subiu. */
+  get failure() { return this.log; }
 
   private onContextLost = (event: Event) => { event.preventDefault(); this.stop(); this.program = null; };
   private onContextRestored = () => { this.setup(); this.start(); };
@@ -269,6 +296,7 @@ export class ShaderVisual implements VoiceVisual {
       gl.compileShader(shader);
       if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
         this.failed = true;
+        this.log = tidyLog(gl.getShaderInfoLog(shader) ?? "", type === gl.FRAGMENT_SHADER ? PRELUDE_LINES : 0);
         gl.deleteShader(shader);
         return null;
       }
@@ -286,7 +314,11 @@ export class ShaderVisual implements VoiceVisual {
     gl.linkProgram(program);
     gl.deleteShader(vertex);
     gl.deleteShader(fragment);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) { this.failed = true; return; }
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      this.failed = true;
+      this.log = tidyLog(gl.getProgramInfoLog(program) ?? "", 0);
+      return;
+    }
 
     this.program = program;
     gl.useProgram(program);

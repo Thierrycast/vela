@@ -234,7 +234,7 @@ async function startVoice(mode: "live" | "dictation") {
       // A preferência viaja junto: o content script não lê settings, e pedir depois deixaria o
       // Pulse aparecendo com um visual e trocando para outro na frente do usuário.
       const settings = await loadSettings();
-      if (settings.voice.showPulse) void notifyTabs({ type: "pulse:show", state: "Ouvindo", visual: settings.voice.visual });
+      if (settings.voice.showPulse) void notifyTabs({ type: "pulse:show", state: "Ouvindo", visual: settings.voice.visual, shader: settings.voice.customShader });
     }
   } catch (error) {
     voiceMode = "off";

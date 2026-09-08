@@ -1,5 +1,5 @@
 import { VelaOrbRenderer } from "./orb-renderer";
-import { VISUALS } from "./voice-visuals";
+import { VISUALS, setCustomShader } from "./voice-visuals";
 import { VoiceVisual, shadersAvailable } from "./gl-visual";
 import { VoiceVisualMetrics } from "./audio-metrics";
 import { MotionState } from "./motion-tokens";
@@ -151,7 +151,7 @@ export class PulsePanel {
   setMetrics(metrics: VoiceVisualMetrics) { this.renderer?.setMetrics(metrics); }
 
   /** Só registra a escolha; quem monta é `mountRenderer`, no momento em que o painel aparece. */
-  setVisual(id: string) { this.visualId = id; }
+  setVisual(id: string, shader?: string) { this.visualId = id; setCustomShader(shader ?? ""); }
 
   /**
    * Monta o renderer uma vez por exibição. Cai no orb de partículas quando o visual escolhido

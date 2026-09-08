@@ -51,6 +51,22 @@
    ficava visível por cima de um shader que estava rodando bem. */
 .visual-stage em[hidden]{display:none}
 
+/* O editor de shader: a prévia grande em cima, o código embaixo. Quem escreve shader precisa ver
+   o resultado enquanto digita — separar em abas mataria justamente o que torna isso usável. */
+.shader-editor{display:grid;gap:12px;margin:12px 0 4px}
+.shader-preview{aspect-ratio:16/7;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:radial-gradient(circle at 50% 55%,#0e1214,#07090a 78%)}
+.shader-preview canvas{display:block;width:100%;height:100%}
+.shader-code{display:grid;gap:8px}
+.shader-code textarea{width:100%;min-height:220px;resize:vertical;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);font-family:var(--font-mono);font-size:12px;line-height:1.55;tab-size:2}
+.shader-code textarea:focus{outline:none;border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.shader-status{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;min-height:32px}
+.shader-status .probe-ok,.shader-status .probe-off{font-size:11.5px;line-height:1.5}
+/* O erro do compilador vem em linhas: quebrar preserva a coluna, e o scroll evita empurrar a
+   coluna inteira quando o driver devolve uma mensagem longa. */
+.shader-status pre{margin:0;max-height:76px;overflow:auto;white-space:pre-wrap;font-family:var(--font-mono);font-size:11px}
+.shader-help{color:var(--text-muted);font-size:11.5px;line-height:1.65;margin:0}
+.shader-help code{font-family:var(--font-mono);font-size:11px;padding:1px 4px;border-radius:4px;background:color-mix(in srgb,var(--signal) 12%,transparent)}
+
 .visual-canvas{display:block;width:100%;height:100%}
 .visual-canvas>canvas{display:block;width:100%;height:100%}
 

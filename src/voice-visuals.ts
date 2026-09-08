@@ -285,7 +285,36 @@ function withAlpha(hex: string, alpha: number) {
   return `rgba(${(number >> 16) & 255},${(number >> 8) & 255},${number & 255},${Math.max(0, Math.min(1, alpha)).toFixed(3)})`;
 }
 
-export type VisualId = "ambient-edge" | "mesh-field" | "soft-orb" | "liquid-blob" | "energy-field" | "particle-orb";
+export type VisualId = "ambient-edge" | "mesh-field" | "soft-orb" | "liquid-blob" | "energy-field" | "particle-orb" | "custom";
+
+/**
+ * O shader escrito pelo usuário mora em `settings.voice.customShader`, mas o registro de visuais é
+ * um array de módulo que ninguém passa settings para. Threadar a string por seis componentes —
+ * painel, palco, orb, miniatura, Pulse, opções — poluiria seis assinaturas por causa de um valor
+ * que é preferência global, não estado de instância. Fica aqui, e quem carrega as settings avisa.
+ */
+let customSource = "";
+export function setCustomShader(source: string) { customSource = source.trim(); }
+export function getCustomShader() { return customSource; }
+
+/**
+ * O que a opção mostra enquanto ninguém escreveu nada — e o ponto de partida do editor. Curto de
+ * propósito: ensina o contrato (uniforms do prelúdio, `gl_FragColor` com alpha) sem ser um shader
+ * que a pessoa tenha medo de mexer.
+ */
+export const CUSTOM_STARTER = `void main() {
+  // Coordenada centrada, com o lado menor valendo 1.
+  vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution) / min(uResolution.x, uResolution.y);
+
+  // uEnergy é o volume já suavizado; uBass, uMid e uHigh são as três bandas.
+  float raio = 0.42 + uEnergy * 0.18 + fbm(uv * 2.0 + uTime * uPace * 0.3) * 0.06;
+  float borda = smoothstep(raio, raio - 0.14, length(uv));
+
+  // uMood é a cor do estado (azul ouvindo, âmbar falando); uSignal é a cor da marca.
+  vec3 cor = mix(uSignal, uMood, 0.65) + uHigh * 0.25;
+
+  gl_FragColor = vec4(cor * borda, borda * uAlpha);
+}`;
 
 export type VisualEntry = {
   id: VisualId;
@@ -344,5 +373,13 @@ export const VISUALS: VisualEntry[] = [
     technique: "canvas 2D · 72 partículas orbitais",
     webgl: false,
     create: (canvas, options) => new VelaOrbRenderer(canvas, { color: options.signal, reducedMotion: options.reducedMotion }),
+  },
+  {
+    id: "custom",
+    name: "06 · Seu shader",
+    description: "O visual que você escrever. O código fica em Configurações → Voz, e vale para o painel, o palco e a janelinha.",
+    technique: "shader · seu fragment, com o mesmo prelúdio dos outros",
+    webgl: true,
+    create: (canvas, options) => new ShaderVisual(canvas, customSource || CUSTOM_STARTER, options),
   },
 ];

@@ -4,7 +4,8 @@ import { AppSettings } from "./types";
 import { ConnectionCheck, VoiceOption, checkVoiceEndpoint, listVoices } from "./provider";
 import { Select } from "./select";
 import { VisualPicker } from "./visual-picker";
-import { VisualId } from "./voice-visuals";
+import { ShaderEditor } from "./shader-editor";
+import { VisualId, setCustomShader } from "./voice-visuals";
 
 type MicrophoneState = "unknown" | "granted" | "denied" | "prompt" | "asking" | "error";
 
@@ -36,6 +37,10 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
   const [connection, setConnection] = useState<ConnectionCheck | "testing" | null>(null);
   const [voices, setVoices] = useState<VoiceOption[] | null>(null);
   const { voice } = settings;
+
+  // A miniatura de "Seu shader" no seletor lê o código do registro, não de uma prop: mantê-lo em
+  // dia aqui é o que faz a opção mostrar o shader da pessoa em vez do exemplo.
+  useEffect(() => { setCustomShader(voice.customShader); }, [voice.customShader]);
 
   // Sem isto, a lista só existia depois de um clique em Testar — e o campo ficava um texto livre
   // onde o usuário teria de adivinhar o nome de uma voz.
@@ -99,6 +104,7 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
     <h2 className="subsection">Aparência da voz</h2>
     <p className="picker-intro">Como a Vela se mostra enquanto ouve e fala. Cada opção passeia sozinha pelos estados: azul quando é você falando, âmbar quando é ela.</p>
     <VisualPicker value={voice.visual} onChange={(visual: VisualId) => patch({ visual })} />
+    {voice.visual === "custom" && <ShaderEditor value={voice.customShader} onChange={(customShader) => patch({ customShader })} />}
 
     <h2 className="subsection">Durante a conversa</h2>
     <div className="settings-group">

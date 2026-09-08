@@ -53,6 +53,8 @@ export type AppSettings = {
     showPulse: boolean;
     /** Qual visual representa a Vela quando ela ouve e fala. Ver voice-visuals.ts. */
     visual: string;
+    /** Fragment shader escrito pelo usuário, usado quando `visual` é "custom". Vazio = o exemplo. */
+    customShader: string;
   };
 };
 
@@ -151,5 +153,6 @@ export const defaultSettings: AppSettings = {
     showPulse: false,
     streamingUrl: "ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream",
     visual: "liquid-blob",
+    customShader: "",
   },
 };

@@ -424,9 +424,35 @@ do seguinte:
   cena, então uma delas seria um runtime inteiro para desenhar um retângulo.
 - `voice-visuals.ts` — os cinco visuais atrás de uma interface só (`VoiceVisual`), que o orb em
   canvas 2D já satisfazia. Trocar de estética é trocar a classe.
+- `shader-editor.tsx` — o sexto visual não é uma classe: é o que o usuário escrever.
 
 O prelúdio GLSL compartilhado traz ruído por hash, fBm, `domain warping` e `smooth-min` — as
 quatro peças que produzem o aspecto líquido sem simulação de fluido.
+
+### O sexto visual é escrito por quem usa
+
+"Trocar de estética é trocar a classe" resolvia para quem compila o projeto. Para quem só usa, a
+lista de cinco era fixa — plugável no papel, fechada na prática. O visual `custom` fecha essa
+distância: o fragment shader mora em `settings.voice.customShader`, passa pelo mesmo `ShaderVisual`
+com o mesmo prelúdio e os mesmos uniforms, e vale no painel, no palco e na janelinha.
+
+Três decisões carregam esse recurso:
+
+- **O erro do compilador virou produto.** `ShaderVisual` descartava `getShaderInfoLog`, o que era
+  indiferente para os cinco de fábrica — eles compilam ou o build está quebrado. Para código
+  escrito na hora, um shader errado cairia calado para o visual de reserva sem dizer por quê.
+  O log agora é exposto em `failure`, e o número da linha vem **descontado do prelúdio**: o driver
+  reclama da linha 207 do arquivo concatenado, e o editor mostra a linha 3, que é a que existe na
+  tela.
+- **Só o que compila é gravado.** Um shader quebrado salvo nas preferências derrubaria o visual no
+  painel e na janelinha, longe do editor, onde não há nem mensagem de erro nem como consertar.
+- **O código não é prop, é estado de módulo.** Threadar a string por painel, palco, orb, miniatura,
+  Pulse e opções poluiria seis assinaturas por causa de um valor que é preferência global.
+  `setCustomShader` é chamado por quem carrega as settings; para o Pulse, que vive no content
+  script, o shader viaja junto no `pulse:show`.
+
+A prévia recompila 500 ms depois da última tecla. Sem essa pausa, cada tecla acusaria erro de chave
+não fechada enquanto a linha ainda está sendo escrita.
 
 ### Cada estado tem cor, ritmo e gesto
 

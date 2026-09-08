@@ -8,6 +8,7 @@ import { useSettings, useTheme } from "./use-settings";
 import { ActivityTimeline, AgentStatus, AmbientEdge, ApprovalCard, ContextChip, DeveloperDetails, DictationButton, LiveVoiceButton, TakeoverCard, VelaOrb, VelaState } from "./vela-components";
 import { AssistantActions, MessageEditor, UserActions } from "./message-actions";
 import { VoiceStage } from "./voice-stage";
+import { setCustomShader } from "./voice-visuals";
 import { ModelPicker } from "./model-picker";
 import { Markdown } from "./markdown";
 import { VelaMark } from "./vela-mark";
@@ -67,6 +68,9 @@ function App() {
   const liveRef = useRef(false);
 
   useTheme(settings);
+
+  // O shader do usuário é preferência global, não prop: o registro de visuais o lê de um lugar só.
+  useEffect(() => { setCustomShader(settings.voice.customShader); }, [settings.voice.customShader]);
 
   /** Fechar com animação exige manter montado até o fim dela; por isso o estado de saída. */
   const closeMenu = useCallback(() => {
