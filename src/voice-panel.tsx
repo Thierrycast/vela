@@ -154,7 +154,7 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
 
     <h2 className="subsection">Transcrição incremental</h2>
     <div className="settings-group">
-      <Row label="WebSocket" description="Usado para mostrar o texto aparecendo enquanto você fala. Áudio em PCM 16-bit, 16 kHz, mono.">
+      <Row label="WebSocket" description="Mostra o texto aparecendo enquanto você fala, no modo de voz ao vivo. Áudio em PCM 16-bit, 16 kHz, mono. Em branco, desliga — a transcrição final continua igual.">
         <input className="mono" value={voice.streamingUrl} placeholder="ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream" onChange={(event) => patch({ streamingUrl: event.target.value })} />
       </Row>
     </div>

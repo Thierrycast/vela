@@ -218,6 +218,38 @@ sustenta ~130 ms, fim quando o silêncio sustenta ~700 ms, com *pre-roll* de 300
 da primeira palavra não ser cortado. Cada enunciado vira um WAV completo. O pre-roll é impossível
 com MediaRecorder sem quebrar o contêiner — foi o que decidiu a troca.
 
+### Texto ao vivo: o rascunho escreve, o lote decide
+
+O caminho em lote só responde quando a frase acabou. Durante os segundos em que se fala a tela não
+tem o que mostrar, e é esse silêncio que faz a pessoa repetir a frase achando que o microfone não
+pegou. `stt-stream.ts` abre um WebSocket para `/stt/stream` do servidor de voz (Vosk) e recebe
+hipótese a cada bloco de 250 ms.
+
+O que o stream **não** resolve é a qualidade. Medido contra o servidor real, com "abrir o site do
+banco e clicar em extrato", o Vosk entregou "abrir o site do banco e querer carinha extrato" — e
+"querer carinha" viraria uma ação. Por isso os dois convivem com papéis separados:
+
+- **O stream escreve na tela.** É rascunho, muda enquanto se fala, e nunca abre um turno.
+- **O lote decide.** O Whisper continua produzindo o texto que a Vela obedece.
+
+O áudio sai duas vezes de propósito. Numa tailnet local isso custa quase nada, e a alternativa —
+confiar o comando ao rascunho — trocaria latência por erro de interpretação.
+
+Três detalhes que só apareceram contra o servidor de verdade:
+
+- **O `ready` vem depois do primeiro quadro de áudio, não depois do `config`.** A primeira versão
+  segurava o áudio esperando a permissão enquanto o servidor esperava o som: os dois lados
+  travavam e nenhum parcial chegava. O áudio agora sai assim que o socket abre.
+- **`final` é raro; `done` é o que sempre chega.** Um trecho de três segundos fecha sem nenhum
+  `final` e só emite `done` no `eof`. Os dois são tratados como texto fechado.
+- **Enquanto a Vela fala, o microfone ouve a própria Vela.** O empurrão ao stream é suprimido até
+  `speakingUntil`, senão a tela se enche da resposta dela mesma escrita como se fosse do usuário.
+
+O limite do servidor é de seis conexões simultâneas, com fechamento em 1013 quando lota — nesse
+caso o cliente não reconecta, porque insistir só aumenta a fila. Nos outros fechamentos são três
+tentativas, e aí ele desiste em silêncio: a transcrição final continua inteira sem ele. O endereço
+fica em Configurações → Voz e, em branco, o recurso simplesmente não existe.
+
 ### Content script sob demanda, e em build separado
 
 O manifest **não** declara `content_scripts`. `injection.ts` registra em runtime via
@@ -551,6 +583,18 @@ Existe por um motivo específico: a recomendação de "rode um tempo e veja se p
 vale nada sem o número. Se a fatia de "sem efeito perceptível" for baixa, o caminho DOM basta e a
 extensão continua instalando sem aviso de depuração. Se for alta, o `cdp-actuator` se justifica —
 e aí a permissão `debugger` entra no manifest sabendo o que compra.
+
+### O anexo cortado em silêncio
+
+O compositor guardava 20 000 caracteres por arquivo anexado e o prompt mandava
+`attachment.slice(0, 2000)`. Nove décimos do arquivo iam para o lixo sem ninguém ver: a pessoa
+anexava o documento inteiro e a Vela respondia sobre o começo dele achando que tinha lido tudo —
+o pior tipo de defeito, o que produz resposta plausível.
+
+O corte agora é por soma (`ATTACHMENT_BUDGET`, 24 000 caracteres entre todos os anexos da rodada)
+e é **declarado**: o anexo cortado chega ao modelo com `cortado="fim"`, e o que não coube chega
+como `cortado="inteiro"`. O modelo passa a saber que está vendo um pedaço, que é a diferença entre
+responder com ressalva e responder errado com confiança.
 
 ## Pendências conhecidas
 

@@ -4,6 +4,7 @@ import { UtteranceSegmenter } from "./vad";
 import { VoiceMetricsAnalyzer } from "./audio-metrics";
 import { encodeWav } from "./wav-encoder";
 import { VoiceRuntimeState } from "./voice-runtime";
+import { SttStream } from "./stt-stream";
 import { spanFrom, traceFrom } from "./trace-client";
 
 const trace = traceFrom("offscreen");
@@ -37,6 +38,8 @@ let muted = false;
 let speakingUntil = 0;
 const pending: Blob[] = [];
 let draining = false;
+let live: SttStream | null = null;
+let lastPartial = "";
 // Janela de resumo do sinal de áudio, para a trilha não receber vinte eventos por segundo.
 let samples = 0;
 let peak = 0;
@@ -148,7 +151,38 @@ async function start(nextMode: "live" | "dictation") {
       },
     }, { sampleRate: audio.sampleRate });
 
-    node.port.onmessage = (event: MessageEvent<Float32Array>) => { if (!muted) segmenter?.push(event.data); };
+    /*
+     * O texto ao vivo é opcional por definição: se o endereço não estiver configurado, ou se a
+     * conexão cair, a transcrição em lote continua inteira. Ele nunca abre um turno — só escreve
+     * na tela enquanto a pessoa fala.
+     */
+    const streamingUrl = (await loadSettings()).voice.streamingUrl.trim();
+    if (mode === "live" && streamingUrl) {
+      const connecting = traceSpan("voice", "texto ao vivo", { url: streamingUrl });
+      let opened = false;
+      live = new SttStream(streamingUrl, audio.sampleRate, {
+        onReady: () => { if (!opened) { opened = true; connecting.end({ ok: true }); } },
+        onPartial: (text) => {
+          if (text === lastPartial) return;
+          lastPartial = text;
+          void send({ type: "voice:partial", text });
+        },
+        onFinal: (text) => { lastPartial = ""; trace("voice", "trecho fechado no texto ao vivo", { data: { texto: text } }); },
+        onError: (message) => {
+          if (!opened) { opened = true; connecting.end({ ok: false, code: "falha", data: { erro: message } }); }
+          else trace("voice", "texto ao vivo falhou", { ok: false, data: { erro: message } });
+        },
+      });
+      live.open();
+    }
+
+    node.port.onmessage = (event: MessageEvent<Float32Array>) => {
+      if (muted) return;
+      segmenter?.push(event.data);
+      // Enquanto a Vela fala, o microfone ouve a própria Vela: mandar isso ao texto ao vivo
+      // encheria a tela com a resposta dela mesma, escrita como se fosse do usuário.
+      if (Date.now() >= speakingUntil) live?.push(event.data);
+    };
     await audio.resume();
     publish("listening");
   } catch (error) {
@@ -166,6 +200,9 @@ function stop() {
   node?.disconnect();
   node = null;
   segmenter = null;
+  live?.close();
+  live = null;
+  lastPartial = "";
   pending.length = 0;
   void audio?.close();
   audio = null;

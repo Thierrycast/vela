@@ -19,6 +19,8 @@ export type SidecarInbound =
   | { type: "voice:state"; state: VoiceState }
   | { type: "voice:error"; message: string }
   | { type: "voice:transcript"; text: string }
+  /** Rascunho do que está sendo falado agora. Nunca vira turno; some quando o final chega. */
+  | { type: "voice:partial"; text: string }
   | { type: "chat:prefill"; text: string }
   | { type: "chat:attachments"; items: string[] }
   | { type: "chat:approval"; request: ApprovalRequest }

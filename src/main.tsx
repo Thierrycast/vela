@@ -93,6 +93,8 @@ function App() {
       if (message.type === "chat:speaking" && !message.speaking) setSpeakingId(null);
       if (message.type === "voice:state") { setVoiceState(message.state); if (message.state === "idle") { setDictating(false); setSpeakingId(null); } }
       if (message.type === "voice:error") { setVoiceState("error"); setDictating(false); setSpeakingId(null); setEvents((current) => [...current, { kind: "error", text: message.message }]); }
+      // Só no palco: no ditado o rascunho brigaria com o que você já digitou no campo.
+      if (message.type === "voice:partial" && liveRef.current) setLiveTranscript(message.text);
       if (message.type === "voice:transcript") {
         // No Live Voice o que você falou já virou turno; repetir no campo de texto seria ruído.
         if (liveRef.current) setLiveTranscript(message.text);

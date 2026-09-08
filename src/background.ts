@@ -359,6 +359,11 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
   if (message.type === "pulse:approval-resolve" && message.id && message.decision) resolveApproval(message.id, message.decision as ApprovalDecision);
   if (message.type === "pulse:takeover-resume") resumeTakeover();
   if (message.type === "voice:error" && message.message) broadcast({ type: "voice:error", message: message.message });
+  // O parcial é rascunho: aparece no palco e na janelinha, e nunca chama `speakTurn`.
+  if (message.type === "voice:partial" && message.text && voiceMode === "live") {
+    broadcast({ type: "voice:partial", text: message.text });
+    void notifyActiveTab({ type: "pulse:transcript", text: message.text });
+  }
   if (message.type === "voice:transcript" && message.text) {
     const text = message.text;
     if (voiceMode === "live") { void notifyActiveTab({ type: "pulse:transcript", text }); void speakTurn(text); }

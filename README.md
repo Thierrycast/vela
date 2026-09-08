@@ -195,6 +195,12 @@ mais lenta, com o número ao lado, e quem já tinha uma voz lenta salva é migra
 **Síntese em streaming** (ligada) toca os pedaços de PCM à medida que chegam, agendados na linha
 do tempo do AudioContext, em vez de esperar o arquivo inteiro.
 
+**Texto ao vivo** mostra as palavras aparecendo enquanto você fala, no modo de voz ao vivo, em vez
+de deixar a tela em branco até a frase acabar. É rascunho: vem do Vosk pelo WebSocket em
+Configurações → Voz, muda enquanto você fala e **nunca vira comando** — quem decide o que a Vela
+vai obedecer continua sendo a transcrição final. Em branco, o campo desliga o recurso e o resto da
+voz segue igual.
+
 ### O palco da voz
 
 Ao entrar em Live Voice, o orb ocupa a conversa: durante uma fala o assunto é o que se ouve, não

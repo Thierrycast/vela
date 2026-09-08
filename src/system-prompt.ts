@@ -1,5 +1,8 @@
 import { AppSettings, Autonomy, BrowserContext } from "./types";
 
+/** Teto somado dos anexos numa rodada. Cinco arquivos de 20 000 inteiros estourariam o contexto. */
+const ATTACHMENT_BUDGET = 24_000;
+
 const AUTONOMY_RULES: Record<Autonomy, string> = {
   observe: "MODO OBSERVAR. Você não pode clicar, digitar, navegar nem pressionar teclas — essas chamadas serão recusadas. Leia a página, explique o que faria e peça ao usuário para mudar a autonomia se a ação for necessária.",
   assist: "MODO ASSISTIR. Você pode agir, mas anuncie em uma frase o que vai fazer antes de cada ação que modifique a página ou navegue.",
@@ -60,7 +63,19 @@ export function buildStateBlock(context: BrowserContext): string {
     lines.push("<aba_ativa>indisponível (o usuário desligou o contexto de página ou a aba é restrita)</aba_ativa>");
   }
   if (context.selection) lines.push(`<selecao_atual>${context.selection.slice(0, 1200)}</selecao_atual>`);
-  for (const attachment of context.attachments) lines.push(`<anexo>${attachment.slice(0, 2000)}</anexo>`);
+  /*
+   * O compositor guarda até 20 000 caracteres por arquivo anexado. Cortar cada um em 2 000 aqui
+   * jogava fora nove décimos do arquivo sem ninguém ver: a pessoa anexava o documento inteiro e a
+   * Vela respondia sobre o começo dele achando que tinha lido tudo. O corte agora é por soma — e
+   * quando corta, diz que cortou.
+   */
+  let orcamento = ATTACHMENT_BUDGET;
+  for (const attachment of context.attachments) {
+    if (orcamento <= 0) { lines.push(`<anexo cortado="inteiro">(não coube no contexto desta rodada)</anexo>`); continue; }
+    const cortado = attachment.length > orcamento;
+    lines.push(`<anexo${cortado ? ` cortado="fim"` : ""}>${attachment.slice(0, orcamento)}</anexo>`);
+    orcamento -= Math.min(attachment.length, orcamento);
+  }
   if (context.tabs.length) {
     lines.push("<abas_da_sessao>");
     for (const tab of context.tabs.slice(0, 12)) lines.push(`  [${tab.tabId}] ${tab.title} — ${safeHost(tab.url)}${tab.active ? " (ativa)" : ""}`);
