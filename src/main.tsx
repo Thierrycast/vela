@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { FileText, Layers, Menu, Paperclip, Plus, Search, Send, Settings2, Square, WifiOff } from "lucide-react";
+import { FileText, Layers, Menu, Paperclip, Plus, Search, Send, Settings2, Square, Trash2, WifiOff } from "lucide-react";
 import { AgentEvent, ChatMessage } from "./types";
 import { SidecarInbound, SidecarPort, VoiceState, connectSidecar } from "./messages";
 import type { ApprovalRequest } from "./approvals";
@@ -54,6 +54,8 @@ function App() {
   const [voiceFocused, setVoiceFocused] = useState(true);
   const [voiceMuted, setVoiceMuted] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
+  /** Qual linha do histórico está pedindo confirmação. Apagar não tem volta: exige dois cliques. */
+  const [forgetting, setForgetting] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
@@ -222,7 +224,18 @@ function App() {
     {menuOpen && <aside className={`popover ${menuLeaving ? "leaving" : ""}`} ref={menuRef}>
       <span className="popover-label">Conversas recentes</span>
       {history.length > 0
-        ? history.slice(0, 10).map((item) => <button key={item.id} className="popover-history" onClick={() => { post({ type: "chat:open", id: item.id }); closeMenu(); }}>{item.title}</button>)
+        ? history.slice(0, 10).map((item) => <div key={item.id} className="popover-row">
+          {forgetting === item.id
+            ? <>
+              <span className="popover-ask">Apagar de vez?</span>
+              <button className="popover-yes" onClick={() => { post({ type: "chat:forget", id: item.id }); setForgetting(null); }}>Apagar</button>
+              <button className="popover-no" onClick={() => setForgetting(null)}>Não</button>
+            </>
+            : <>
+              <button className="popover-history" onClick={() => { post({ type: "chat:open", id: item.id }); closeMenu(); }}>{item.title}</button>
+              <button className="popover-forget" aria-label={`Apagar a conversa “${item.title}”`} title="Apagar esta conversa" onClick={() => setForgetting(item.id)}><Trash2 size={13} /></button>
+            </>}
+        </div>)
         : <p className="popover-empty">Nenhuma tarefa anterior ainda.</p>}
     </aside>}
 

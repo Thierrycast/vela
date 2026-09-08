@@ -42,6 +42,7 @@ export type SidecarOutbound =
   | { type: "voice:start-dictation" }
   | { type: "chat:history-request" }
   | { type: "chat:open"; id: string }
+  | { type: "chat:forget"; id: string }
   | { type: "session:rename"; title: string }
   | { type: "chat:rewind"; id: string; text?: string }
   | { type: "chat:speak"; text: string }

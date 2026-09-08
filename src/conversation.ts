@@ -85,6 +85,28 @@ export async function reset() {
   await flush();
 }
 
+/**
+ * Apaga uma conversa. Não havia como apagar nenhuma: o histórico só abria, e uma tarefa de teste
+ * ficava para sempre na lista das dez recentes, empurrando o trabalho real para fora da vista.
+ *
+ * Devolve se a conversa apagada era a ativa, porque nesse caso quem chamou precisa republicar a
+ * tela — o painel estaria mostrando mensagens que já não existem em lugar nenhum.
+ */
+export async function remove(id: string): Promise<{ existia: boolean; eraAtiva: boolean }> {
+  const conversations = await ensure();
+  const index = conversations.findIndex((item) => item.id === id);
+  if (index < 0) return { existia: false, eraAtiva: false };
+
+  const eraAtiva = conversations[index].id === activeId;
+  conversations.splice(index, 1);
+  // Apagar a última deixaria `ensure` recarregando do storage e ressuscitando o que foi apagado,
+  // porque uma lista vazia é o sinal de "cache frio". Uma conversa nova toma o lugar.
+  if (!conversations.length) conversations.push(makeConversation());
+  if (eraAtiva) activeId = conversations[0].id;
+  await flush();
+  return { existia: true, eraAtiva };
+}
+
 export async function messageById(id: string): Promise<ChatMessage | null> {
   return (await active()).messages.find((item) => item.id === id) ?? null;
 }

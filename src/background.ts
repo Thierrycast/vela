@@ -270,6 +270,16 @@ async function applySidecarMessage(message: SidecarOutbound) {
     broadcast({ type: "chat:snapshot", ...(await agentLoop.snapshot()) });
     return;
   }
+  if (message.type === "chat:forget") {
+    const { existia, eraAtiva } = await conversation.remove(message.id);
+    if (!existia) return;
+    // Apagar a conversa aberta deixaria a tela mostrando mensagens que já não existem: o laço
+    // precisa recarregar da conversa que passou a ser a ativa antes de republicar o retrato.
+    if (eraAtiva) { cancelPendingApprovals(); agentLoop.abort(); broadcast({ type: "chat:snapshot", ...(await agentLoop.snapshot()) }); await publishSession(); }
+    broadcast({ type: "chat:history", items: await conversation.list() });
+    broadcast({ type: "chat:event", event: { kind: "status", text: "Conversa apagada." } });
+    return;
+  }
   if (message.type === "chat:rewind") return rewind(message.id, message.text);
   if (message.type === "chat:speak") return speakText(message.text);
   if (message.type === "chat:speak-stop") return stopSpeaking();

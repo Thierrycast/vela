@@ -646,6 +646,32 @@ teto para em 20 000 caracteres com o começo preservado. Com três anexos de 20 
 prompt sai com o primeiro inteiro, o segundo `cortado="fim"` e o terceiro `cortado="inteiro"`,
 somando 24 288 caracteres.
 
+### A conversa que não tinha como apagar
+
+Duas conversas de teste ficaram no histórico e o assunto virou "decisão do usuário". Não era: o
+histórico só **abria** conversas. `conversation.ts` tinha `list` e `open` e mais nada — nenhuma
+superfície do produto, nem o painel, nem a página de opções, nem `vela_settings`, sabia apagar uma
+conversa. O item pendente não esperava uma decisão, esperava a funcionalidade.
+
+`remove(id)` devolve `{ existia, eraAtiva }` porque o chamador precisa saber das duas coisas:
+
+- **Apagar a conversa aberta** deixaria a tela mostrando mensagens que não existem mais. O
+  background aborta o laço e republica o retrato da conversa que passou a ser a ativa.
+- **Apagar a última** era a armadilha: lista vazia é justamente o sinal de "cache frio" em
+  `ensure()`, então na chamada seguinte ele recarregaria do storage e ressuscitaria o que foi
+  apagado. Uma conversa nova toma o lugar antes do `flush`.
+
+Na interface, a linha do histórico deixou de ser um botão e passou a ser uma linha — título que
+abre mais lixeira que apaga não podem ser o mesmo elemento, e botão dentro de botão não é HTML
+válido. A lixeira só aparece no hover: dez ícones de lixo em dez linhas transformariam o menu de
+conversas num painel de destruição. E apagar não tem volta, então pede dois cliques — a linha
+inteira troca de assunto para "Apagar de vez? Apagar / Não", de modo que não existe clique em
+"apagar" achando que se estava abrindo a conversa.
+
+Coberto no harness com os quatro casos: id inexistente, conversa comum, a conversa aberta, e
+apagar todas. Verificado no painel real: um clique na lixeira não apaga, "Não" volta atrás, e
+"Apagar" tira a linha da lista e o registro do `chrome.storage.local`.
+
 ## Pendências conhecidas
 
 Registradas para decisão, não esquecidas:

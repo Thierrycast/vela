@@ -218,6 +218,25 @@ await new Promise((resolve) => setTimeout(resolve, 5));
 await conversation.append({ id: "m3", role: "user", content: "mais uma na antiga", createdAt: Date.now(), status: "complete" });
 console.log("depois de escrever na antiga:", (await conversation.list()).map((item) => item.title));
 
+// 15. Apagar conversa: o histórico só abria, e uma tarefa de teste ficava para sempre na lista.
+console.log("\n=== apagar conversa ===");
+const antesDeApagar = await conversation.list();
+const alvo = antesDeApagar.find((item) => item.title === "segunda conversa");
+console.log("apagando:", JSON.stringify(alvo?.title), await conversation.remove(alvo?.id ?? ""));
+console.log("sobrou:", (await conversation.list()).map((item) => item.title).slice(0, 3));
+console.log("id inexistente:", await conversation.remove("nao-existe"));
+
+// A ativa apagada é o caso perigoso: a tela ficaria mostrando mensagens que já não existem.
+const ativa = (await conversation.list())[0];
+await conversation.open(ativa.id);
+const resultado = await conversation.remove(ativa.id);
+console.log("apaguei a que estava aberta:", resultado);
+console.log("a conversa ativa agora tem", (await conversation.all()).length, "mensagens");
+
+// E apagar tudo não pode ressuscitar nada: lista vazia é o sinal de cache frio em `ensure`.
+for (const item of await conversation.list()) await conversation.remove(item.id);
+console.log("depois de apagar todas:", (await conversation.list()).length, "na lista e", (await conversation.all()).length, "mensagens abertas");
+
 // 13. Escalada para o modo preciso: clique sem efeito vira clique confiável, e a resposta diz o que mudou.
 await run("modo preciso repete o clique inerte", [
   [delta("Vou clicar."), toolCall("c1", "browser_action", { action: "click", selector: "#inerte" }), DONE],

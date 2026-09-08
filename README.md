@@ -100,6 +100,9 @@ saiu "sem efeito perceptível" é repetido pelo depurador do Chrome — e a Vela
 se a página reagiu, para dizer a verdade em vez de "cliquei de novo". Nasce desligado porque
 anexar o depurador faz o Chrome exibir uma faixa de aviso; ela some assim que a ação termina.
 
+**Apagar uma conversa.** No menu de conversas recentes, a lixeira aparece ao passar o mouse na
+linha. Apagar não tem volta, então a linha pergunta antes: *Apagar de vez?*
+
 **Mudar as próprias preferências.** "Troca para a voz do Cadu", "usa o mesh field", "desliga o
 cursor", "aumenta o limite de etapas" — `vela_settings` faz na hora, sem mandar você abrir a tela
 de configurações. Endereço de servidor, chaves e a autonomia ficam fora do alcance dela.
