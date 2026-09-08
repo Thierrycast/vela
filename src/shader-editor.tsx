@@ -12,6 +12,12 @@ const PAUSA = 500;
 type Estado = { ok: boolean; erro: string };
 
 /**
+ * Sondado uma vez, fora do React: a disponibilidade de WebGL não muda durante a sessão, e como
+ * `shadersAvailable` queima um canvas descartável a cada chamada, repetir por render é desperdício.
+ */
+const SEM_WEBGL = typeof document !== "undefined" && !shadersAvailable();
+
+/**
  * Os cinco visuais de fábrica são classes: trocar de estética é trocar a classe, e isso serve
  * para quem compila o projeto. Para quem só usa, "plugável" tinha que significar escrever o
  * shader e ver acontecer — daí este editor.
@@ -35,7 +41,7 @@ export function ShaderEditor({ value, onChange }: { value: string; onChange: (so
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || !shadersAvailable()) return;
+    if (!host || SEM_WEBGL) return;
 
     const canvas = document.createElement("canvas");
     host.replaceChildren(canvas);
@@ -84,9 +90,14 @@ export function ShaderEditor({ value, onChange }: { value: string; onChange: (so
         aria-label="Fragment shader do visual"
       />
       <div className="shader-status">
-        {estado.ok
-          ? <span className="probe-ok">Compilou. O visual já está valendo no painel e na janelinha.</span>
-          : <pre className="probe-off">{estado.erro || "O shader não compilou."}</pre>}
+        {/* Sem WebGL a prévia fica vazia; dizer "Compilou" ali seria afirmar sucesso justamente
+            onde o recurso não existe. */}
+        {SEM_WEBGL
+          ? <span className="probe-off">Este navegador não tem WebGL disponível, então não há como rodar shader aqui. Escolha um dos visuais em canvas 2D.</span>
+          : estado.ok
+            ? <span className="probe-ok">Compilou. O visual já está valendo no painel e na janelinha.</span>
+            : <pre className="probe-off">{estado.erro || "O shader não compilou."}
+Enquanto não compilar, o visual anterior continua valendo — nada é gravado.</pre>}
         <button className="secondary-button" type="button" onClick={restaurar}><RotateCcw size={14} /> Restaurar o exemplo</button>
       </div>
     </div>

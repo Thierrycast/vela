@@ -245,6 +245,12 @@ Três detalhes que só apareceram contra o servidor de verdade:
 - **Enquanto a Vela fala, o microfone ouve a própria Vela.** O empurrão ao stream é suprimido até
   `speakingUntil`, senão a tela se enche da resposta dela mesma escrita como se fosse do usuário.
 
+Um quarto detalhe, do mesmo tipo: **o orçamento de reconexões conta tempo de vida, não tentativas.**
+Três tentativas existem para um servidor que não está lá; uma conexão que viveu dez segundos e caiu
+é o servidor fechando por 120 s de silêncio, que numa conversa é normal. Sem essa distinção, três
+pausas longas gastavam o orçamento e o texto ao vivo morria pelo resto da sessão — e zerar no
+`ready` não resolveria, porque o `ready` só chega quando alguém fala.
+
 O limite do servidor é de seis conexões simultâneas, com fechamento em 1013 quando lota — nesse
 caso o cliente não reconecta, porque insistir só aumenta a fila. Nos outros fechamentos são três
 tentativas, e aí ele desiste em silêncio: a transcrição final continua inteira sem ele. O endereço
@@ -444,6 +450,9 @@ Três decisões carregam esse recurso:
   O log agora é exposto em `failure`, e o número da linha vem **descontado do prelúdio**: o driver
   reclama da linha 207 do arquivo concatenado, e o editor mostra a linha 3, que é a que existe na
   tela.
+- **A tela não afirma sucesso onde o recurso não existe.** Sem WebGL a prévia fica vazia, e o
+  estado dizia "Compilou" do lado dela. Agora diz que o navegador não tem WebGL e manda escolher um
+  visual em canvas 2D.
 - **Só o que compila é gravado.** Um shader quebrado salvo nas preferências derrubaria o visual no
   painel e na janelinha, longe do editor, onde não há nem mensagem de erro nem como consertar.
 - **O código não é prop, é estado de módulo.** Threadar a string por painel, palco, orb, miniatura,
@@ -648,6 +657,25 @@ Registradas para decisão, não esquecidas:
 7. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
 
 ### O cursor é o caminho da execução, não um enfeite
+
+A seta era um círculo com um ponto no meio. Um círculo não aponta: dizia "algo está aqui" e nunca
+"estou mirando isto", e identificar o alvo ficava por conta do destaque. Agora é silhueta de
+ponteiro — reconhecível na hora — mas mais estreita, com a aresta direita levemente côncava e o
+corpo em gradiente do ciano de `acting` ao violeta do accent. A diferença de forma é deliberada:
+durante uma tarefa há dois cursores na tela, o do sistema e o da Vela, e eles precisam ser
+distinguíveis num relance.
+
+Três detalhes que a troca obrigou:
+
+- **O ponto de ação virou a ponta, não o centro.** Com o círculo, `translate(-50%,-50%)` centrava
+  a marca no alvo. Uma seta encosta pela ponta: ela fica em (2,1) do viewBox, e o deslocamento é
+  `translate(-2px,-1px)`. Medido na extensão real, a ponta cai a 0/-1 px do centro do alvo.
+- **O `transform-origin` foi para a ponta também**, senão o esmagamento do clique encolheria a seta
+  para o meio dela, afastando a ponta do alvo no exato instante do clique.
+- **Contorno escuro mais halo**, porque a seta flutua sobre site alheio. Em página escura o próprio
+  ciano dá o contraste; em página clara é o contorno que faz a silhueta existir. Verificado nos dois
+  fundos, e também na variante vazada que o modo Observar usa para dizer "clicaria aqui".
+
 
 `traceLayer.begin()` devolve uma **promise que resolve na chegada do cursor**, e a ação só
 dispara depois dela. Antes, o cursor animava em paralelo enquanto o clique já tinha acontecido —

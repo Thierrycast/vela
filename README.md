@@ -39,7 +39,7 @@ Toda vez que rodar `npm run build`, clique em **Atualizar** no card da extensão
 |---|---|
 | Abra uma página comum e peça *"leia esta página e liste os botões"* | Deve listar botões que existem de verdade, com refs |
 | *"vá para example.com e me diga o título"* | Navega, espera o load, lê e responde |
-| Troque a autonomia para **Observar** e peça um clique | Recusa, mas o cursor tracejado viaja até o alvo |
+| Troque a autonomia para **Observar** e peça um clique | Recusa, mas a seta vazada viaja até o alvo |
 | Em **Assistir**, peça um clique | Aparece um cartão pedindo aprovação antes de agir |
 | Selecione um texto em qualquer página | Aparece a marca da Vela; o menu oferece Perguntar/Explicar/Resumir/Usar como contexto |
 | Feche e reabra o painel no meio de uma tarefa | O histórico e o estado de execução continuam |

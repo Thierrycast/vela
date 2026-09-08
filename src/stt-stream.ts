@@ -35,6 +35,8 @@ type Handlers = {
 
 const RECONNECT_DELAY = 1500;
 const MAX_RECONNECTS = 3;
+/** Acima disto, a conexão funcionou e caiu — não conta contra o orçamento de tentativas. */
+const HEALTHY_CONNECTION = 10_000;
 
 export class SttStream {
   private socket: WebSocket | null = null;
@@ -62,6 +64,8 @@ export class SttStream {
     socket.binaryType = "arraybuffer";
     this.socket = socket;
 
+    const openedAt = Date.now();
+
     socket.onopen = () => {
       socket.send(JSON.stringify({ type: "config", sample_rate: this.sampleRate, words: false }));
       for (const frame of this.queue) socket.send(frame);
@@ -71,10 +75,7 @@ export class SttStream {
     socket.onmessage = (event: MessageEvent<string>) => {
       let message: { type?: string; text?: string; message?: string };
       try { message = JSON.parse(event.data) as typeof message; } catch { return; }
-      if (message.type === "ready") {
-        this.reconnects = 0;
-        this.handlers.onReady();
-      }
+      if (message.type === "ready") this.handlers.onReady();
       if (message.type === "partial" && message.text) this.handlers.onPartial(message.text);
       // `final` fecha um segmento no meio da fala; `done` fecha a conexão inteira. Os dois são
       // texto em que dá para confiar — o que muda é só quando chegam.
@@ -87,6 +88,14 @@ export class SttStream {
       if (this.closing) return;
       // 1013 é o servidor dizendo que já tem seis streams. Reconectar em laço só piora a fila.
       if (event.code === 1013) { this.handlers.onError("O servidor de voz está com todas as conexões de streaming ocupadas."); return; }
+      /*
+       * O orçamento de três tentativas existe para um servidor que não está lá. Uma conexão que
+       * viveu bastante e caiu é outra coisa: o servidor fecha o stream depois de 120 s sem áudio, e
+       * uma conversa tem silêncio. Sem esta distinção, três pausas longas gastavam o orçamento e o
+       * texto ao vivo morria pelo resto da sessão. Zerar no `ready` não resolveria — o `ready` só
+       * vem quando alguém fala, que é justamente o que não estava acontecendo.
+       */
+      if (Date.now() - openedAt >= HEALTHY_CONNECTION) this.reconnects = 0;
       if (this.reconnects >= MAX_RECONNECTS) { this.handlers.onError("O texto ao vivo caiu; a transcrição final continua funcionando."); return; }
       this.reconnects += 1;
       this.retry = setTimeout(() => { this.retry = null; if (!this.closing) this.connect(); }, RECONNECT_DELAY);
