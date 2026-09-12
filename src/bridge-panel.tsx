@@ -72,9 +72,14 @@ export function BridgePanel({ settings, update }: { settings: AppSettings; updat
       <Row label="Chamadas atendidas" description="Quantos pedidos de agentes externos a Vela executou desde que a ponte subiu.">
         <span className="status-badge">{status.calls}</span>
       </Row>
-      <Row label="Porta local" description="Só 127.0.0.1. A ponte nunca escuta na rede.">
+      <Row label="Porta local" description="Só 127.0.0.1. A ponte nunca escuta na rede. Se esta porta estiver ocupada, o processo anda até sete casas acima e a extensão acha sozinha.">
         <input className="mono" type="number" min={1024} max={65535} value={bridge.port} onChange={(event) => patch({ port: Number(event.target.value) || 8792 })} />
       </Row>
+      {/* A porta preferida é o que você pediu; esta é onde a ponte coube. Mostrar as duas evita o
+          diagnóstico errado de "configurei 8792 e não conecta" quando ela está viva na 8794. */}
+      {status.port !== undefined && status.port !== bridge.port && <Row label="Porta em uso" description="A configurada estava ocupada quando o processo subiu.">
+        <span className="status-badge">{status.port}</span>
+      </Row>}
     </div>
 
     <h2 className="subsection">Token</h2>

@@ -20,7 +20,17 @@ const args = Object.fromEntries(process.argv.slice(2).flatMap((item) => {
   return match ? [[match[1], match[2]]] : [];
 }));
 
-const PORT = Number(args.port ?? process.env.VELA_BRIDGE_PORT ?? 8792);
+/**
+ * A porta é uma preferência, não um requisito. Antes, 8792 ocupada matava o processo e obrigava a
+ * trocar o número à mão nos dois lados — e o lado da extensão fica numa tela de configurações que
+ * ninguém lembra de abrir. Agora a ponte anda pela faixa e a extensão sonda a mesma faixa.
+ *
+ * A faixa é curta de propósito: oito portas dão margem para instâncias paralelas sem a extensão
+ * varrer meio sistema atrás de um servidor que talvez nem exista.
+ */
+const PORT_RANGE = 8;
+const FIRST_PORT = Number(args.port ?? process.env.VELA_BRIDGE_PORT ?? 8792);
+let PORT = FIRST_PORT;
 const TOKEN = args.token ?? process.env.VELA_BRIDGE_TOKEN ?? "";
 const POLL_TIMEOUT = 25_000;
 const CALL_TIMEOUT = 180_000;
@@ -104,6 +114,15 @@ const httpServer = createServer(async (request, http) => {
   if (!authorized(request)) return respond(http, 401, { error: "token inválido" });
   http.setHeader("access-control-allow-origin", "*");
 
+  /*
+   * Sondagem. Existe porque `/poll` fica pendurado 25 s quando não há comando, o que serve para
+   * receber trabalho e não serve para perguntar "você está aí?". Responde na hora e se identifica,
+   * para a extensão não adotar qualquer servidor que por acaso esteja na faixa.
+   */
+  if (request.method === "GET" && request.url.startsWith("/hello")) {
+    return respond(http, 200, { vela: "bridge", port: PORT, online: isOnline() });
+  }
+
   if (request.method !== "POST" || !request.url.startsWith("/poll")) return respond(http, 404, { error: "rota desconhecida" });
 
   const body = await readBody(request);
@@ -121,6 +140,16 @@ const httpServer = createServer(async (request, http) => {
 
   if (state.queue.length) return respond(http, 200, { commands: state.queue.splice(0, 8) });
 
+  /*
+   * O primeiro poll volta na hora, mesmo vazio.
+   *
+   * Pendurá-lo como os outros fazia a extensão passar 25 s em "Conectando…" com a conexão já de pé
+   * — e quem estava olhando a tela concluía que não tinha funcionado. A resposta vazia custa um
+   * poll a mais e transforma o estado em verdade imediata. Do segundo em diante, o long-poll é o
+   * que segura a conexão sem torrar CPU.
+   */
+  if (first) return respond(http, 200, { commands: [] });
+
   const waiter = { http, timer: 0 };
   waiter.timer = setTimeout(() => {
     state.waiting = state.waiting.filter((item) => item !== waiter);
@@ -134,12 +163,24 @@ const httpServer = createServer(async (request, http) => {
 });
 
 httpServer.on("error", (error) => {
-  log(error.code === "EADDRINUSE"
-    ? `a porta ${PORT} já está em uso. Feche a outra ponte ou escolha outra porta com --port=.`
-    : `falha no servidor local: ${error.message}`);
-  process.exit(1);
+  if (error.code !== "EADDRINUSE") {
+    log(`falha no servidor local: ${error.message}`);
+    process.exit(1);
+  }
+  // Porta ocupada não é motivo para desistir: outra ponte, ou qualquer processo, pode estar ali.
+  const proxima = PORT + 1;
+  if (proxima >= FIRST_PORT + PORT_RANGE) {
+    log(`as portas ${FIRST_PORT}–${FIRST_PORT + PORT_RANGE - 1} estão todas ocupadas. Libere uma ou escolha outra faixa com --port=.`);
+    process.exit(1);
+  }
+  PORT = proxima;
+  httpServer.listen(PORT, "127.0.0.1");
 });
-httpServer.listen(PORT, "127.0.0.1", () => log(`ouvindo em http://127.0.0.1:${PORT} — aguardando a extensão.`));
+httpServer.listen(PORT, "127.0.0.1", () => {
+  log(PORT === FIRST_PORT
+    ? `ouvindo em http://127.0.0.1:${PORT} — aguardando a extensão.`
+    : `a porta ${FIRST_PORT} estava ocupada; ouvindo em http://127.0.0.1:${PORT}. A extensão acha sozinha.`);
+});
 
 // --- MCP por stdio: o lado do agente de fora ----------------------------------------
 

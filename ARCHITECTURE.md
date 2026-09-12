@@ -201,6 +201,30 @@ aprovasse", senão insiste na mesma chamada.
 Ações irreversíveis (`/comprar|pagar|excluir|confirmar|transferir/`) pedem confirmação **mesmo em
 modo Auto**.
 
+#### `unattended` deixou de ser palpite
+
+A primeira versão **adivinhava**: um `connected()` respondia se havia painel aberto ou voz ligada, e
+com os dois desligados a ação era recusada **sem nunca ter sido oferecida**. Duas coisas estavam
+erradas nisso.
+
+A primeira é que o Pulse — a janelinha da página — sempre foi capaz de mostrar o cartão, e estava
+sendo descartado porque o código confundia *superfície* com *modo*: o Pulse é a UI da página, não um
+acessório da voz. Com o painel fechado, a ação morria com uma aba ali na frente, capaz de perguntar,
+e onde a Vela estava agindo naquele instante.
+
+A segunda é que adivinhar era desnecessário. `configureApprovals` agora recebe um entregador que
+devolve **quantas superfícies aceitaram**, e `unattended` só sai quando esse número é zero — medido,
+não suposto. A contagem vem de `chrome.tabs.sendMessage` não rejeitar: rejeição é "Receiving end does
+not exist", que é exatamente "aqui ninguém veria o cartão".
+
+Na prática, a aba que está agindo sempre tem content script — ela acabou de responder à ação. Por
+isso a **notificação do Chrome** é rede de segurança, não caminho comum: cobre a corrida em que a aba
+morre entre a ação e a aprovação. Ela traz botões Permitir/Recusar, e fechar sem escolher conta como
+recusa — silêncio não autoriza nada.
+
+**Abrir o painel sozinha não é opção**: `chrome.sidePanel.open()` exige gesto do usuário no MV3 e
+lança quando chamado de um handler de fundo. É limite do Chrome, não escolha de desenho.
+
 ### Campos sensíveis são redigidos na leitura
 
 `page-snapshot.ts` nunca expõe o valor de `type=password|hidden` nem de campos com `autocomplete`
@@ -398,6 +422,27 @@ conexão; um `POST /poll` fica pendurado até 25 s esperando comando.
 **A latência não vem do ciclo de 25 s.** Quando um comando termina, `bridge.ts` aborta o poll em
 curso para entregar o resultado imediatamente — sem isso, um clique de 200 ms só chegaria ao
 agente no fim do ciclo. Medido de ponta a ponta: 6 ms.
+
+### A porta é preferência, não requisito
+
+Antes, 8792 ocupada matava o processo e obrigava a trocar o número **nos dois lados** à mão — e o
+lado da extensão fica numa tela de configurações que ninguém lembra de abrir. Agora o processo anda
+pela faixa 8792–8799 e a extensão sonda a mesma faixa.
+
+Três detalhes decidem se isso funciona:
+
+- **`GET /hello` existe porque `/poll` não serve para perguntar "você está aí?"** — ele fica
+  pendurado 25 s por definição. A rota nova responde na hora e se identifica com `{ vela: "bridge" }`,
+  o que impede a extensão de adotar um servidor qualquer que por acaso esteja na faixa. O token
+  fecha o resto: 401 é uma ponte de outro token, e essa não é a nossa.
+- **A varredura parte sempre da porta configurada, e a descoberta não grava nas preferências.** A
+  porta das preferências é a intenção do usuário; a que vale agora é consequência de quem chegou
+  primeiro, e vive em `bridgeStatus().port`. Se a descoberta gravasse, o ponto de partida andaria
+  junto — e quando a porta preferida voltasse a vagar, a extensão procuraria só acima dela e nunca
+  mais acharia a ponte que voltou para casa.
+- **O primeiro `/poll` volta na hora, mesmo vazio.** Pendurá-lo como os outros deixava a extensão
+  25 s em "Conectando…" com a conexão já de pé, e quem olhava a tela concluía que a descoberta tinha
+  falhado. Medido antes e depois: 23 s → imediato.
 
 ### O que impede um processo qualquer de dirigir o navegador
 
@@ -679,15 +724,15 @@ Registradas para decisão, não esquecidas:
 1. ~~**Escalada para CDP ("Modo preciso")**~~ — resolvida: `cdp-actuator.ts` mais o gatilho em
    `agent.ts`, ligada em Configurações → Agente.
 2. ~~**Sem atalho de teclado**~~ — resolvido: `Alt+V`, alterável em `chrome://extensions/shortcuts`.
-3. **Aprovação com o painel fechado** só aparece se o Live Voice estiver ligado (é o Pulse que
-   a mostra). Sem nenhuma das duas superfícies, a ação é recusada com `unattended`.
-4. ~~**Renomear a tarefa**~~ — resolvido: o título na topbar é editável.
-5. ~~**Modo claro nunca foi verificado visualmente**~~ — resolvido: conferido no preview e na
+3. ~~**Renomear a tarefa**~~ — resolvido: o título na topbar é editável.
+4. ~~**Modo claro nunca foi verificado visualmente**~~ — resolvido: conferido no preview e na
    extensão real.
-8. **A ponte MCP não tem descoberta automática de porta** — se 8792 estiver ocupada, o processo
-   avisa e sai, e a porta precisa ser trocada nos dois lados à mão.
-6. ~~**Endpoints de áudio não confirmados** — dependem da sondagem com a chave real.
-7. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
+5. ~~**Endpoints de áudio não confirmados**~~ — resolvido: sondados contra o servidor real.
+6. ~~**Não é repositório git**~~ — resolvido: repositório iniciado, `refs/` fora do versionamento.
+7. ~~**A ponte MCP não tem descoberta automática de porta**~~ — resolvido: o processo anda pela
+   faixa 8792–8799 e a extensão sonda a mesma faixa em `GET /hello`.
+8. ~~**Aprovação com o painel fechado**~~ — resolvida: a aprovação é entregue e contada, com o
+   Pulse na aba que está sendo operada e notificação do Chrome como reserva.
 
 ### O cursor é o caminho da execução, não um enfeite
 

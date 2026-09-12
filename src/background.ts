@@ -5,7 +5,7 @@ import { parseMetadata } from "./user-script";
 import { SIDECAR_PORT, SidecarInbound, SidecarOutbound, VoiceState } from "./messages";
 import { LensIntent, attachmentText, lensPrompt } from "./prompts";
 import { addAttachment, listAttachments, removeAttachment } from "./browser-context";
-import { ApprovalDecision, cancelPendingApprovals, clearSessionApprovals, configureApprovals, resolveApproval, resumeTakeover } from "./approvals";
+import { ApprovalDecision, ApprovalRequest, cancelPendingApprovals, clearSessionApprovals, configureApprovals, resolveApproval, resumeTakeover } from "./approvals";
 import * as agentLoop from "./agent-loop";
 import * as conversation from "./conversation";
 import { injectIntoActiveTab, syncContentScriptRegistration } from "./injection";
@@ -46,19 +46,92 @@ const broadcast = (message: SidecarInbound) => {
   }
 };
 
-/** Aprovação e tomada de controle aparecem nas duas superfícies: painel e Pulse. */
-const notifySurfaces = (message: SidecarInbound) => {
+/**
+ * Entrega uma aprovação ou tomada de controle e devolve quantas superfícies aceitaram.
+ *
+ * São três, em ordem de preferência:
+ *
+ * 1. **O painel**, quando aberto — é onde a conversa está.
+ * 2. **O Pulse, na aba que está sendo operada.** Antes isto só acontecia com a voz ligada, o que
+ *    era uma confusão entre superfície e modo: o Pulse é a UI da página, não um acessório da voz.
+ *    Com o painel fechado e a voz desligada, a ação era recusada por `unattended` mesmo com uma
+ *    aba ali, capaz de mostrar o cartão, e onde a Vela estava agindo naquele instante.
+ * 3. **Notificação do Chrome**, só quando as duas primeiras falham — página restrita, `chrome://`,
+ *    Web Store, onde nenhum content script entra.
+ */
+const notifySurfaces = async (message: SidecarInbound): Promise<number> => {
   broadcast(message);
-  if (voiceMode === "off") return;
-  if (message.type === "chat:approval") void notifyTabs({ type: "pulse:approval", id: message.request.id, summary: message.request.summary, detail: message.request.detail });
-  if (message.type === "chat:approval-closed" || message.type === "chat:takeover-closed") void notifyTabs({ type: "pulse:cards-close" });
-  if (message.type === "chat:takeover") void notifyTabs({ type: "pulse:takeover", reason: message.reason, expected: message.expected });
+  let surfaces = sidecarPorts.size;
+
+  if (message.type === "chat:approval") {
+    surfaces += await notifyTabsCounting({ type: "pulse:approval", id: message.request.id, summary: message.request.summary, detail: message.request.detail });
+    if (!surfaces) surfaces += await notifyByNotification(message.request);
+  }
+  if (message.type === "chat:takeover") {
+    surfaces += await notifyTabsCounting({ type: "pulse:takeover", reason: message.reason, expected: message.expected });
+  }
+  if (message.type === "chat:approval-closed" || message.type === "chat:takeover-closed") {
+    void notifyTabs({ type: "pulse:cards-close" });
+    if (message.type === "chat:approval-closed") clearApprovalNotification(message.id);
+  }
+  return surfaces;
 };
 
-configureApprovals(notifySurfaces, () => sidecarPorts.size > 0 || voiceMode !== "off");
+/**
+ * A última superfície. Vive fora do navegador, então funciona em página restrita — e é o único
+ * caminho quando a Vela age numa aba onde nenhum script dela pode entrar.
+ */
+const approvalNotifications = new Map<string, string>();
 
-/** Um agente externo não é superfície de aprovação: ele não consegue responder ao cartão. Por isso
- *  a ponte só emite eventos para o painel, e o gate continua exigindo painel ou voz aberta. */
+async function notifyByNotification(request: ApprovalRequest): Promise<number> {
+  if (!chrome.notifications) return 0;
+  try {
+    const notificationId = await chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icons/icon-128.png",
+      title: "A Vela precisa de aprovação",
+      message: request.summary,
+      contextMessage: request.detail.slice(0, 120),
+      requireInteraction: true,
+      buttons: [{ title: "Permitir" }, { title: "Recusar" }],
+    });
+    approvalNotifications.set(notificationId, request.id);
+    return 1;
+  } catch {
+    // Notificação bloqueada pelo sistema. Não há mais superfície: quem chamou decide o que fazer.
+    return 0;
+  }
+}
+
+/** Sem isto sobra um cartão morto na bandeja, aceitando clique em algo que já foi decidido. */
+function clearApprovalNotification(approvalId: string) {
+  for (const [notificationId, id] of approvalNotifications) {
+    if (id !== approvalId) continue;
+    approvalNotifications.delete(notificationId);
+    void chrome.notifications?.clear(notificationId);
+  }
+}
+
+chrome.notifications?.onButtonClicked.addListener((notificationId, buttonIndex) => {
+  const approvalId = approvalNotifications.get(notificationId);
+  if (!approvalId) return;
+  approvalNotifications.delete(notificationId);
+  void chrome.notifications.clear(notificationId);
+  resolveApproval(approvalId, buttonIndex === 0 ? "allow" : "deny");
+});
+
+// Fechar a notificação sem escolher é uma resposta: a ação não foi autorizada.
+chrome.notifications?.onClosed.addListener((notificationId) => {
+  const approvalId = approvalNotifications.get(notificationId);
+  if (!approvalId) return;
+  approvalNotifications.delete(notificationId);
+  resolveApproval(approvalId, "deny");
+});
+
+configureApprovals(notifySurfaces);
+
+/** Um agente externo não é superfície de aprovação: ele não consegue responder ao cartão. A ponte
+ *  só emite eventos, e quem decide continua sendo painel, Pulse ou notificação. */
 configureBridge({
   emit: (event) => notifySurfaces({ type: "chat:event", event }),
   ask: askAgent,
@@ -99,6 +172,26 @@ async function notifyActiveTab(message: unknown) {
 async function notifyTabs(message: unknown) {
   const tabs = await chrome.tabs.query({});
   await Promise.all(tabs.flatMap((tab) => tab.id === undefined ? [] : [chrome.tabs.sendMessage(tab.id, message).catch(() => undefined)]));
+}
+
+/**
+ * Como `notifyTabs`, mas conta quantas abas de fato receberam.
+ *
+ * `sendMessage` rejeita com "Receiving end does not exist" quando não há content script na aba —
+ * página restrita, Web Store, aba onde a Vela nunca entrou. Essa rejeição é justamente o sinal de
+ * que ali ninguém veria o cartão, e é o que separa "entreguei" de "achei que tinha entregue".
+ *
+ * A aba ativa vem primeiro porque é onde a atenção está; a ordem não muda a contagem, mas muda
+ * qual cartão a pessoa vê aparecer.
+ */
+async function notifyTabsCounting(message: unknown): Promise<number> {
+  const tabs = await chrome.tabs.query({});
+  const ordenadas = [...tabs].sort((left, right) => Number(right.active) - Number(left.active));
+  const entregues = await Promise.all(ordenadas.map(async (tab) => {
+    if (tab.id === undefined) return 0;
+    try { await chrome.tabs.sendMessage(tab.id, message); return 1; } catch { return 0; }
+  }));
+  return entregues.reduce<number>((total, item) => total + item, 0);
 }
 
 function scriptMatches(patterns: string[], url: string) {

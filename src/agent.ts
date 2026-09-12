@@ -236,7 +236,10 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
     const origin = originOf(tab.url);
     if (autonomy === "assist" || isRisky(action, label)) {
       const decision = await requestApproval(approvalKey(action, origin), describeAction(action, label), origin);
-      if (decision === "unattended") return failure("denied", "Modo Assistir sem painel aberto: não havia como pedir sua aprovação. Peça ao usuário para abrir o painel da Vela ou mudar a autonomia para Auto.");
+      // `unattended` deixou de significar "o painel está fechado": a aprovação vai ao painel, ao
+      // Pulse da aba e, em último caso, a uma notificação. Chegar aqui significa que nenhuma das
+      // três coube — e a única das três que o sistema pode bloquear é a notificação.
+      if (decision === "unattended") return failure("denied", "Não houve como pedir sua aprovação: o painel está fechado, a aba não aceita a janelinha da Vela e as notificações do Chrome parecem bloqueadas. Peça ao usuário para abrir o painel, liberar as notificações, ou mudar a autonomia para Auto.");
       if (decision === "deny") return failure("denied", "O usuário não aprovou esta ação. Explique o que pretendia fazer e peça orientação, sem repetir a mesma chamada.");
     }
   }

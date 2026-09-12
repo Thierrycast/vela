@@ -8,14 +8,23 @@ export type ApprovalRequest = { id: string; summary: string; detail: string };
 const TIMEOUT_MS = 120_000;
 const RISKY_LABEL = /\b(comprar|compra|pagar|pagamento|assinar|assinatura|excluir|apagar|deletar|remover|confirmar|finalizar|transferir|enviar|checkout|buy|pay|purchase|subscribe|delete|remove|confirm|submit|transfer|order)\b/i;
 
-let broadcast: ((message: SidecarInbound) => void) | null = null;
-let hasListener = () => false;
+/**
+ * Entrega a mensagem e devolve **quantas superfícies aceitaram** — painel, Pulse, notificação.
+ *
+ * O contrato antes era outro: um `send` que não devolvia nada, mais um `connected()` que adivinhava
+ * se havia alguém olhando. Adivinhar custava caro: com o painel fechado e a voz desligada, o gate
+ * respondia "não" e a ação era recusada **sem nunca ter sido oferecida**, mesmo havendo uma aba
+ * perfeitamente capaz de mostrar o cartão. Agora `unattended` só sai quando a entrega realmente
+ * não encontrou ninguém.
+ */
+type Deliver = (message: SidecarInbound) => Promise<number>;
+
+let deliver: Deliver | null = null;
 const pending = new Map<string, { resolve: (decision: ApprovalDecision) => void; timer: number }>();
 const sessionAllowed = new Set<string>();
 
-export function configureApprovals(send: (message: SidecarInbound) => void, connected: () => boolean) {
-  broadcast = send;
-  hasListener = connected;
+export function configureApprovals(send: Deliver) {
+  deliver = send;
 }
 
 export function resolveApproval(id: string, decision: ApprovalDecision) {
@@ -37,13 +46,13 @@ export function resumeTakeover() { takeoverResolve?.(); takeoverResolve = null; 
 
 /** O modelo pede intervenção humana e o loop fica suspenso até "Retomar". */
 export async function requestTakeover(reason: string, expected: string): Promise<boolean> {
-  if (!broadcast || !hasListener()) return false;
-  broadcast({ type: "chat:takeover", reason, expected });
+  if (!deliver) return false;
+  if (!(await deliver({ type: "chat:takeover", reason, expected }))) return false;
   await new Promise<void>((resolve) => {
     takeoverResolve = resolve;
     setTimeout(() => { if (takeoverResolve === resolve) { takeoverResolve = null; resolve(); } }, 600_000);
   });
-  broadcast({ type: "chat:takeover-closed" });
+  void deliver({ type: "chat:takeover-closed" });
   return true;
 }
 
@@ -71,15 +80,24 @@ export function approvalKey(action: BrowserAction, origin: string) {
 
 export async function requestApproval(key: string, summary: string, detail: string): Promise<ApprovalOutcome> {
   if (sessionAllowed.has(key)) return "allow";
-  if (!broadcast || !hasListener()) return "unattended";
+  if (!deliver) return "unattended";
 
   const id = crypto.randomUUID();
-  const decision = await new Promise<ApprovalDecision>((resolve) => {
+  // A espera é armada antes da entrega: uma superfície rápida — a notificação já clicada, por
+  // exemplo — pode resolver a aprovação antes de `deliver` devolver a contagem.
+  const decision = new Promise<ApprovalDecision>((resolve) => {
     const timer = setTimeout(() => { pending.delete(id); resolve("deny"); }, TIMEOUT_MS) as unknown as number;
     pending.set(id, { resolve, timer });
-    broadcast?.({ type: "chat:approval", request: { id, summary, detail } });
   });
-  broadcast?.({ type: "chat:approval-closed", id });
-  if (decision === "allow-session") sessionAllowed.add(key);
-  return decision;
+
+  if (!(await deliver({ type: "chat:approval", request: { id, summary, detail } }))) {
+    const entry = pending.get(id);
+    if (entry) { clearTimeout(entry.timer); pending.delete(id); }
+    return "unattended";
+  }
+
+  const outcome = await decision;
+  void deliver({ type: "chat:approval-closed", id });
+  if (outcome === "allow-session") sessionAllowed.add(key);
+  return outcome;
 }

@@ -51,6 +51,16 @@ node bridge/vela-bridge.mjs --token=... --port=8792
 
 `--port` e `--token` também podem vir de `VELA_BRIDGE_PORT` e `VELA_BRIDGE_TOKEN`.
 
+### A porta é preferência, não requisito
+
+Se a porta escolhida estiver ocupada, a ponte **anda até sete casas acima** (8792–8799 no padrão) e
+diz no log qual pegou. A extensão sonda a mesma faixa em `GET /hello` e adota a que se identificar
+com o token certo — não é preciso trocar número nenhum à mão.
+
+O que não muda é a porta em **Configurações → Ponte MCP**: ela é a sua intenção, o ponto de partida
+da busca. Quando a ponte está numa porta diferente, a tela mostra as duas. Se as oito estiverem
+ocupadas, aí sim o processo sai avisando.
+
 ## Ferramentas expostas
 
 | Ferramenta | O que faz |

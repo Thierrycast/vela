@@ -13,7 +13,7 @@ import { loadSettings } from "./storage";
  * o modo Observar recusa e o modo Assistir espera a aprovação no painel.
  */
 export type BridgeState = "off" | "connecting" | "on" | "offline" | "error";
-export type BridgeStatus = { state: BridgeState; detail?: string; connectedAt?: number; calls: number };
+export type BridgeStatus = { state: BridgeState; detail?: string; connectedAt?: number; calls: number; port?: number };
 
 type Command = { id: string; tool: string; params: Record<string, unknown> };
 type CommandResult = { id: string; ok: boolean; content: string };
@@ -21,6 +21,8 @@ type Hooks = { emit: (event: AgentEvent) => void; ask: (prompt: string) => Promi
 
 const POLL_BACKOFF = [1_000, 2_000, 5_000, 10_000, 20_000];
 const ALARM = "vela:bridge-keepalive";
+/** Quantas portas acima da configurada a ponte pode ter escolhido. Igual à faixa do processo. */
+const PORT_RANGE = 8;
 
 let hooks: Hooks | null = null;
 let status: BridgeStatus = { state: "off", calls: 0 };
@@ -69,7 +71,34 @@ export function onKeepAliveAlarm(name: string) {
   void syncBridge();
 }
 
-async function pump(mine: number, port: number, token: string) {
+/**
+ * Acha a ponte quando a porta configurada não responde.
+ *
+ * O processo `vela-bridge` anda pela faixa quando a porta preferida está ocupada — outra instância,
+ * ou qualquer coisa da máquina. Sem esta sondagem, a extensão ficava batendo para sempre numa porta
+ * vazia e o usuário tinha de descobrir o número no log e trocar à mão nos dois lados.
+ *
+ * `/hello` responde na hora (o `/poll` fica pendurado 25 s, não serve para perguntar "você está
+ * aí?"), e o token é o que impede adotar um servidor qualquer que por acaso esteja na faixa: 401 é
+ * uma ponte de outro token, e essa não é a nossa.
+ */
+async function discoverPort(base: number, token: string): Promise<number | null> {
+  for (let port = base; port < base + PORT_RANGE; port += 1) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/hello`, {
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(700),
+      });
+      if (!response.ok) continue;
+      const payload = await response.json() as { vela?: string };
+      if (payload.vela === "bridge") return port;
+    } catch { /* porta vazia, ou coisa que não é a ponte */ }
+  }
+  return null;
+}
+
+async function pump(mine: number, base: number, token: string) {
+  let port = base;
   const outbox: CommandResult[] = [];
   let failures = 0;
 
@@ -84,7 +113,7 @@ async function pump(mine: number, port: number, token: string) {
       });
 
       if (response.status === 401) {
-        status = { state: "error", detail: "A ponte recusou o token. Gere um novo e reinicie o processo vela-bridge.", calls: status.calls };
+        status = { state: "error", detail: "A ponte recusou o token. Gere um novo e reinicie o processo vela-bridge.", calls: status.calls, port };
         generation += 1;
         return;
       }
@@ -92,7 +121,7 @@ async function pump(mine: number, port: number, token: string) {
 
       const payload = await response.json() as { commands?: Command[] };
       if (status.state !== "on") {
-        status = { state: "on", connectedAt: Date.now(), calls: status.calls };
+        status = { state: "on", connectedAt: Date.now(), calls: status.calls, port };
         announce("Ponte MCP conectada. Um agente externo pode usar a Vela.");
       }
       failures = 0;
@@ -103,8 +132,30 @@ async function pump(mine: number, port: number, token: string) {
     } catch (error) {
       if (poked) { poked = false; continue; }
       if (mine !== generation) return;
+
+      /*
+       * Antes de declarar offline: a ponte pode estar viva numa porta vizinha.
+       *
+       * A varredura parte sempre da porta **configurada**, nunca da que está em uso. A porta das
+       * preferências é a intenção do usuário; a que vale agora é consequência de quem chegou
+       * primeiro, e por isso vive em `status.port` e não nas settings. Se a descoberta gravasse nas
+       * preferências, o ponto de partida andaria junto — e quando a porta preferida voltasse a
+       * vagar, a extensão procuraria só acima dela e nunca mais acharia a ponte que voltou para casa.
+       *
+       * Só reata sem esperar quando a ponte mudou de lugar: se ela responde na mesma porta que
+       * acabou de falhar, o problema é outro, e voltar direto ao laço viraria giro em falso.
+       */
+      const achada = await discoverPort(base, token);
+      if (achada !== null && achada !== port && mine === generation) {
+        announce(`A porta ${port} não respondeu; a ponte está na ${achada}.`);
+        port = achada;
+        status = { ...status, port };
+        failures = 0;
+        continue;
+      }
+
       const detail = error instanceof Error ? error.message : "falha de rede";
-      status = { state: "offline", detail: `O processo vela-bridge não respondeu (${detail}).`, calls: status.calls };
+      status = { state: "offline", detail: `O processo vela-bridge não respondeu (${detail}).`, calls: status.calls, port };
       await sleep(POLL_BACKOFF[Math.min(failures, POLL_BACKOFF.length - 1)]);
       failures += 1;
     }

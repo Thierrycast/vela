@@ -6,12 +6,15 @@ import { configureApprovals, resolveApproval } from "../src/approvals";
 
 const emitted: SidecarInbound[] = [];
 let autoDecision: "allow" | "deny" = "allow";
-const emit = (message: SidecarInbound) => {
+/** Quantas superfícies o painel falso simula. Zero é "ninguém conseguiu mostrar o cartão". */
+let superficies = 1;
+const emit = async (message: SidecarInbound) => {
   emitted.push(message);
   // Painel falso: responde a pedidos de aprovação imediatamente.
-  if (message.type === "chat:approval") setTimeout(() => resolveApproval(message.request.id, autoDecision), 0);
+  if (message.type === "chat:approval" && superficies > 0) setTimeout(() => resolveApproval(message.request.id, autoDecision), 0);
+  return superficies;
 };
-configureApprovals(emit, () => true);
+configureApprovals(emit);
 const wire: string[] = [];
 
 function sseStream(chunks: string[]) {
@@ -99,8 +102,8 @@ const toolCall = (id: string, name: string, args: unknown) =>
   `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] })}\n\n`;
 const DONE = "data: [DONE]\n\n";
 
-async function run(name: string, rounds: string[][], settings: Partial<AppSettings> = {}, decision: "allow" | "deny" = "allow") {
-  emitted.length = 0; wire.length = 0; cdpLog.length = 0; autoDecision = decision;
+async function run(name: string, rounds: string[][], settings: Partial<AppSettings> = {}, decision: "allow" | "deny" = "allow", surfaces = 1) {
+  emitted.length = 0; wire.length = 0; cdpLog.length = 0; autoDecision = decision; superficies = surfaces;
   const store: Record<string, unknown> = {
     "vela:settings": { ...defaultSettings, ...settings, providers: [{ ...defaultSettings.providers[0], apiKey: "k", defaultModel: "m" }] },
   };
@@ -139,6 +142,14 @@ await run("assistir com recusa", [
   [delta("Vou clicar."), toolCall("c1", "browser_action", { action: "click", ref: "ref_1_1" }), DONE],
   [delta("Ok, não vou insistir."), DONE],
 ], {}, "deny");
+
+// 2b. Nenhuma superfície aceitou o cartão: aí sim a recusa é por `unattended`, e a mensagem tem de
+// dizer o que fazer. Antes isto era decidido por adivinhação — o gate olhava se o painel estava
+// aberto e recusava sem nem tentar entregar.
+await run("assistir sem superfície nenhuma", [
+  [delta("Vou clicar."), toolCall("c1", "browser_action", { action: "click", ref: "ref_1_1" }), DONE],
+  [delta("Entendi, ninguém podia aprovar."), DONE],
+], {}, "allow", 0);
 
 // 3. Ref obsoleto: o modelo precisa receber o erro, não um sucesso falso.
 await run("ref obsoleto devolve erro", [
