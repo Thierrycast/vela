@@ -764,7 +764,12 @@ apagar todas. Verificado no painel real: um clique na lixeira não apaga, "Não"
 
 ## Pendências conhecidas
 
-Registradas para decisão, não esquecidas:
+**Nenhuma aberta.** A lista fica como histórico — cada item diz o que era e onde foi resolvido, que
+é mais útil do que apagar. Quando algo novo aparecer, entra aqui em aberto.
+
+O que continua verdadeiro e não é pendência, só limite: `chrome.sidePanel.open()` exige gesto do
+usuário no MV3, então a Vela não consegue abrir o próprio painel para pedir aprovação — daí o Pulse
+e a notificação.
 
 1. ~~**Escalada para CDP ("Modo preciso")**~~ — resolvida: `cdp-actuator.ts` mais o gatilho em
    `agent.ts`, ligada em Configurações → Agente.
