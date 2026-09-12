@@ -3,6 +3,7 @@ import * as conversation from "../src/conversation";
 import { SidecarInbound } from "../src/messages";
 import { ActionResult, AppSettings, BrowserAction, defaultSettings } from "../src/types";
 import { configureApprovals, resolveApproval } from "../src/approvals";
+import { addAttachment, listAttachments } from "../src/browser-context";
 
 const emitted: SidecarInbound[] = [];
 let autoDecision: "allow" | "deny" = "allow";
@@ -102,13 +103,15 @@ const toolCall = (id: string, name: string, args: unknown) =>
   `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] })}\n\n`;
 const DONE = "data: [DONE]\n\n";
 
-async function run(name: string, rounds: string[][], settings: Partial<AppSettings> = {}, decision: "allow" | "deny" = "allow", surfaces = 1) {
+async function run(name: string, rounds: string[][], settings: Partial<AppSettings> = {}, decision: "allow" | "deny" = "allow", surfaces = 1, antes?: () => Promise<void>) {
   emitted.length = 0; wire.length = 0; cdpLog.length = 0; autoDecision = decision; superficies = surfaces;
   const store: Record<string, unknown> = {
     "vela:settings": { ...defaultSettings, ...settings, providers: [{ ...defaultSettings.providers[0], apiKey: "k", defaultModel: "m" }] },
   };
   installChrome(store, fakePage());
   await agentLoop.reset();
+  // Preparo que depende do `chrome` falso já instalado — anexo no storage, por exemplo.
+  await antes?.();
 
   let call = 0;
   (globalThis as Record<string, unknown>).fetch = async (_url: string, init: { body: string }) => {
@@ -261,3 +264,16 @@ await run("modo preciso desligado não anexa nada", [
   [delta("Não deu."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto", preciseMode: false } });
 console.log("CDP:", cdpLog.join(" → ") || "(não escalou)");
+
+// 17. O anexo tem de chegar ao modelo. O chip aparece na tira, o arquivo entra no storage — mas
+// nada disso importa se ele não estiver no corpo da requisição.
+await run("anexo chega ao modelo", [
+  [delta("Li o anexo."), DONE],
+], {}, "allow", 1, async () => {
+  await addAttachment("Arquivo anexado “notas.md”:\nA REUNIÃO FOI ADIADA PARA OUTUBRO");
+});
+const corpo = wire[0] ?? "";
+console.log("anexo no corpo enviado:", corpo.includes("ADIADA PARA OUTUBRO") ? "sim" : "NÃO — o modelo nunca viu o arquivo");
+console.log("tag <anexo> presente:", corpo.includes("anexo") ? "sim" : "não");
+// E some depois: anexo é contexto do turno, não permanente.
+console.log("anexos restantes depois do turno:", (await listAttachments()).length);

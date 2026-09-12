@@ -716,6 +716,22 @@ vale nada sem o número. Se a fatia de "sem efeito perceptível" for baixa, o ca
 extensão continua instalando sem aviso de depuração. Se for alta, o `cdp-actuator` se justifica —
 e aí a permissão `debugger` entra no manifest sabendo o que compra.
 
+### O anexo que nunca saía da máquina
+
+Pior que o corte silencioso: o anexo **não chegava ao modelo de jeito nenhum**.
+
+`clearAttachments()` era chamado logo depois de gravar a mensagem do usuário, **antes** da primeira
+rodada — e é dentro da rodada que `collectBrowserContext` lê os anexos. O arquivo virava chip na
+tira de contexto, entrava no `chrome.storage.session`, e era apagado sem nunca ter sido enviado. O
+recurso inteiro era encenação: tudo o que a pessoa via acontecia, e nada do que importava.
+
+Ficou escondido porque cada metade funcionava sozinha. O chip aparecia, o storage guardava, o
+`buildStateBlock` renderizava `<anexo>` corretamente quando recebia anexos — e o teste de ponta a
+ponta que rodei antes media exatamente essas metades, nunca o corpo da requisição.
+
+Agora a limpeza acontece no `finally` do turno: o anexo fica disponível em todas as rodadas e é
+descartado depois. O harness passou a olhar o que de fato vai no fio.
+
 ### O anexo cortado em silêncio
 
 O compositor guardava 20 000 caracteres por arquivo anexado e o prompt mandava

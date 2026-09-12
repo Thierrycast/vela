@@ -85,7 +85,6 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
   void appendLog({ level: "info", event: "chat.started", detail: `provider=${settings.activeProviderId}; model=${profile?.defaultModel || "unset"}` });
 
   await addMessage({ id: newId(), role: "user", content: text, createdAt: Date.now(), status: "complete" }, emit);
-  await clearAttachments();
 
   try {
     for (let round = 0; round < maxRounds; round += 1) {
@@ -197,6 +196,15 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
     record({ kind: "error", text: message }, emit);
     void appendLog({ level: "error", event: "chat.unhandled_error", detail: message });
   } finally {
+    /*
+     * O anexo é contexto **deste** turno, e some quando ele acaba.
+     *
+     * A limpeza acontecia logo depois de gravar a mensagem do usuário, antes da primeira rodada —
+     * ou seja, antes de `collectBrowserContext` ler os anexos. O arquivo virava chip na tira,
+     * entrava no storage, e era apagado sem nunca ter sido enviado: o recurso inteiro não fazia
+     * nada. Limpar aqui mantém o anexo disponível em todas as rodadas do turno e o descarta depois.
+     */
+    await clearAttachments();
     turnSpan.end({ ok: true });
     running = false;
     controller = null;
