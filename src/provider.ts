@@ -131,7 +131,7 @@ type ToolDefinition = { type: string; function: { name: string; description: str
 export function buildTools(settings: AppSettings): ToolDefinition[] {
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
   const tools: ToolDefinition[] = [browserActionTool, webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool];
-  if (profile?.capabilities.webFetch) tools.splice(2, 0, webFetchTool);
+  if (profile?.capabilities?.webFetch) tools.splice(2, 0, webFetchTool);
   return tools;
 }
 

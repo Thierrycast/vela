@@ -225,6 +225,17 @@ recusa — silêncio não autoriza nada.
 **Abrir o painel sozinha não é opção**: `chrome.sidePanel.open()` exige gesto do usuário no MV3 e
 lança quando chamado de um handler de fundo. É limite do Chrome, não escolha de desenho.
 
+### Um perfil de provider incompleto derrubava todo turno
+
+`buildTools` lia `profile?.capabilities.webFetch` — com `?.` no perfil e nenhum no `capabilities`.
+E `normalizeSettings` completava `brand`, `agent`, `context`, `bridge` e `voice`, mas aceitava os
+providers como vieram. Um perfil sem `capabilities` — backup antigo, importação, storage editado à
+mão — fazia **toda** conversa morrer com "Cannot read properties of undefined (reading 'webFetch')"
+aparecendo no painel como se o modelo tivesse falhado.
+
+Agora cada perfil é completado sobre o padrão, e o acesso tem o segundo `?.`. Apareceu montando o
+provider falso do teste de voz, que é exatamente o caso de um perfil escrito de fora.
+
 ### Campos sensíveis são redigidos na leitura
 
 `page-snapshot.ts` nunca expõe o valor de `type=password|hidden` nem de campos com `autocomplete`
@@ -283,9 +294,43 @@ fica em Configurações → Voz e, em branco, o recurso simplesmente não existe
 Verificado dentro da extensão, com microfone falso alimentado por arquivo
 (`--use-file-for-fake-audio-capture`): o offscreen abre o stream contra o servidor real e o parcial
 chega ao palco em 1,6 s — "abrir o site", depois "abrir o site do banco" — sem nenhum erro de
-console. O que não deu para exercitar sem a chave do provider é o turno completo, isto é o lote
-sobrescrevendo o rascunho e a supressão de eco durante a fala da Vela; essas duas continuam
-verificadas só por leitura.
+console.
+
+#### O turno inteiro, com um provider falso
+
+A chave do provider não existe no perfil de teste, e por isso o turno completo tinha ficado
+verificado só por leitura. Um servidor local respondendo SSE em `/api/v1/chat/completions` resolve:
+a síntese e a transcrição continuam sendo do servidor real, e só o modelo é fabricado. Medido:
+
+```
+[  3.50s] Ouvindo você   palco="abrir o site do banco e cara extrato"
+[  4.00s] Pensando       turno de usuário: "Abrir o site do banco e clicar em extrato."
+[  4.25s] Falando
+[ 16.75s] Ouvindo você   palco continua "abrir o site do banco e cara extrato"
+```
+
+Três coisas nessas quatro linhas:
+
+- **O lote sobrescreve o rascunho.** O Vosk entregou "e cara extrato"; o turno abriu com "e clicar
+  em extrato", com maiúscula e ponto final. É a tese do desenho, agora medida.
+- **O rascunho congela quando ela começa a falar** e continua congelado por 12,5 s, com o microfone
+  falso tocando fala o tempo todo. Um turno de usuário, um pedido ao modelo.
+- **O ciclo fecha sozinho**: ouvindo → pensando → falando → ouvindo, sem ninguém tocar em nada.
+
+#### A supressão de eco cobria só o rabo
+
+O teste achou o defeito. Eram duas proteções e só uma existia:
+
+- o **turno** estava coberto por `segmenter.suspend()`, então a fala da Vela nunca abriu turno;
+- o **rascunho na tela** não estava. `speakingUntil` só era atribuído no `finally` de `speak()`, ou
+  seja **depois** de ela terminar. Durante a fala ele guardava um instante já passado, e o áudio
+  seguia para o texto ao vivo. Com alto-falante de verdade, a resposta dela apareceria na tela
+  escrita como se fosse do usuário — e o comentário logo acima do código prometia justamente o
+  contrário.
+
+Agora `speaking` cobre a fala e `speakingUntil` cobre os 250 ms de rabo depois dela. `stop()` zera os
+dois: desligar a voz no meio de uma fala deixaria `speaking` preso em `true` e o texto ao vivo mudo
+para sempre na próxima abertura do microfone.
 
 ### Content script sob demanda, e em build separado
 

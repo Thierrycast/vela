@@ -35,6 +35,18 @@ let output: HTMLAudioElement | null = null;
 let analyzer: VoiceMetricsAnalyzer | null = null;
 let telemetryTimer = 0;
 let muted = false;
+/*
+ * Enquanto a Vela fala, o microfone ouve a Vela pelos alto-falantes.
+ *
+ * Eram duas proteções e só uma existia. O turno estava coberto pelo `suspend()` do VAD, então a
+ * fala dela nunca abriu um turno. O **rascunho na tela** não estava: `speakingUntil` só era
+ * atribuído no `finally` de `speak()`, ou seja, depois de ela terminar — durante a fala ele
+ * guardava um instante já passado, e o áudio seguia para o texto ao vivo. Com alto-falante de
+ * verdade, a resposta dela aparecia na tela escrita como se fosse do usuário.
+ *
+ * `speaking` cobre a fala; `speakingUntil` cobre o rabo de eco depois dela.
+ */
+let speaking = false;
 let speakingUntil = 0;
 const pending: Blob[] = [];
 let draining = false;
@@ -139,7 +151,7 @@ async function start(nextMode: "live" | "dictation") {
       onStart: () => { trace("voice", "fala começou"); if (mode === "live") publish("listening"); },
       onEnd: (chunks) => {
         const amostras = chunks.reduce((total, item) => total + item.length, 0);
-        const engolido = Date.now() < speakingUntil;
+        const engolido = speaking || Date.now() < speakingUntil;
         trace("voice", engolido ? "fala ignorada (a Vela estava falando)" : "fala terminou", {
           ok: !engolido,
           data: { segundos: Number((amostras / (audio?.sampleRate ?? SAMPLE_RATE)).toFixed(2)) },
@@ -181,7 +193,7 @@ async function start(nextMode: "live" | "dictation") {
       segmenter?.push(event.data);
       // Enquanto a Vela fala, o microfone ouve a própria Vela: mandar isso ao texto ao vivo
       // encheria a tela com a resposta dela mesma, escrita como se fosse do usuário.
-      if (Date.now() >= speakingUntil) live?.push(event.data);
+      if (!speaking && Date.now() >= speakingUntil) live?.push(event.data);
     };
     await audio.resume();
     publish("listening");
@@ -211,6 +223,10 @@ function stop() {
   output?.pause();
   output = null;
   muted = false;
+  // Desligar a voz no meio de uma fala deixaria `speaking` preso em true, e o texto ao vivo
+  // silenciado para sempre na próxima vez que o microfone abrisse.
+  speaking = false;
+  speakingUntil = 0;
   publish("idle");
 }
 
@@ -322,6 +338,7 @@ async function speak(text: string) {
     if (!spoken) { attempt.end({ ok: false, code: "vazio" }); return; }
     output?.pause();
     segmenter?.suspend();
+    speaking = true;
     publish("speaking");
 
     if (settings.voice.streamSpeech) {
@@ -350,6 +367,7 @@ async function speak(text: string) {
     void send({ type: "voice:error", message });
   } finally {
     if (url) URL.revokeObjectURL(url);
+    speaking = false;
     speakingUntil = Date.now() + 250;
     segmenter?.resume();
     // Sem microfone aberto, esta foi uma leitura avulsa: o runtime volta a ocioso em vez de

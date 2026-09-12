@@ -41,7 +41,19 @@ export function normalizeSettings(stored: Partial<AppSettings> | undefined): App
     context: { ...defaultSettings.context, ...(stored?.context ?? {}) },
     bridge: { ...defaultSettings.bridge, ...(stored?.bridge ?? {}) },
     voice: { ...defaultSettings.voice, ...(stored?.voice ?? {}) },
-    providers: stored?.providers?.length ? stored.providers : defaultSettings.providers,
+    /*
+     * Cada perfil é completado, não apenas aceito como veio. Um perfil sem `capabilities` — vindo
+     * de backup antigo, de importação, ou de storage editado à mão — derrubava **todo turno** em
+     * `profile?.capabilities.webFetch`, com a mensagem "Cannot read properties of undefined
+     * (reading 'webFetch')" aparecendo na conversa como se o modelo tivesse falhado.
+     */
+    providers: stored?.providers?.length
+      ? stored.providers.map((profile) => ({
+        ...defaultSettings.providers[0],
+        ...profile,
+        capabilities: { ...defaultSettings.providers[0].capabilities, ...(profile.capabilities ?? {}) },
+      }))
+      : defaultSettings.providers,
   };
 }
 
