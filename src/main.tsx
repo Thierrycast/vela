@@ -8,6 +8,7 @@ import { useSettings, useTheme } from "./use-settings";
 import { ActivityTimeline, AgentStatus, AmbientEdge, ApprovalCard, ContextChip, DeveloperDetails, DictationButton, LiveVoiceButton, TakeoverCard, VelaOrb, VelaState } from "./vela-components";
 import { AssistantActions, MessageEditor, UserActions } from "./message-actions";
 import { VoiceStage } from "./voice-stage";
+import { useReadingHighlight } from "./reading-highlight";
 import { setCustomShader } from "./voice-visuals";
 import { ModelPicker } from "./model-picker";
 import { Markdown } from "./markdown";
@@ -52,6 +53,9 @@ function App() {
   const [dictating, setDictating] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [voiceFocused, setVoiceFocused] = useState(true);
+  /** Há uma conversa ao vivo aberta. Separa "a Vela está falando porque conversamos" de "a Vela
+   *  está lendo uma mensagem que eu pedi" — os dois deixam a voz ativa, e só o primeiro pede palco. */
+  const [liveSession, setLiveSession] = useState(false);
   const [voiceMuted, setVoiceMuted] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
   /** Qual linha do histórico está pedindo confirmação. Apagar não tem volta: exige dois cliques. */
@@ -70,6 +74,7 @@ function App() {
   const liveRef = useRef(false);
 
   useTheme(settings);
+  useReadingHighlight(streamRef, speakingId);
 
   // O shader do usuário é preferência global, não prop: o registro de visuais o lê de um lugar só.
   useEffect(() => { setCustomShader(settings.voice.customShader); }, [settings.voice.customShader]);
@@ -97,7 +102,7 @@ function App() {
       if (message.type === "chat:session") setSession({ title: message.title, tabCount: message.tabCount });
       if (message.type === "chat:history") setHistory(message.items);
       if (message.type === "chat:speaking" && !message.speaking) setSpeakingId(null);
-      if (message.type === "voice:state") { setVoiceState(message.state); if (message.state === "idle") { setDictating(false); setSpeakingId(null); } }
+      if (message.type === "voice:state") { setVoiceState(message.state); if (message.state === "idle") { setDictating(false); setSpeakingId(null); setLiveSession(false); liveRef.current = false; } }
       if (message.type === "voice:error") { setVoiceState("error"); setDictating(false); setSpeakingId(null); setEvents((current) => [...current, { kind: "error", text: message.message }]); }
       // Só no palco: no ditado o rascunho brigaria com o que você já digitou no campo.
       if (message.type === "voice:partial" && liveRef.current) setLiveTranscript(message.text);
@@ -169,6 +174,7 @@ function App() {
     const starting = voiceState === "idle";
     trace(starting ? "ligou o Live Voice" : "desligou o Live Voice", { visual: settings.voice.visual, voz: settings.voice.speechVoice });
     liveRef.current = starting;
+    setLiveSession(starting);
     if (starting) { setVoiceFocused(true); setLiveTranscript(""); setVoiceMuted(false); }
     post({ type: starting ? "voice:start-live" : "voice:stop-live" });
     setEvents((current) => {
@@ -186,8 +192,14 @@ function App() {
   const speak = (message: ChatMessage) => {
     trace("pediu leitura em voz alta", { chars: message.content.length });
     if (speakingId === message.id) { post({ type: "chat:speak-stop" }); setSpeakingId(null); return; }
-    if (post({ type: "chat:speak", text: message.content })) setSpeakingId(message.id);
+    // Ler uma mensagem não é conversar: o orb fica pequeno no alto e o texto continua à vista, que é
+    // justamente o que se quer acompanhar. Tocar no orb ainda expande, se a pessoa quiser.
+    if (!liveSession) setVoiceFocused(false);
+    if (post({ type: "chat:speak", text: message.content, id: message.id })) setSpeakingId(message.id);
   };
+  const stopReading = () => { post({ type: "chat:speak-stop" }); setSpeakingId(null); };
+  /** Leitura avulsa: voz ativa, mas sem conversa ao vivo por trás. */
+  const reading = !liveSession && speakingId !== null;
 
   /** Editar, reenviar e gerar outra resposta são a mesma operação: a linha do tempo volta a um
    *  ponto e segue de lá. Anexar correções ao fim confundiria o modelo e o histórico. */
@@ -247,7 +259,8 @@ function App() {
       muted={voiceMuted}
       onToggleFocus={() => setVoiceFocused((value) => !value)}
       onToggleMute={() => { setVoiceMuted((value) => !value); void chrome.runtime?.sendMessage({ type: "voice:toggle-mute" }).catch(() => undefined); }}
-      onClose={toggleLive}
+      mode={reading ? "leitura" : "live"}
+      onClose={reading ? stopReading : toggleLive}
     />}
 
     <section className={`conversation ${live && voiceFocused ? "atras-do-palco" : ""}`} ref={streamRef}>
@@ -261,7 +274,7 @@ function App() {
               <button onClick={() => setInput("Pesquise por ")}><Search size={ICON.inline} /> Pesquisar na web</button>
             </div>
           </div>
-        : <div className="message-list">{bubbles.map((message) => <article className={`message ${message.role}`} key={message.id}>
+        : <div className="message-list">{bubbles.map((message) => <article className={`message ${message.role}`} key={message.id} data-message-id={message.id}>
             {message.role === "assistant" && <span className="avatar"><VelaOrb state={message.status === "streaming" ? "thinking" : "idle"} size={16} /></span>}
             {editingId === message.id
               ? <MessageEditor value={message.content} onCancel={() => setEditingId(null)} onSubmit={(text) => rewind(message.id, text)} />

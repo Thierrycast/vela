@@ -296,7 +296,73 @@ Verificado dentro da extensão, com microfone falso alimentado por arquivo
 chega ao palco em 1,6 s — "abrir o site", depois "abrir o site do banco" — sem nenhum erro de
 console.
 
-#### O turno inteiro, com um provider falso
+#### Ler uma mensagem não é conversar
+
+O botão de alto-falante abria o palco da voz em **tela cheia**, igual ao Live Voice. Era confusão de
+conceito: o palco existe para quando o assunto é a conversa falada. Pedir para ler uma mensagem é o
+contrário disso — o que se quer é justamente continuar vendo o texto.
+
+O painel passou a distinguir as duas coisas por `liveSession`, e não por "a voz está ativa": as duas
+deixam `voiceState` fora de `idle`, e só a primeira pede palco. Lendo, o orb nasce recolhido no alto;
+tocar nele ainda expande, se a pessoa quiser. O `VoiceStage` ganhou `mode`, porque em leitura os
+controles de conversa não fazem sentido: não há microfone para silenciar, e "encerrar a conversa por
+voz" faria a coisa errada — o botão vira **parar a leitura**.
+
+### O destaque que acompanha a leitura
+
+Enquanto a Vela lê, a palavra falada acende no texto e a frase em volta fica num véu. O desenho veio
+da extensão Vox, do mesmo autor, e mudou em dois pontos por medição.
+
+**A posição vem de janelas de tempo reais, não de estimativa sobre o texto inteiro.** A síntese não
+devolve tempo de palavra. O que dá para medir com exatidão é a janela de cada frase: o offscreen pede
+**uma frase por vez** ao `/tts/stream` e agenda cada uma na linha do tempo do `AudioContext`, então
+sabe onde cada frase começa e termina. Dentro dela a palavra é estimada por fração de caracteres — e
+como a janela zera a cada frase, o erro não acumula ao longo de um texto longo. Pedir frase a frase
+não atrasa o primeiro som: o servidor já fatia por frase internamente.
+
+**O texto limpo vem do servidor, pela rota `/text/prepare`.** Ela existe para isto: tira Markdown,
+transforma item de lista em frase e narra tabela. Sem essa limpeza, um `## Título` ou uma lista partem
+a frase no lugar errado e o destaque desalinha do que se ouve. `normalize: false` é deliberado —
+expandir "R$ 49,90" em "quarenta e nove reais" faria o trecho não existir na tela.
+
+**Quem fatia é um lado só.** `reading-text.ts` quebra as frases no offscreen, e elas vão **prontas**
+para o painel, que nunca fatia: só procura. Se cada ponta fatiasse, as listas divergiriam na primeira
+abreviação e o destaque apontaria para a frase errada — um erro que só aparece no meio de um texto
+longo.
+
+#### Por que uma camada, e não a CSS Custom Highlight API
+
+A primeira versão usava `CSS.highlights`, como o Vox. Ela pinta um `Range` sem tocar no DOM, o que é
+ótimo — mas `::highlight()` aceita só cor, fundo e sombra: **nada de borda arredondada, nada de
+transição**. Na tela o destaque saiu como um retângulo duro colado nas letras, e a palavra piscava de
+uma para a outra.
+
+Agora os retângulos são desenhados numa camada `position: fixed` presa ao `document.body`, **fora da
+árvore do React** — a mensagem continua intocada e o render dela nunca briga com nó que não criou. A
+camada tem o tamanho da área de rolagem e corta o que passar dela, senão a pílula apareceria por cima
+da barra do topo quando a frase rolasse para baixo.
+
+Três coisas que só apareceram olhando a tela ampliada:
+
+- **`getClientRects()` não devolve uma caixa por linha, e sim uma por caixa inline.** Um `**negrito**`
+  no meio da frase virava três retângulos na mesma linha, e com canto arredondado cada emenda aparecia
+  como um dente. Agora as caixas da mesma linha são mescladas numa faixa contínua.
+- **A pílula piscava a cada espaço.** As frações de palavra têm buracos onde ficam os espaços, e
+  procurar a palavra que *contém* o ratio não devolvia nada nesses intervalos. Passou a ser a última
+  palavra que **já começou**, o que também cobre o fim da frase de graça. Medido depois: 1 amostra em
+  126 sem pílula, e é a do instante entre preparar a frase e chegar a primeira posição.
+- **A cor sai de `--reading`, que por padrão é `var(--signal)`.** A cor de marca e o tema claro/escuro
+  mudam o destaque junto, e um tema futuro pode dar à leitura uma cor própria trocando um token só.
+
+#### Parar precisa limpar dos dois lados
+
+`stopSpeaking` fecha o documento offscreen quando a voz não está ligada — e um documento fechado não
+roda o `finally` que mandaria o fim da leitura. Duas consequências, as duas corrigidas: o destaque
+ficava preso na tela (agora o painel limpa sozinho quando o id da leitura zera) e o orb continuava
+aparecendo (agora quem fecha o offscreen também anuncia `voice:state idle`, porque quem morreu não
+anuncia a própria morte).
+
+### O turno inteiro, com um provider falso
 
 A chave do provider não existe no perfil de teste, e por isso o turno completo tinha ficado
 verificado só por leitura. Um servidor local respondendo SSE em `/api/v1/chat/completions` resolve:

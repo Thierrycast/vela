@@ -272,6 +272,25 @@ export async function transcribeAudio(endpoint: VoiceEndpoint, audio: Blob, mode
  * Abre o fluxo de áudio já em geração. Devolve o corpo cru: quem consome decide como tocar,
  * porque tocar PCM em pedaços é problema do lado que tem AudioContext.
  */
+/**
+ * O texto limpo que a síntese vai falar, sem sintetizar.
+ *
+ * O servidor tira Markdown, transforma item de lista em frase e narra tabela. É essa limpeza que
+ * permite casar o que se ouve com o que está escrito: sem ela, um `## Título` ou uma lista partem a
+ * frase no lugar errado e o destaque por palavra desalinha. `normalize: false` mantém "R$ 49,90" como
+ * está na tela — expandido em "quarenta e nove reais", não acharia o trecho renderizado.
+ */
+export async function prepareText(endpoint: VoiceEndpoint, text: string): Promise<string> {
+  const response = await fetch(`${endpoint.baseUrl.replace(/\/+$/, "")}/text/prepare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", ...voiceHeaders(endpoint) },
+    body: JSON.stringify({ text, sanitize: true, normalize: false }),
+  });
+  if (!response.ok) throw new Error(`Preparação do texto falhou (HTTP ${response.status}).`);
+  const payload = await response.json() as { text?: string };
+  return payload.text ?? text;
+}
+
 export async function streamSpeech(endpoint: VoiceEndpoint, input: string, voice: string): Promise<ReadableStream<Uint8Array>> {
   const response = await fetch(`${endpoint.baseUrl.replace(/\/+$/, "")}/tts/stream`, {
     method: "POST",

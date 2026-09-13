@@ -45,7 +45,8 @@ export type SidecarOutbound =
   | { type: "chat:forget"; id: string }
   | { type: "session:rename"; title: string }
   | { type: "chat:rewind"; id: string; text?: string }
-  | { type: "chat:speak"; text: string }
+  /** `id` é a mensagem lida: com ele o painel sabe onde pintar o destaque palavra a palavra. */
+  | { type: "chat:speak"; text: string; id?: string }
   | { type: "chat:speak-stop" }
   | { type: "chat:attach"; name: string; text: string }
   | { type: "chat:detach"; index: number };

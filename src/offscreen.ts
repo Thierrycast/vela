@@ -1,5 +1,6 @@
 import { loadSettings } from "./storage";
-import { VoiceEndpoint, streamSpeech, synthesizeSpeech, transcribeAudio } from "./provider";
+import { VoiceEndpoint, prepareText, streamSpeech, synthesizeSpeech, transcribeAudio } from "./provider";
+import { splitSentences } from "./reading-text";
 import { UtteranceSegmenter } from "./vad";
 import { VoiceMetricsAnalyzer } from "./audio-metrics";
 import { encodeWav } from "./wav-encoder";
@@ -15,12 +16,12 @@ const MAX_PENDING = 3;
 const HALLUCINATIONS = [/^legendas?\b.*amara\.org/i, /^obrigad[oa]\.?$/i, /^\.{2,}$/, /^tchau\.?$/i, /^\s*$/];
 
 // O listener é registrado antes de qualquer await para o background poder fazer handshake.
-chrome.runtime.onMessage.addListener((message: { type?: string; text?: string; mode?: "live" | "dictation" }, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: { type?: string; text?: string; id?: string; mode?: "live" | "dictation" }, _sender, sendResponse) => {
   if (message.type === "voice:ping") { sendResponse({ ok: true }); return false; }
   if (message.type === "voice:start") { void start(message.mode ?? "live"); return false; }
   if (message.type === "voice:stop") { stop(); return false; }
   if (message.type === "voice:toggle-mute") { toggleMute(); return false; }
-  if (message.type === "voice:speak" && message.text) { void speak(message.text); return false; }
+  if (message.type === "voice:speak" && message.text) { void speak(message.text, message.id); return false; }
   if (message.type === "voice:speak-stop") { streamingStop?.(); output?.pause(); output = null; return false; }
   return false;
 });
@@ -231,107 +232,218 @@ function stop() {
 }
 
 /**
- * Toca o áudio enquanto ele ainda está sendo gerado.
+ * Um palco de áudio para uma fala: contexto, mixer, e o medidor que move o orb.
  *
- * O caminho antigo esperava o arquivo inteiro: numa frase longa, isso é a diferença entre a Vela
- * responder e parecer travada. Aqui cada pedaço de PCM vira um buffer agendado na sequência —
- * o relógio do AudioContext costura tudo sem emenda audível.
+ * O analisador fica na saída: o que a Vela fala move o orb do mesmo jeito que a sua voz move.
  */
-async function speakStreaming(endpoint: VoiceEndpoint, spoken: string, voice: string) {
-  const body = await streamSpeech(endpoint, spoken, voice);
+function openSpeechStage() {
   const context = new AudioContext();
-  // Um analisador na saída: o que a Vela fala move o orb do mesmo jeito que a sua voz move.
   const mixer = context.createGain();
   mixer.connect(context.destination);
   const meter = new VoiceMetricsAnalyzer(context, mixer);
   const meterTimer = self.setInterval(() => {
     void send({ type: "voice:telemetry", telemetry: { state: "speaking", metrics: meter.sample(), timestamp: Date.now() } });
   }, 50);
+  const sources: AudioBufferSourceNode[] = [];
+  const close = () => { self.clearInterval(meterTimer); meter.disconnect(); void context.close(); };
+  return { context, mixer, sources, close };
+}
+
+type SpeechStage = ReturnType<typeof openSpeechStage>;
+
+/**
+ * Agenda um WAV em streaming na linha do tempo do contexto, a partir de `playAt`.
+ *
+ * Cada pedaço de PCM vira um buffer agendado na sequência, e o relógio do AudioContext costura tudo
+ * sem emenda audível. Devolve **quando o primeiro buffer começa** e onde a linha do tempo terminou —
+ * é esse par que vira a janela de uma frase no destaque da leitura. Um lugar só lê cabeçalho e sobra
+ * de byte: a leitura frase a frase e a fala inteira usam o mesmo agendador.
+ */
+async function scheduleWav(
+  stage: SpeechStage,
+  body: ReadableStream<Uint8Array>,
+  from: number,
+  onReader: (reader: ReadableStreamDefaultReader<Uint8Array>) => void,
+): Promise<{ start: number | null; playAt: number }> {
+  const { context, mixer, sources } = stage;
   const reader = body.getReader();
+  onReader(reader);
+  let playAt = from;
   let leftover = new Uint8Array(0);
   let sampleRate = 22_050;
   let channels = 1;
   let headerRead = false;
-  let playAt = 0;
-  const sources: AudioBufferSourceNode[] = [];
+  let start: number | null = null;
 
-  streamingStop = () => { void reader.cancel().catch(() => undefined); for (const node of sources) { try { node.stop(); } catch { /* já parou */ } } };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const merged = new Uint8Array(leftover.length + value.length);
+    merged.set(leftover);
+    merged.set(value, leftover.length);
+    let offset = 0;
 
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const merged = new Uint8Array(leftover.length + value.length);
-      merged.set(leftover);
-      merged.set(value, leftover.length);
-      let offset = 0;
-
-      // O cabeçalho WAV chega no primeiro pedaço e traz a taxa real; assumir 22.05k daria
-      // um áudio acelerado ou arrastado conforme a voz escolhida.
-      if (!headerRead) {
-        if (merged.length < 44) { leftover = merged; continue; }
-        const view = new DataView(merged.buffer, merged.byteOffset, merged.byteLength);
-        channels = view.getUint16(22, true) || 1;
-        sampleRate = view.getUint32(24, true) || 22_050;
-        offset = 44;
-        headerRead = true;
-        playAt = context.currentTime + 0.12;
-      }
-
-      // PCM de 16 bits: sobra de byte ímpar fica para o próximo pedaço.
-      const usable = merged.length - offset;
-      const samples = Math.floor(usable / 2 / channels) * channels;
-      if (samples <= 0) { leftover = merged.subarray(offset); continue; }
-
-      const view = new DataView(merged.buffer, merged.byteOffset + offset, samples * 2);
-      const frames = samples / channels;
-      const buffer = context.createBuffer(channels, frames, sampleRate);
-      for (let channel = 0; channel < channels; channel += 1) {
-        const target = buffer.getChannelData(channel);
-        for (let frame = 0; frame < frames; frame += 1) {
-          target[frame] = view.getInt16((frame * channels + channel) * 2, true) / 32768;
-        }
-      }
-
-      const node = context.createBufferSource();
-      node.buffer = buffer;
-      node.connect(mixer);
-      playAt = Math.max(playAt, context.currentTime + 0.02);
-      node.start(playAt);
-      playAt += buffer.duration;
-      sources.push(node);
-
-      leftover = merged.subarray(offset + samples * 2);
+    // O cabeçalho WAV chega no primeiro pedaço e traz a taxa real; assumir 22.05k daria
+    // um áudio acelerado ou arrastado conforme a voz escolhida.
+    if (!headerRead) {
+      if (merged.length < 44) { leftover = merged; continue; }
+      const header = new DataView(merged.buffer, merged.byteOffset, merged.byteLength);
+      channels = header.getUint16(22, true) || 1;
+      sampleRate = header.getUint32(24, true) || 22_050;
+      offset = 44;
+      headerRead = true;
     }
 
-    // Espera o fim do que já foi agendado, senão o estado volta a "ocioso" com áudio tocando.
-    //
-    // Quem avisa é o último buffer, por `onended`, e não um `setTimeout` calculado: o relógio do
-    // AudioContext e o do `setTimeout` correm separados, e a diferença aparecia como o orb
-    // continuando âmbar depois de a fala ter acabado. O tempo calculado fica só como rede de
-    // segurança, para o caso de o evento não vir.
-    const ultimo = sources.at(-1);
-    const restante = Math.max(0, playAt - context.currentTime) * 1000;
-    const fimDoAudio = traceSpan("voice", "fim da reprodução", { agendado: Math.round(restante) });
-    await new Promise<void>((resolve) => {
-      let done = false;
-      const finish = (via: string) => { if (done) return; done = true; fimDoAudio.end({ ok: true, data: { via } }); resolve(); };
-      if (ultimo) ultimo.onended = () => finish("onended");
-      setTimeout(() => finish("tempo calculado"), restante + 400);
-    });
+    // PCM de 16 bits: sobra de byte ímpar fica para o próximo pedaço.
+    const usable = merged.length - offset;
+    const samples = Math.floor(usable / 2 / channels) * channels;
+    if (samples <= 0) { leftover = merged.subarray(offset); continue; }
+
+    const view = new DataView(merged.buffer, merged.byteOffset + offset, samples * 2);
+    const frames = samples / channels;
+    const buffer = context.createBuffer(channels, frames, sampleRate);
+    for (let channel = 0; channel < channels; channel += 1) {
+      const target = buffer.getChannelData(channel);
+      for (let frame = 0; frame < frames; frame += 1) {
+        target[frame] = view.getInt16((frame * channels + channel) * 2, true) / 32768;
+      }
+    }
+
+    const node = context.createBufferSource();
+    node.buffer = buffer;
+    node.connect(mixer);
+    playAt = Math.max(playAt, context.currentTime + 0.02);
+    if (start === null) start = playAt;
+    node.start(playAt);
+    playAt += buffer.duration;
+    sources.push(node);
+
+    leftover = merged.subarray(offset + samples * 2);
+  }
+  return { start, playAt };
+}
+
+/**
+ * Espera o fim do que já foi agendado, senão o estado volta a "ocioso" com áudio tocando.
+ *
+ * Quem avisa é o último buffer, por `onended`, e não um `setTimeout` calculado: o relógio do
+ * AudioContext e o do `setTimeout` correm separados, e a diferença aparecia como o orb continuando
+ * âmbar depois de a fala ter acabado. O tempo calculado fica só como rede de segurança.
+ */
+async function waitScheduled(stage: SpeechStage, playAt: number) {
+  const ultimo = stage.sources.at(-1);
+  const restante = Math.max(0, playAt - stage.context.currentTime) * 1000;
+  const fimDoAudio = traceSpan("voice", "fim da reprodução", { agendado: Math.round(restante) });
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = (via: string) => { if (done) return; done = true; fimDoAudio.end({ ok: true, data: { via } }); resolve(); };
+    if (ultimo) ultimo.onended = () => finish("onended");
+    setTimeout(() => finish("tempo calculado"), restante + 400);
+  });
+}
+
+/**
+ * Toca o áudio enquanto ele ainda está sendo gerado.
+ *
+ * O caminho antigo esperava o arquivo inteiro: numa frase longa, isso é a diferença entre a Vela
+ * responder e parecer travada.
+ */
+async function speakStreaming(endpoint: VoiceEndpoint, spoken: string, voice: string) {
+  const body = await streamSpeech(endpoint, spoken, voice);
+  const stage = openSpeechStage();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  streamingStop = () => {
+    void reader?.cancel().catch(() => undefined);
+    for (const node of stage.sources) { try { node.stop(); } catch { /* já parou */ } }
+  };
+  try {
+    const { playAt } = await scheduleWav(stage, body, stage.context.currentTime + 0.12, (r) => { reader = r; });
+    await waitScheduled(stage, playAt);
   } finally {
-    self.clearInterval(meterTimer);
-    meter.disconnect();
     streamingStop = null;
-    void context.close();
+    stage.close();
+  }
+}
+
+/**
+ * Lê uma mensagem **frase a frase**, dizendo ao painel onde a fala está.
+ *
+ * A síntese não devolve tempo de palavra. O que dá para medir com precisão é a janela de cada frase:
+ * pedindo uma frase por vez, cada uma tem início e fim exatos na linha do tempo do contexto. Dentro
+ * dela a palavra é estimada por fração de caracteres — e como a janela zera a cada frase, o erro não
+ * acumula ao longo de um texto longo, que é onde uma estimativa única sobre a mensagem inteira
+ * desalinharia.
+ *
+ * Pedir frase a frase não atrasa o primeiro som: o `/tts/stream` já fatia por frase do lado do
+ * servidor, então o primeiro áudio sai no tempo da primeira frase de qualquer jeito. E como o piper
+ * gera mais rápido do que fala, a frase seguinte chega antes de a atual terminar — sem buraco.
+ *
+ * O fatiamento vem de `reading-text.ts`, e as frases vão prontas para o painel: se cada ponta
+ * fatiasse por conta própria, as listas divergiriam e o destaque apontaria para a frase errada.
+ */
+async function speakReading(endpoint: VoiceEndpoint, voice: string, text: string, id: string) {
+  const preparado = await prepareText(endpoint, text).catch(() => speakable(text));
+  const frases = splitSentences(preparado);
+  if (!frases.length) return;
+
+  const stage = openSpeechStage();
+  const janelas: Array<{ start: number; end: number } | null> = [];
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let cancelada = false;
+  streamingStop = () => {
+    cancelada = true;
+    void reader?.cancel().catch(() => undefined);
+    for (const node of stage.sources) { try { node.stop(); } catch { /* já parou */ } }
+  };
+
+  void send({ type: "voice:reading", phase: "start", id, sentences: frases });
+
+  // A posição sai pelo relógio do áudio, não por contagem de tempo: é o único que sabe o que está
+  // tocando de verdade agora.
+  let ultimaChave = "";
+  const posicao = self.setInterval(() => {
+    const agora = stage.context.currentTime;
+    const index = janelas.findIndex((janela) => janela !== null && agora >= janela.start && agora < janela.end);
+    if (index < 0) return;
+    const janela = janelas[index]!;
+    const ratio = Math.min(1, Math.max(0, (agora - janela.start) / Math.max(0.001, janela.end - janela.start)));
+    const chave = `${index}:${ratio.toFixed(2)}`;
+    if (chave === ultimaChave) return;
+    ultimaChave = chave;
+    void send({ type: "voice:reading", phase: "position", id, index, ratio });
+  }, 80);
+
+  let playAt = stage.context.currentTime + 0.12;
+  try {
+    for (const frase of frases) {
+      if (cancelada) break;
+      try {
+        const body = await streamSpeech(endpoint, frase, voice);
+        const agendado = await scheduleWav(stage, body, playAt, (r) => { reader = r; });
+        janelas.push(agendado.start === null ? null : { start: agendado.start, end: agendado.playAt });
+        playAt = agendado.playAt;
+      } catch (error) {
+        if (cancelada) break;
+        // Uma frase que falha não derruba a leitura: fica sem janela, e os índices continuam
+        // alinhados com a lista que o painel recebeu.
+        janelas.push(null);
+        trace("voice", "frase pulada na leitura", { ok: false, data: { erro: error instanceof Error ? error.message : String(error) } });
+      }
+    }
+    if (!cancelada) await waitScheduled(stage, playAt);
+  } finally {
+    self.clearInterval(posicao);
+    streamingStop = null;
+    void send({ type: "voice:reading", phase: "end", id });
+    stage.close();
   }
 }
 
 let streamingStop: (() => void) | null = null;
 
-async function speak(text: string) {
+async function speak(text: string, readingId?: string) {
   let url = "";
-  const attempt = traceSpan("voice", "síntese", { chars: text.length });
+  const attempt = traceSpan("voice", "síntese", { chars: text.length, leitura: !!readingId });
   try {
     const { settings, endpoint } = await voiceTarget();
     const spoken = speakable(text);
@@ -340,6 +452,17 @@ async function speak(text: string) {
     segmenter?.suspend();
     speaking = true;
     publish("speaking");
+
+    // Leitura de uma mensagem do painel: frase a frase, para o destaque acompanhar a voz.
+    if (readingId && settings.voice.streamSpeech) {
+      try {
+        await speakReading(endpoint, settings.voice.speechVoice, text, readingId);
+        attempt.end({ ok: true, data: { modo: "leitura", voz: settings.voice.speechVoice } });
+        return;
+      } catch (error) {
+        trace("voice", "leitura frase a frase caiu para a fala inteira", { ok: false, data: { erro: error instanceof Error ? error.message : String(error) } });
+      }
+    }
 
     if (settings.voice.streamSpeech) {
       try {

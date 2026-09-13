@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Mic, MicOff, X } from "lucide-react";
+import { Mic, MicOff, Square, X } from "lucide-react";
 import { VelaOrb, VelaState } from "./vela-components";
 import { VoiceVisualMetrics } from "./audio-metrics";
 import { traceFrom } from "./trace-client";
@@ -17,7 +17,7 @@ const trace = traceFrom("painel");
  * O mesmo componente serve aos dois estados: o que muda é a classe, então a transição é contínua
  * em vez de uma troca de tela.
  */
-export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, onToggleMute, muted, onClose }: {
+export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, onToggleMute, muted, onClose, mode = "live" }: {
   state: VelaState;
   visual?: string;
   focused: boolean;
@@ -26,6 +26,12 @@ export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, 
   onToggleMute: () => void;
   muted: boolean;
   onClose: () => void;
+  /**
+   * `live` é conversa: microfone aberto, dá para silenciar e encerrar. `leitura` é a Vela lendo uma
+   * mensagem que você pediu — não há microfone para silenciar, e "encerrar a conversa" seria a ação
+   * errada: o que se quer é parar a leitura.
+   */
+  mode?: "live" | "leitura";
 }) {
   // O offscreen transmite a telemetria para toda a extensão; ouvir aqui evita passar 20 amostras
   // por segundo pelo estado do painel, o que re-renderizaria a conversa inteira a cada uma.
@@ -49,7 +55,8 @@ export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, 
     return () => { chrome.runtime?.onMessage.removeListener(listener); clearInterval(resumo); };
   }, []);
 
-  const label = state === "listening" ? "Ouvindo você" : state === "speaking" ? "Falando" : state === "thinking" ? "Pensando" : "Ao vivo";
+  const label = mode === "leitura" ? "Lendo em voz alta"
+    : state === "listening" ? "Ouvindo você" : state === "speaking" ? "Falando" : state === "thinking" ? "Pensando" : "Ao vivo";
 
   return <div className={`voice-stage ${focused ? "focada" : "compacta"}`}>
     <button
@@ -67,10 +74,14 @@ export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, 
     </>}
 
     <div className="voice-controls">
-      <button className={`voice-control ${muted ? "mudo" : ""}`} onClick={onToggleMute} aria-label={muted ? "Reativar o microfone" : "Silenciar o microfone"}>
-        {muted ? <MicOff size={16} /> : <Mic size={16} />}
-      </button>
-      <button className="voice-control encerrar" onClick={onClose} aria-label="Encerrar a conversa por voz"><X size={16} /></button>
+      {mode === "leitura"
+        ? <button className="voice-control encerrar" onClick={onClose} aria-label="Parar a leitura" title="Parar a leitura"><Square size={13} fill="currentColor" /></button>
+        : <>
+          <button className={`voice-control ${muted ? "mudo" : ""}`} onClick={onToggleMute} aria-label={muted ? "Reativar o microfone" : "Silenciar o microfone"}>
+            {muted ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
+          <button className="voice-control encerrar" onClick={onClose} aria-label="Encerrar a conversa por voz"><X size={16} /></button>
+        </>}
     </div>
   </div>;
 }

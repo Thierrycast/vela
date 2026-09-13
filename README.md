@@ -209,6 +209,11 @@ Configurações → Voz, muda enquanto você fala e **nunca vira comando** — q
 vai obedecer continua sendo a transcrição final. Em branco, o campo desliga o recurso e o resto da
 voz segue igual.
 
+**Ler uma mensagem em voz alta** é o botão de alto-falante em cada resposta. O orb fica pequeno no
+alto — quem pede para ouvir quer continuar vendo o texto — e a palavra sendo falada **acende no
+próprio texto**, com a frase em volta num véu. O destaque segue a cor da marca e o tema. Clicar de
+novo para.
+
 ### O palco da voz
 
 Ao entrar em Live Voice, o orb ocupa a conversa: durante uma fala o assunto é o que se ouve, não

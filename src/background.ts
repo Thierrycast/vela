@@ -284,10 +284,10 @@ async function speakTurn(text: string) {
 
 /** Ler uma resposta em voz alta sobe o runtime de áudio sozinho: não faz sentido exigir que o
  *  Live Voice esteja ligado só para ouvir uma mensagem. */
-async function speakText(text: string) {
+async function speakText(text: string, id?: string) {
   try {
     await ensureVoiceRuntime();
-    void chrome.runtime.sendMessage({ type: "voice:speak", text }).catch(() => undefined);
+    void chrome.runtime.sendMessage({ type: "voice:speak", text, id }).catch(() => undefined);
   } catch (error) {
     broadcast({ type: "voice:error", message: error instanceof Error ? error.message : "Não consegui iniciar a leitura." });
     broadcast({ type: "chat:speaking", speaking: false });
@@ -297,7 +297,15 @@ async function speakText(text: string) {
 async function stopSpeaking() {
   void chrome.runtime.sendMessage({ type: "voice:speak-stop" }).catch(() => undefined);
   broadcast({ type: "chat:speaking", speaking: false });
-  if (voiceMode === "off") await chrome.offscreen?.closeDocument().catch(() => undefined);
+  if (voiceMode === "off") {
+    await chrome.offscreen?.closeDocument().catch(() => undefined);
+    /*
+     * Fechar o offscreen mata quem publicaria o `idle`: o `finally` de `speak()` nunca roda num
+     * documento destruído. O painel ficava em "speaking" para sempre, e o orb da leitura continuava
+     * na tela depois de a pessoa ter parado. Quem fechou é quem avisa.
+     */
+    broadcast({ type: "voice:state", state: "idle" });
+  }
 }
 
 /**
@@ -374,7 +382,7 @@ async function applySidecarMessage(message: SidecarOutbound) {
     return;
   }
   if (message.type === "chat:rewind") return rewind(message.id, message.text);
-  if (message.type === "chat:speak") return speakText(message.text);
+  if (message.type === "chat:speak") return speakText(message.text, message.id);
   if (message.type === "chat:speak-stop") return stopSpeaking();
   if (message.type === "chat:attach") {
     const header = `Arquivo anexado “${message.name}”:`;
