@@ -32,7 +32,16 @@ export const CAPABILITY_LABELS: Record<keyof Capabilities, string> = {
 const ACTION_CAPABILITY: Partial<Record<BrowserAction["type"], keyof Capabilities>> = {
   evaluateScript: "scriptIsolated",
   waitFor: "waitFor",
+  hover: "hover",
+  drag: "drag",
+  history: "history",
 };
+
+/** `evaluateScript` tem dois interruptores, um por mundo: ver o DOM e ver o JavaScript do site
+ *  são poderes diferentes, e quem concede um não concede o outro por tabela. */
+export function scriptCapability(world: string | undefined): keyof Capabilities {
+  return world === "main" ? "scriptMain" : "scriptIsolated";
+}
 
 const TOOL_CAPABILITY: Record<string, keyof Capabilities> = {
   delegate_task: "delegate",

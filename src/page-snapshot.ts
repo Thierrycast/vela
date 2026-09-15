@@ -91,7 +91,52 @@ function readableText() {
   return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export type FindOptions = { query?: string; selector?: string; limit?: number };
+export type FindOptions = { query?: string; selector?: string; limit?: number; role?: string };
+
+/**
+ * Palavras que descrevem **o que a coisa é**, não como ela se chama.
+ *
+ * "Campo de busca" não é um texto que exista em lugar nenhum da página — é o papel de um elemento
+ * cujo rótulo pode ser "Pesquisar", "Buscar produtos" ou nada. Procurar por substring nunca acha;
+ * procurar pelo papel acha na primeira tentativa. Sem isto, a saída do modelo era rolar a página
+ * relendo o retrato, que é o caminho mais lento e mais caro de não encontrar nada.
+ */
+const INTENTS: Array<{ termos: string[]; roles: string[]; selectors?: string[] }> = [
+  { termos: ["busca", "buscar", "pesquisa", "pesquisar", "search", "procurar"], roles: ["searchbox", "textbox", "combobox"], selectors: ['input[type="search"]', 'input[name="q"]', '[role="search"] input'] },
+  { termos: ["botao", "button"], roles: ["button"] },
+  { termos: ["link", "links"], roles: ["link"] },
+  { termos: ["caixa", "checkbox", "marcar", "desmarcar"], roles: ["checkbox", "switch"] },
+  { termos: ["opcao", "radio"], roles: ["radio"] },
+  { termos: ["campo", "input", "preencher", "digitar"], roles: ["textbox", "searchbox", "combobox"] },
+  { termos: ["lista", "select", "combobox", "dropdown", "menu"], roles: ["combobox", "listbox", "menu", "menuitem"] },
+  { termos: ["enviar", "submeter", "submit", "confirmar"], roles: ["button"], selectors: ['button[type="submit"]', 'input[type="submit"]'] },
+  { termos: ["aba", "tab"], roles: ["tab"] },
+  { termos: ["titulo", "cabecalho", "heading"], roles: ["heading"] },
+];
+
+/** Artigos e preposições não distinguem nada, e exigir que apareçam no elemento derruba acerto. */
+const STOPWORDS = new Set(["de", "do", "da", "dos", "das", "o", "a", "os", "as", "um", "uma", "no", "na", "em", "para", "por", "com", "que", "e", "the", "of", "to", "for"]);
+
+/** Plural simples é a diferença entre achar e não achar "produtos" numa página que diz "produto". */
+const stem = (word: string) => (word.length > 3 && word.endsWith("s") ? word.slice(0, -1) : word);
+
+function readIntent(query: string) {
+  const tokens = fold(query).split(" ").filter(Boolean);
+  const roles = new Set<string>();
+  const selectors: string[] = [];
+  const words: string[] = [];
+  for (const token of tokens) {
+    if (STOPWORDS.has(token)) continue;
+    const intent = INTENTS.find((item) => item.termos.includes(token));
+    if (intent) {
+      for (const role of intent.roles) roles.add(role);
+      if (intent.selectors) selectors.push(...intent.selectors);
+      continue;
+    }
+    words.push(stem(token));
+  }
+  return { roles, selectors, words };
+}
 
 /**
  * Procura na página inteira, sem rolar e sem depender do retrato.
@@ -105,13 +150,21 @@ export type FindOptions = { query?: string; selector?: string; limit?: number };
  * resposta — clicar no contêiner acerta o alvo errado com frequência.
  */
 export function findElements(options: FindOptions) {
-  const { query = "", selector, limit = 20 } = options;
+  const { query = "", selector, limit = 20, role } = options;
   const needle = fold(query);
+  const intent = readIntent(query);
+  if (role) intent.roles.add(role.toLowerCase());
   const pool: Element[] = [];
   if (selector) {
     try { pool.push(...document.querySelectorAll(selector)); } catch { /* seletor inválido cai como zero resultados */ }
   } else {
     everyElement(document, pool, 12_000);
+  }
+
+  /** Um elemento que o próprio site marca como campo de busca vale mais que um que só parece. */
+  const hinted = new Set<Element>();
+  for (const candidate of intent.selectors) {
+    try { for (const element of document.querySelectorAll(candidate)) hinted.add(element); } catch { /* seletor da tabela, sempre válido */ }
   }
 
   const scored: Array<{ element: Element; score: number; text: string }> = [];
@@ -120,17 +173,35 @@ export function findElements(options: FindOptions) {
     const name = accessibleName(element);
     const text = (element.textContent ?? "").replace(/\s+/g, " ").trim();
     const attributes = [element.getAttribute("aria-label"), element.getAttribute("title"), element.getAttribute("alt"), element.getAttribute("placeholder"), element.getAttribute("href")].filter(Boolean).join(" ");
+    const elementRole = roleOf(element);
+    const roleMatches = intent.roles.size === 0 || intent.roles.has(elementRole);
+
     if (needle) {
-      const inName = fold(name).includes(needle);
-      const inText = fold(text).includes(needle);
-      const inAttributes = fold(attributes).includes(needle);
-      if (!inName && !inText && !inAttributes) continue;
-      // Casar pelo nome acessível vale mais que casar por um texto que só passa por dentro.
-      const exact = fold(name) === needle ? 40 : 0;
+      const foldedName = fold(name);
+      const haystack = `${foldedName} ${fold(text)} ${fold(attributes)}`;
+      /*
+       * Todas as palavras, em qualquer ordem, em qualquer um dos campos — em vez da frase inteira
+       * como substring. "Adicionar ao carrinho" deixava de achar um botão escrito "Adicionar no
+       * carrinho", e quem dita raramente repete a ordem exata do site.
+       */
+      const wordsHit = intent.words.length > 0 && intent.words.every((word) => haystack.includes(word));
+      const phraseHit = haystack.includes(needle);
+      // Quando a busca só descreve o papel ("campo de busca"), não há palavra a casar: o papel é
+      // o critério inteiro, e exigir texto junto devolveria zero.
+      const onlyRole = intent.words.length === 0 && intent.roles.size > 0;
+      if (!wordsHit && !phraseHit && !(onlyRole && roleMatches)) continue;
+      if (intent.roles.size > 0 && !roleMatches && !phraseHit) continue;
+
+      const exact = foldedName === needle ? 40 : 0;
+      const inName = intent.words.length > 0 && intent.words.every((word) => foldedName.includes(word));
       const size = Math.min(20, Math.round(2000 / Math.max(20, text.length)));
-      scored.push({ element, score: exact + (inName ? 22 : 0) + (inAttributes ? 8 : 0) + size + (isInteractive(element) ? 14 : 0), text: name || text });
-    } else {
-      scored.push({ element, score: isInteractive(element) ? 10 : 0, text: name || text });
+      scored.push({
+        element,
+        score: exact + (inName ? 22 : 0) + (phraseHit ? 10 : 0) + (roleMatches && intent.roles.size ? 30 : 0) + (hinted.has(element) ? 25 : 0) + size + (isInteractive(element) ? 14 : 0),
+        text: name || text,
+      });
+    } else if (intent.roles.size === 0 || roleMatches) {
+      scored.push({ element, score: (roleMatches && intent.roles.size ? 30 : 0) + (isInteractive(element) ? 10 : 0), text: name || text });
     }
   }
 

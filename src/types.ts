@@ -127,10 +127,19 @@ export type BrowserAction =
   | { type: "keyPress"; key: string; ref?: string }
   | { type: "scroll"; deltaX?: number; deltaY?: number }
   | { type: "extractPage"; mode?: "outline" | "text"; offset?: number; bypassWireguard?: boolean }
-  | { type: "find"; query?: string; selector?: string; limit?: number }
+  | { type: "find"; query?: string; selector?: string; limit?: number; role?: string }
   | { type: "screenshot" }
   | { type: "pageTool"; name: string; arguments?: unknown }
-  | { type: "evaluateScript"; script: string }
+  /** `world` decide se o script vê só o DOM (isolated, o padrão) ou também o JavaScript da página. */
+  | { type: "evaluateScript"; script: string; world?: "isolated" | "main" }
+  /** Menus que só abrem quando o ponteiro passa por cima — clicar neles não faz nada. */
+  | { type: "hover"; ref?: string; selector?: string }
+  /** Arrastar um elemento até outro: reordenar lista, soltar arquivo, mover cartão de quadro. */
+  | { type: "drag"; ref?: string; selector?: string; toRef?: string; toSelector?: string }
+  /** Escolher numa combobox pelo que ela mostra, pelo valor, ou pela posição. */
+  | { type: "selectOption"; ref?: string; selector?: string; label?: string; value?: string; index?: number }
+  /** Voltar e avançar são pedidos triviais que não tinham como ser atendidos. */
+  | { type: "history"; direction: "back" | "forward" }
   | { type: "wait"; milliseconds: number }
   /** Espera por uma condição da página, não por um número que o modelo chutou. */
   | { type: "waitFor"; text?: string; selector?: string; gone?: boolean; networkIdle?: boolean; timeoutMs?: number };

@@ -268,8 +268,8 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
   }
 
   if (action.type === "find") {
-    if (!action.query?.trim() && !action.selector?.trim()) return failure("unsupported", "Informe query (texto a procurar) ou selector.");
-    const result = findElements({ query: action.query, selector: action.selector, limit: action.limit });
+    if (!action.query?.trim() && !action.selector?.trim() && !action.role?.trim()) return failure("unsupported", "Informe query (o que procurar), selector (CSS) ou role (o papel do elemento).");
+    const result = findElements({ query: action.query, selector: action.selector, limit: action.limit, role: action.role });
     if (!result.total) return failure("element_not_found", `Nada casa com ${action.query ? `“${action.query}”` : action.selector} nesta página.`);
     return {
       ok: true,
@@ -319,7 +319,7 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
     return { ok: true, summary: `Tecla ${action.key}: ${detail}.` };
   }
 
-  if (action.type === "navigate") return failure("unsupported", "Navegação é tratada fora da página.");
+  if (action.type === "navigate" || action.type === "history") return failure("unsupported", "Navegação é tratada fora da página.");
   // A captura precisa da API de abas, que só existe no background: a página não fotografa a si.
   if (action.type === "screenshot") return failure("unsupported", "A captura é tratada fora da página.");
 
@@ -328,6 +328,88 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
   if (!element) return failure("element_not_found", "Elemento não encontrado.");
   if (element.hasAttribute("disabled")) return failure("element_not_interactable", `${describeTarget(element)} está desabilitado.`);
 
+
+  /*
+   * Passar o mouse por cima é uma ação de verdade, não um preâmbulo do clique.
+   *
+   * Menu que só abre no hover é comum o bastante para ter travado tarefas inteiras: o agente
+   * clicava no item pai, a página não reagia (porque o pai não é clicável), e não havia degrau
+   * seguinte. A resposta diz se alguma coisa apareceu — sem isso, "passei o mouse" não informa
+   * nada e o modelo leria a página de novo para descobrir.
+   */
+  if (action.type === "hover") {
+    const rect = element.getBoundingClientRect();
+    const base = { bubbles: true, cancelable: true, composed: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, view: window } as const;
+    let mutated = false;
+    const observer = new MutationObserver(() => { mutated = true; });
+    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+    element.dispatchEvent(new PointerEvent("pointerover", { ...base, pointerId: 1, isPrimary: true }));
+    element.dispatchEvent(new MouseEvent("mouseover", base));
+    element.dispatchEvent(new PointerEvent("pointermove", { ...base, pointerId: 1, isPrimary: true }));
+    element.dispatchEvent(new MouseEvent("mousemove", base));
+    if (element instanceof HTMLElement) element.focus({ preventScroll: true });
+    await wait(450);
+    observer.disconnect();
+    return { ok: true, summary: `Passei o mouse sobre ${describeTarget(element)}${note ?? ""} — ${mutated ? "alguma coisa apareceu; leia a página para ver o quê" : "nada mudou na página"}.` };
+  }
+
+  /*
+   * Arrastar é uma sequência de pontos, não um salto.
+   *
+   * Bibliotecas de arrastar-e-soltar ignoram um movimento que vai direto do começo ao fim: elas
+   * escutam `pointermove` para decidir que o gesto começou, e um único evento não convence
+   * nenhuma delas. Os passos intermediários são o que faz a lista reordenar de verdade.
+   */
+  if (action.type === "drag") {
+    const destino = resolveTarget({ ref: action.toRef, selector: action.toSelector });
+    if (destino.error) return destino.error;
+    if (!destino.element) return failure("element_not_found", "Informe para onde arrastar (toRef ou toSelector).");
+    const from = element.getBoundingClientRect();
+    const to = destino.element.getBoundingClientRect();
+    const start = { x: from.left + from.width / 2, y: from.top + from.height / 2 };
+    const end = { x: to.left + to.width / 2, y: to.top + to.height / 2 };
+    const point = (x: number, y: number) => ({ bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window, pointerId: 1, isPrimary: true } as const);
+
+    element.dispatchEvent(new PointerEvent("pointerover", point(start.x, start.y)));
+    element.dispatchEvent(new PointerEvent("pointerdown", { ...point(start.x, start.y), buttons: 1 }));
+    element.dispatchEvent(new MouseEvent("mousedown", { ...point(start.x, start.y), buttons: 1 }));
+    for (let step = 1; step <= 10; step += 1) {
+      const x = start.x + ((end.x - start.x) * step) / 10;
+      const y = start.y + ((end.y - start.y) * step) / 10;
+      const over = document.elementFromPoint(x, y) ?? destino.element;
+      over.dispatchEvent(new PointerEvent("pointermove", { ...point(x, y), buttons: 1 }));
+      over.dispatchEvent(new MouseEvent("mousemove", { ...point(x, y), buttons: 1 }));
+      await wait(16);
+    }
+    destino.element.dispatchEvent(new PointerEvent("pointerup", point(end.x, end.y)));
+    destino.element.dispatchEvent(new MouseEvent("mouseup", point(end.x, end.y)));
+    await wait(250);
+    return { ok: true, summary: `Arrastei ${describeTarget(element)} até ${describeTarget(destino.element)}. Leia a página para conferir se o destino aceitou.` };
+  }
+
+  /*
+   * A combobox tem caminho próprio porque simular a abertura do menu e o clique na opção é o
+   * jeito mais frágil de fazer a coisa mais comum de um formulário — e o `<select>` nativo nem
+   * abre menu de verdade para eventos sintéticos.
+   */
+  if (action.type === "selectOption") {
+    if (!(element instanceof HTMLSelectElement)) return failure("element_not_interactable", `${describeTarget(element)} não é uma combobox nativa. Se for um menu customizado, clique nele e depois clique na opção.`);
+    const options = Array.from(element.options);
+    const wanted = action.label ?? action.value ?? "";
+    const needle = fold(wanted);
+    const chosen = action.index !== undefined ? options[action.index]
+      : options.find((option) => fold(option.text) === needle)
+      ?? options.find((option) => fold(option.value) === needle)
+      ?? options.find((option) => fold(option.text).includes(needle) && needle.length > 0);
+    if (!chosen) {
+      const amostra = options.slice(0, 12).map((option) => `“${option.text.trim().slice(0, 40)}”`).join(", ");
+      return failure("element_not_found", `Nenhuma opção casa com ${wanted ? `“${wanted}”` : `índice ${action.index}`}. As opções são: ${amostra}${options.length > 12 ? ` (e mais ${options.length - 12})` : ""}.`);
+    }
+    element.value = chosen.value;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return { ok: true, summary: `Escolhi “${chosen.text.trim().slice(0, 60)}” em ${describeTarget(element)}.` };
+  }
 
   if (action.type === "click") {
     const before = captureSignals(element);

@@ -37,8 +37,12 @@ type Section = typeof sections[number];
  */
 const CAPABILITY_ROWS: Array<{ key: keyof Capabilities; label: string; description: string }> = [
   { key: "batch", label: "Ações em lote", description: "Deixa a Vela executar vários passos previsíveis de uma vez — abrir, clicar, digitar, enviar — em vez de consultar o modelo a cada clique. É o que mais acelera tarefas longas. Em modo Assistir, você aprova o plano inteiro num cartão só." },
+  { key: "hover", label: "Passar o mouse por cima", description: "Abre menus que só aparecem quando o ponteiro passa sobre o item — clicar neles não faz nada, e sem isto a Vela ficava sem saída nessas interfaces." },
+  { key: "drag", label: "Arrastar e soltar", description: "Reordenar listas, mover cartões, soltar um item num alvo." },
+  { key: "history", label: "Voltar e avançar", description: "Deixa a Vela usar o histórico da aba em vez de tentar adivinhar a URL anterior." },
   { key: "waitFor", label: "Espera inteligente", description: "Em vez de pausar por um tempo chutado, a Vela espera pelo que deve acontecer — um texto aparecer, um “carregando” sumir, a página parar de pedir dados — e segue no instante em que acontece." },
   { key: "scriptIsolated", label: "Injetar script na página", description: "Deixa a Vela rodar JavaScript próprio para ler ou mexer no DOM quando clicar e digitar não resolvem. Roda isolado do código do site: vê a página, não vê o que o site guardou em memória." },
+  { key: "scriptMain", label: "Script com acesso ao código do site", description: "Permite que o script da Vela enxergue também o JavaScript da página — variáveis, estado de framework, o que o site guardou em memória. Resolve o que não aparece no DOM, e é o poder mais amplo desta lista: o código roda com a mesma autoridade do site, numa aba onde você está logado. Nasce desligado." },
   { key: "delegate", label: "Tarefas em segundo plano", description: "Durante uma conversa por voz, deixa a Vela mandar uma tarefa longa para rodar por trás enquanto continua falando com você." },
 ];
 

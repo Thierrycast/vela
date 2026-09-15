@@ -13,7 +13,7 @@ export type ChatEvent =
   | { type: "error"; message: string };
 
 /** A ordem aqui é a ordem em que o modelo lê as opções; as de leitura vêm antes das de ação. */
-const BROWSER_ACTIONS: Array<BrowserAction["type"]> = ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "waitFor", "wait", "pageTool", "evaluateScript"];
+const BROWSER_ACTIONS: Array<BrowserAction["type"]> = ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "hover", "drag", "selectOption", "history", "waitFor", "wait", "pageTool", "evaluateScript"];
 
 const browserActionTool = (settings: AppSettings) => ({
   type: "function",
@@ -29,6 +29,11 @@ const browserActionTool = (settings: AppSettings) => ({
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
         ref: { type: "string", description: "Identificador de elemento, como e412, copiado de um extractPage ou de um find. Continua válido em releituras da mesma página e diz sozinho em que aba agir; deixa de valer quando aquela aba navega. Nunca deduza um ref a partir de outro." },
         selector: { type: "string", description: "Seletor CSS. Use apenas se o elemento não estiver no extractPage." },
+        toRef: { type: "string", description: "Para drag: o elemento de destino, no mesmo quadro da origem." },
+        toSelector: { type: "string", description: "Para drag: destino por seletor CSS." },
+        label: { type: "string", description: "Para selectOption: o texto da opção como ele aparece na tela." },
+        index: { type: "number", description: "Para selectOption: a posição da opção, quando o texto não ajuda." },
+        direction: { type: "string", enum: ["back", "forward"], description: "Para history." },
         text: { type: "string", description: "Para type." },
         submit: { type: "boolean", description: "Para type: pressiona Enter ao final." },
         mode: { type: "string", enum: ["replace", "append"], description: "Para type. Padrão replace." },
@@ -42,9 +47,11 @@ const browserActionTool = (settings: AppSettings) => ({
         offset: { type: "number", description: "Para extractPage: continua a leitura a partir deste ponto quando o resultado veio truncado." },
         query: { type: "string", description: "Para find: o texto a procurar na página inteira, mesmo fora da tela. Sem acento e sem caixa importa." },
         limit: { type: "number", description: "Para find: quantos resultados devolver. Padrão 20." },
+        role: { type: "string", description: "Para find: restringe ao papel do elemento (button, link, textbox, searchbox, checkbox, combobox, tab, heading). Use quando souber o que a coisa é mas não como ela se chama." },
         toolName: { type: "string", description: "Para pageTool: nome exato de uma ferramenta listada em \"Ferramentas oferecidas pela página\"." },
         toolArguments: { type: "object", description: "Para pageTool: argumentos conforme o schema anunciado pela ferramenta." },
-        script: { type: "string", description: "Para evaluateScript: código JavaScript a ser injetado e rodado no contexto da página. Retorne valores no final se precisar ler algo do DOM ou estado." },
+        script: { type: "string", description: "Para evaluateScript: código JavaScript a ser injetado e rodado na página. Retorne um valor no final se precisar ler algo." },
+        world: { type: "string", enum: ["isolated", "main"], description: "Para evaluateScript. isolated (padrão) enxerga o DOM, que basta para quase tudo. main enxerga também o JavaScript do site — variáveis globais da página, estado de framework — e só é necessário quando o que você precisa não existe no DOM." },
       },
       required: ["action"],
     },

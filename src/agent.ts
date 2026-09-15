@@ -6,11 +6,15 @@ import { span } from "./trace";
 import { adoptTab } from "./session";
 import { cdpAvailable, preciseClick, preciseFill, preciseKey } from "./cdp-actuator";
 import { allocateRefs, resolveRoute } from "./ref-registry";
+import { evaluateInMainWorld } from "./script-world";
 
-const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "waitFor", "screenshot"];
-const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find", "screenshot", "evaluateScript"];
+// `hover` entra aqui porque passar o mouse nao modifica a pagina — pedir aprovacao para cada
+// passagem de mouse em modo Assistir tornaria o modo inutilizavel em qualquer site com menu.
+const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "waitFor", "screenshot", "hover"];
+/** As acoes em que o cursor viaja ate o alvo: sao as que a pessoa precisa ver acontecer. */
+const CURSOR_ACTIONS: Array<BrowserAction["type"]> = ["click", "type", "keyPress", "hover", "drag", "selectOption"];
 // `waitFor` tem teto próprio dentro da página (30 s); a margem aqui é para a resposta voltar.
-const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, screenshot: 10_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, waitFor: 34_000, navigate: 20_000, pageTool: 20_000, evaluateScript: 15_000 };
+const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, screenshot: 10_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, waitFor: 34_000, hover: 8_000, drag: 12_000, selectOption: 8_000, history: 12_000, navigate: 20_000, pageTool: 20_000, evaluateScript: 15_000 };
 
 export const isReadOnly = (action: BrowserAction) => READ_ONLY.includes(action.type);
 
@@ -292,7 +296,21 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
   const tab = routed.tabId === active?.id ? active : await chrome.tabs.get(routed.tabId).catch(() => null);
   if (!tab?.id) return failure("page_gone", `A aba ${routed.tabId}, onde esse elemento foi lido, não existe mais. Leia a página de novo na aba em que você quer trabalhar.`);
   const frameId = routed.frameId;
-  const localAction = routed.ref !== undefined && "ref" in action ? { ...action, ref: routed.ref } : action;
+  let localAction = routed.ref !== undefined && "ref" in action ? { ...action, ref: routed.ref } : action;
+
+  /*
+   * Arrastar tem dois alvos, e o destino também é um ref público que precisa de tradução. Exigir
+   * que os dois estejam no mesmo frame não é limitação inventada: as coordenadas do gesto são
+   * relativas ao documento, e arrastar de um frame para outro não tem significado único.
+   */
+  if (action.type === "drag" && action.toRef) {
+    const destino = routeRef(action.toRef, tab.id);
+    if (!destino.ok) return destino.failure;
+    if (destino.tabId !== tab.id || destino.frameId !== frameId) {
+      return failure("unsupported", `Não dá para arrastar entre páginas ou quadros diferentes: ${action.ref ?? "a origem"} e ${action.toRef} não estão no mesmo lugar.`);
+    }
+    localAction = { ...localAction, toRef: destino.ref } as BrowserAction;
+  }
 
   // Recusas baratas vêm antes da aprovação: não faz sentido consultar o usuário
   // sobre uma ação que já vai falhar por causa da página.
@@ -336,7 +354,39 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
     return { ok: true, summary: `Abri ${outcome.url ?? action.url}${outcome.partial ? " (ainda carregando)" : ""}. Chame extractPage para ler a página.`, navigatedTo: outcome.url ?? action.url };
   }
 
+  /*
+   * Voltar e avançar passam pela API de abas, não por `history.back()` na página: a pilha de
+   * navegação é da aba, e o content script só enxerga o documento em que está — num site que
+   * substituiu o histórico, mexer de dentro anda para um lugar diferente do botão do navegador.
+   */
+  if (action.type === "history") {
+    if (denied) return failure("denied", "Modo Observar: navegação bloqueada.");
+    const urlAntes = tab.url;
+    try {
+      if (action.direction === "back") await chrome.tabs.goBack(tab.id);
+      else await chrome.tabs.goForward(tab.id);
+    } catch {
+      return failure("nav_error", action.direction === "back" ? "Não há para onde voltar nesta aba." : "Não há para onde avançar nesta aba.");
+    }
+    await waitForNavigation(tab.id, 8_000);
+    await waitForContentScript(tab.id);
+    const depois = await chrome.tabs.get(tab.id).catch(() => null);
+    return { ok: true, summary: `${action.direction === "back" ? "Voltei" : "Avancei"} para ${depois?.url ?? "a página anterior"}${depois?.url === urlAntes ? " (a URL não mudou)" : ""}. Chame extractPage para ler.`, navigatedTo: depois?.url };
+  }
+
   if (action.type === "extractPage") return readAllFrames(tab.id, tab.url, action);
+
+  /*
+   * O mundo da página é território do site, não da extensão — por isso a injeção sai do content
+   * script e passa pelo background, que é quem tem `chrome.scripting`. O gate de aprovação já
+   * aconteceu acima, junto com o das outras ações que modificam a página.
+   */
+  if (action.type === "evaluateScript" && action.world === "main") {
+    const outcome = await evaluateInMainWorld(tab.id, frameId, action.script);
+    return outcome.ok
+      ? { ok: true, summary: "Script executado no mundo da página.", content: outcome.text }
+      : failure("unsupported", outcome.text);
+  }
 
   /*
    * A captura é o único caminho para o que existe só em pixel — legenda dentro de miniatura,
@@ -358,7 +408,7 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
     }
   }
 
-  if (!isReadOnly(action) && !NO_CURSOR.includes(action.type)) await beginTrace(tab.id);
+  if (CURSOR_ACTIONS.includes(action.type)) await beginTrace(tab.id);
 
   const urlBefore = tab.url;
   const raw = await sendToTab(tab.id, {

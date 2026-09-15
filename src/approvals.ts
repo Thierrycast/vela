@@ -69,8 +69,11 @@ export function describeAction(action: BrowserAction, targetLabel: string) {
     case "click": return `Clicar em ${targetLabel || action.ref || action.selector || "um elemento"}`;
     case "type": return `Digitar “${action.text.slice(0, 40)}”${action.submit ? " e enviar" : ""} em ${targetLabel || "um campo"}`;
     case "keyPress": return `Pressionar ${action.key}`;
+    case "drag": return `Arrastar ${targetLabel || action.ref || "um elemento"} para ${action.toRef || action.toSelector || "outro lugar"}`;
+    case "selectOption": return `Escolher “${action.label ?? action.value ?? `opção ${action.index}`}” em ${targetLabel || "uma lista"}`;
+    case "history": return action.direction === "back" ? "Voltar para a página anterior" : "Avançar para a próxima página";
     case "pageTool": return `Usar a ferramenta “${action.name}” da própria página`;
-    case "evaluateScript": return `Injetar script JavaScript na página`;
+    case "evaluateScript": return action.world === "main" ? `Rodar JavaScript no mundo da página (acesso ao código do site): ${action.script.slice(0, 120)}` : `Injetar script JavaScript na página: ${action.script.slice(0, 120)}`;
     default: return `Executar ${action.type}`;
   }
 }

@@ -10,7 +10,7 @@ import { readSetting, writeSetting } from "./settings-tool";
 import { getMemory, setMemory } from "./storage";
 import { Emit } from "./messages";
 import { runDelegatedTask } from "./background-task";
-import { CAPABILITY_LABELS, actionCapability, isEnabled, refuse, toolCapability } from "./capabilities";
+import { CAPABILITY_LABELS, actionCapability, isEnabled, refuse, scriptCapability, toolCapability } from "./capabilities";
 import { BatchItem, batchSize, runBatch } from "./batch-runner";
 
 type ToolArguments = {
@@ -20,9 +20,10 @@ type ToolArguments = {
   gone?: boolean; networkIdle?: boolean; timeoutMs?: number;
   toolName?: string; toolArguments?: unknown;
   query?: string; limit?: number; max_results?: number; max_length?: number; reason?: string; expected?: string;
-  code?: string; replaces?: string;
+  code?: string; replaces?: string; world?: string;
   op?: "list" | "activate" | "close" | "closeOthers"; tabId?: number; tabIds?: number[]; keep?: number;
   field?: string; value?: string; script?: string; task?: string;
+  toRef?: string; toSelector?: string; label?: string; index?: number; direction?: string; items?: unknown; role?: string;
 };
 
 const SEARCH_BUDGET = 4000;
@@ -40,12 +41,16 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
     case "keyPress": return args.key ? { type: "keyPress", key: args.key, ref: args.ref } : null;
     case "scroll": return { type: "scroll", deltaX: args.deltaX, deltaY: args.deltaY };
     case "extractPage": return { type: "extractPage", mode: args.extractMode, offset: args.offset };
-    case "find": return { type: "find", query: args.query, selector: args.selector, limit: args.limit };
+    case "find": return { type: "find", query: args.query, selector: args.selector, limit: args.limit, role: args.role };
     case "screenshot": return { type: "screenshot" };
     case "wait": return { type: "wait", milliseconds: args.milliseconds ?? 1000 };
     case "waitFor": return { type: "waitFor", text: args.text, selector: args.selector, gone: args.gone, networkIdle: args.networkIdle, timeoutMs: args.timeoutMs };
+    case "hover": return { type: "hover", ref: args.ref, selector: args.selector };
+    case "drag": return { type: "drag", ref: args.ref, selector: args.selector, toRef: args.toRef, toSelector: args.toSelector };
+    case "selectOption": return { type: "selectOption", ref: args.ref, selector: args.selector, label: args.label, value: args.value, index: args.index };
+    case "history": return { type: "history", direction: args.direction === "forward" ? "forward" : "back" };
     case "pageTool": return args.toolName ? { type: "pageTool", name: args.toolName, arguments: args.toolArguments } : null;
-    case "evaluateScript": return args.script ? { type: "evaluateScript", script: args.script } : null;
+    case "evaluateScript": return args.script ? { type: "evaluateScript", script: args.script, world: args.world === "main" ? "main" : "isolated" } : null;
     default: return null;
   }
 }
@@ -84,7 +89,7 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
     if (call.name === "browser_action") {
       const action = toBrowserAction(args);
       if (!action) return { content: `ERRO [unsupported] Argumentos insuficientes para ${args.action ?? "browser_action"}.`, event: { kind: "error", text: `Chamada inválida de ${args.action ?? "browser_action"}.` } };
-      const actionGate = actionCapability(action.type);
+      const actionGate = action.type === "evaluateScript" ? scriptCapability(action.world) : actionCapability(action.type);
       if (actionGate && !isEnabled(settings, actionGate)) {
         return { content: refuse(actionGate), event: { kind: "error", text: `${CAPABILITY_LABELS[actionGate]}: habilidade desligada.` } };
       }
