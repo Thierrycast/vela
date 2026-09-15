@@ -40,7 +40,7 @@ export class UtteranceSegmenter {
     const toFrames = (ms: number) => Math.max(1, Math.round(ms / this.frameMs));
     this.preRollFrames = toFrames(options.preRollMs ?? 300);
     this.attackFrames = toFrames(options.attackMs ?? 130);
-    this.hangoverFrames = toFrames(options.hangoverMs ?? 700);
+    this.hangoverFrames = toFrames(options.hangoverMs ?? 1500);
     this.minFrames = toFrames(options.minUtteranceMs ?? 350);
     this.maxFrames = toFrames(options.maxUtteranceMs ?? 15_000);
   }
