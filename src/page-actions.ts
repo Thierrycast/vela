@@ -4,6 +4,37 @@ import { callPageTool, describePageTools, listPageTools } from "./page-tools";
 
 function failure(code: Extract<ActionResult, { ok: false }>["code"], summary: string): ActionResult { return { ok: false, code, summary }; }
 
+/**
+ * O que `evaluateScript` devolve precisa ser lido, e `JSON.stringify` sozinho falha justamente no
+ * caso mais comum de uso — inspecionar o DOM: `Element`/`Node` não têm propriedade enumerável
+ * nenhuma e viram "{}", igual `Map`/`Set`. Um objeto com referência circular derrubava o script
+ * inteiro com erro, mesmo tendo rodado certo.
+ */
+function serializeEvalResult(result: unknown): string {
+  if (result === undefined) return "Script executado sem retorno explícito.";
+  if (result === null) return "null";
+  if (typeof result === "bigint") return `${result.toString()}n`;
+  if (typeof result === "function") return result.toString().slice(0, 300);
+  if (result instanceof Node) {
+    if (result instanceof Element) {
+      const attrs = result.getAttributeNames().map((name) => `${name}="${(result.getAttribute(name) ?? "").slice(0, 80)}"`).join(" ");
+      const text = (result.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+      return `<${result.tagName.toLowerCase()}${attrs ? ` ${attrs}` : ""}>${text ? ` texto="${text}"` : ""}`;
+    }
+    return (result.textContent ?? "").slice(0, 300);
+  }
+  if (result instanceof NodeList || result instanceof HTMLCollection || Array.isArray(result)) {
+    const list = Array.from(result as ArrayLike<unknown>);
+    return `[${list.length} item(ns)] ${list.slice(0, 30).map(serializeEvalResult).join(" | ").slice(0, 1500)}`;
+  }
+  if (result instanceof Map) return serializeEvalResult(Object.fromEntries(result));
+  if (result instanceof Set) return serializeEvalResult(Array.from(result));
+  if (typeof result === "object") {
+    try { return JSON.stringify(result); } catch { return String(result); }
+  }
+  return String(result);
+}
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function locate(action: { ref?: string; selector?: string }): { element: Element | null; error?: ActionResult } {
@@ -81,6 +112,18 @@ async function typeInto(element: Element, text: string, mode: "replace" | "appen
     document.execCommand("insertText", false, text);
     return element.textContent ?? "";
   }
+  if (element instanceof HTMLSelectElement) {
+    const options = Array.from(element.options);
+    const needle = text.toLowerCase().trim();
+    const best = options.find((opt) => opt.text.toLowerCase().trim() === needle)
+              ?? options.find((opt) => opt.value.toLowerCase().trim() === needle)
+              ?? options.find((opt) => opt.text.toLowerCase().includes(needle));
+    if (best) {
+      element.value = best.value;
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      return best.text;
+    }
+  }
   return null;
 }
 
@@ -100,7 +143,7 @@ function pressKey(element: Element | null, key: string) {
 
 export async function performAction(action: BrowserAction): Promise<ActionResult> {
   if (action.type === "extractPage") {
-    const snapshot = captureSnapshot({ mode: action.mode, offset: action.offset });
+    const snapshot = captureSnapshot({ mode: action.mode, offset: action.offset, bypassWireguard: action.bypassWireguard });
     const pageTools = await listPageTools();
     const content = snapshot.content + describePageTools(pageTools);
     const extra = pageTools.length ? ` A página oferece ${pageTools.length} ferramenta(s) própria(s).` : "";
@@ -124,6 +167,16 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
     return result.ok
       ? { ok: true, summary: `Usei a ferramenta “${action.name}” da página.`, content: result.text }
       : failure("unsupported", result.text);
+  }
+
+  if (action.type === "evaluateScript") {
+    try {
+      const run = new Function(`return (async () => { ${action.script} })();`);
+      const result = await run();
+      return { ok: true, summary: "Script injetado e executado.", content: serializeEvalResult(result) };
+    } catch (e) {
+      return failure("unsupported", `Erro no script: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   if (action.type === "wait") {
@@ -174,7 +227,7 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
     const stateChanged = after.expanded !== before.expanded || after.selected !== before.selected;
     const refocused = after.focus !== before.focus;
     if (navigated || mutated || toggled || stateChanged) invalidateSnapshot();
-    const effect = navigated ? "a página navegou"
+    const effect = navigated ? `a página navegou para ${after.url}`
       : toggled ? `agora está ${after.checked ? "marcado" : "desmarcado"}`
       : stateChanged ? "o estado do elemento mudou"
       : mutated ? "a página reagiu"

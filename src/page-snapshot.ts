@@ -53,8 +53,8 @@ function ownText(element: Element) {
   return text.replace(/\s+/g, " ").trim();
 }
 
-export function accessibleName(element: Element): string {
-  if (isSensitive(element)) {
+export function accessibleName(element: Element, bypassWireguard: boolean = false): string {
+  if (!bypassWireguard && isSensitive(element)) {
     const label = element.getAttribute("aria-label") ?? element.getAttribute("title") ?? "";
     return label.trim() || "[valor omitido]";
   }
@@ -96,25 +96,39 @@ function isInteractive(element: Element) {
   const role = element.getAttribute("role") ?? "";
   if (["button", "link", "checkbox", "radio", "tab", "menuitem", "menuitemcheckbox", "option", "switch", "textbox", "combobox", "searchbox", "slider"].includes(role)) return true;
   if (element.getAttribute("contenteditable") === "true") return true;
+  const attrs = element.getAttributeNames();
+  if (attrs.some((a) => a.startsWith("on") || a.startsWith("hx-") || ["ng-click", "@click", "v-on:click", "data-action", "x-on:click", "on:click"].includes(a))) return true;
   const tabindex = element.getAttribute("tabindex");
   return tabindex !== null && Number(tabindex) >= 0;
 }
 
-function describe(element: Element, index: number) {
+function describe(element: Element, index: number, bypassWireguard: boolean = false) {
   const role = roleOf(element);
-  const name = accessibleName(element).slice(0, MAX_NAME);
+  const name = accessibleName(element, bypassWireguard).slice(0, MAX_NAME);
   const parts = [`[ref_${snapshotId}_${index}]<${role}`];
   if (name) parts.push(`name="${name.replace(/"/g, "'")}"`);
   const href = element.getAttribute("href");
   if (href) { try { const url = new URL(href, location.href); parts.push(`href="${url.host}${url.pathname.slice(0, 40)}"`); } catch { /* href relativo inválido */ } }
   const type = element.getAttribute("type");
   if (type) parts.push(`type="${type}"`);
-  const toggle = element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio");
-  if (element instanceof HTMLInputElement && !toggle && !isSensitive(element) && element.value) parts.push(`value="${element.value.slice(0, 40).replace(/"/g, "'")}"`);
-  if (toggle) parts.push((element as HTMLInputElement).checked ? "checked" : "unchecked");
   const expanded = element.getAttribute("aria-expanded");
-  if (expanded) parts.push(`expanded=${expanded}`);
-  if (element.hasAttribute("disabled")) parts.push("disabled");
+  if (expanded) parts.push(`expanded="${expanded}"`);
+  const toggle = element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio");
+  if (toggle) parts.push(element.checked ? "checked" : "unchecked");
+  if (element.getAttribute("aria-pressed") === "true") parts.push("pressed");
+  if (element.getAttribute("aria-checked") === "true") parts.push("checked");
+  
+  const canShowValue = !isSensitive(element) || bypassWireguard;
+  if (element instanceof HTMLInputElement && !toggle && canShowValue && element.value) parts.push(`value="${element.value.slice(0, 40).replace(/"/g, "'")}"`);
+  if (element instanceof HTMLTextAreaElement && canShowValue && element.value) parts.push(`value="${element.value.slice(0, 40).replace(/"/g, "'")}"`);
+  if (element instanceof HTMLSelectElement && canShowValue) {
+    const selected = element.options[element.selectedIndex];
+    if (selected && selected.value) parts.push(`value="${selected.text.slice(0, 40).replace(/"/g, "'")}"`);
+  }
+  const formField = element as Partial<HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement>;
+  if (formField.required || element.getAttribute("aria-required") === "true") parts.push("required");
+  if (formField.readOnly) parts.push("readonly");
+  if (element.hasAttribute("disabled") || formField.disabled || element.getAttribute("aria-disabled") === "true") parts.push("disabled");
   const rect = element.getBoundingClientRect();
   if (rect.bottom < 0) parts.push("acima-do-viewport");
   else if (rect.top > innerHeight) parts.push("abaixo-do-viewport");
@@ -147,17 +161,22 @@ function headings() {
 }
 
 function readableText() {
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) => {
-      const parent = node.parentElement;
-      if (!parent || parent.closest("script,style,noscript,template,svg,[data-vela-ui]")) return NodeFilter.FILTER_REJECT;
-      return (node.textContent ?? "").trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-    },
-  });
-  const chunks: string[] = [];
-  let node = walker.nextNode();
-  while (node) { chunks.push((node.textContent ?? "").replace(/\s+/g, " ").trim()); node = walker.nextNode(); }
-  return chunks.join(" ").replace(/\s{2,}/g, " ");
+  let text = document.body.innerText ?? "";
+  // Em páginas onde innerText falha ou vem vazio (ex: tudo no ShadowDOM), tentamos o fallback
+  if (!text.trim()) {
+    const chunks: string[] = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      if (!node.parentElement?.closest("script,style,noscript,svg,[data-vela-ui]")) {
+        chunks.push((node.textContent ?? "").replace(/\s+/g, " ").trim());
+      }
+      node = walker.nextNode();
+    }
+    text = chunks.join(" ").replace(/\s{2,}/g, " ");
+  }
+  // Limpa excesso de quebras de linha e preserva tabs (usados pelo innerText para tabelas)
+  return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** Sem acento e em minúsculas: quem dita "recent contributions" não digita o acento certo, e a
@@ -247,10 +266,10 @@ export function findElements(options: FindOptions) {
   };
 }
 
-export type SnapshotOptions = { mode?: "outline" | "text"; offset?: number; budget?: number };
+export type SnapshotOptions = { mode?: "outline" | "text"; offset?: number; budget?: number; bypassWireguard?: boolean };
 
 export function captureSnapshot(options: SnapshotOptions = {}) {
-  const { mode = "outline", offset = 0, budget = DEFAULT_BUDGET } = options;
+  const { mode = "outline", offset = 0, budget = DEFAULT_BUDGET, bypassWireguard = false } = options;
   snapshotId += 1;
   const found: Element[] = [];
   collect(document, found);
@@ -266,7 +285,7 @@ export function captureSnapshot(options: SnapshotOptions = {}) {
     ...headings(),
     "",
     "# Elementos interativos",
-    ...nodes.map((element, index) => describe(element, index)),
+    ...nodes.map((element, index) => describe(element, index, bypassWireguard)),
   ];
   if (found.length > nodes.length) sections.push(`[${found.length - nodes.length} elementos não couberam neste retrato — use find com o texto do que você procura em vez de rolar a página]`);
   if (mode === "text") { sections.push("", "# Texto da página", readableText()); }
