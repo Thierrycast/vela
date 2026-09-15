@@ -213,10 +213,10 @@ async function publishSession() {
   broadcast({ type: "chat:session", title: session?.title ?? "", tabCount: session?.tabIds.length ?? 0 });
 }
 
-async function runTurn(text: string) {
+async function runTurn(text: string, useFastModel = false) {
   ensureKeepAlive();
   void ensureSession(text).then(publishSession);
-  return agentLoop.submit(text, notifySurfaces);
+  return agentLoop.submit(text, notifySurfaces, { useFastModel });
 }
 
 /** Entrada da ponte MCP: um agente de fora descreve o objetivo e a Vela executa no navegador
@@ -274,7 +274,7 @@ async function speakTurn(text: string) {
     while (agentLoop.isRunning() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 60));
   }
   const previous = await lastAnswerId();
-  const accepted = await runTurn(text);
+  const accepted = await runTurn(text, voiceMode === "live");
   if (!accepted) {
     traceRecord("voice", "fala descartada: o turno anterior não encerrou", { from: "background", ok: false, code: "ocupada", data: { texto: text.slice(0, 200) } });
     return;
@@ -397,6 +397,12 @@ async function applySidecarMessage(message: SidecarOutbound) {
   if (message.type === "voice:start-live") return startVoice("live");
   if (message.type === "voice:start-dictation") return startVoice("dictation");
   if (message.type === "voice:stop-live") return stopVoice();
+  if (message.type === "voice:debug-start") {
+    if (voiceMode === "off") { broadcast({ type: "voice:error", message: "Ligue o Live Voice ou o ditado antes de gravar a sessão de depuração." }); return; }
+    void chrome.runtime.sendMessage({ type: "voice:debug-start" }).catch(() => undefined);
+    return;
+  }
+  if (message.type === "voice:debug-stop") { void chrome.runtime.sendMessage({ type: "voice:debug-stop" }).catch(() => undefined); return; }
 }
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -434,15 +440,19 @@ async function runLensAction(payload: { intent: LensIntent; text: string; url: s
   await runTurn(prompt);
 }
 
-// Abas abertas pelo agente entram na sessão; window.open e target=_blank também.
-chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => { void adoptTab(details.tabId).then(publishSession); });
+// Abas abertas pelo agente entram na sessão; window.open e target=_blank também — mas só quando
+// nascem de uma aba que já estava no grupo. Sem checar a origem, um ctrl+click em qualquer link,
+// em qualquer aba do navegador, puxava a aba nova para dentro do grupo da Vela.
+chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
+  void getSession().then((session) => { if (session?.tabIds.includes(details.sourceTabId)) void adoptTab(details.tabId).then(publishSession); });
+});
 chrome.tabs.onRemoved.addListener((tabId) => { void forgetTab(tabId).then(publishSession); });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.groupId === undefined) return;
   void getSession().then((session) => { if (session && changeInfo.groupId === session.groupId) void adoptTab(tabId).then(publishSession); });
 });
 
-chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; title?: string; message?: string; text?: string; url?: string; intent?: string; state?: string; scriptId?: string; id?: string; decision?: string; telemetry?: { metrics?: unknown; state?: string }; entry?: unknown }, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; title?: string; message?: string; text?: string; url?: string; intent?: string; state?: string; scriptId?: string; id?: string; decision?: string; telemetry?: { metrics?: unknown; state?: string }; entry?: unknown; recording?: boolean; items?: number }, _sender, sendResponse) => {
   if (message.type === "lens:action" && message.text) {
     void runLensAction({ intent: (message.intent ?? "context") as LensIntent, text: message.text, url: message.url ?? "", title: message.title ?? "" });
   }
@@ -480,5 +490,6 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
     if (voiceMode === "live") { void notifyActiveTab({ type: "pulse:transcript", text }); void speakTurn(text); }
     else broadcast({ type: "voice:transcript", text });
   }
+  if (message.type === "voice:debug-state") broadcast({ type: "voice:debug-state", recording: !!message.recording, items: Number(message.items) || 0 });
   return false;
 });
