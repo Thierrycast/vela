@@ -114,6 +114,12 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
       <Row label="Janelinha flutuante na página" description="Uma segunda superfície por cima do site que você está lendo. O palco da voz já fica no painel, então ela só faz sentido com a barra lateral fechada.">
         <button className={`toggle ${voice.showPulse ? "on" : ""}`} role="switch" aria-checked={voice.showPulse} aria-label="Janelinha flutuante" onClick={() => patch({ showPulse: !voice.showPulse })}><span /></button>
       </Row>
+      <Row label="Velocidade da fala" description="O servidor de voz fala num ritmo fixo por voz; isto acelera ou desacelera a reprodução no cliente, sem pedir outro arquivo.">
+        <span className="model-inline">
+          <input type="range" min={0.8} max={1.8} step={0.05} value={voice.speechRate} onChange={(event) => patch({ speechRate: Number(event.target.value) })} />
+          <code>{voice.speechRate.toFixed(2)}×</code>
+        </span>
+      </Row>
     </div>
 
     <h2 className="subsection">Microfone</h2>
