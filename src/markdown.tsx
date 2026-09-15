@@ -42,6 +42,25 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
   return nodes;
 }
 
+function SyntaxHighlighter({ code }: { code: string }) {
+  const tokens: ReactNode[] = [];
+  let cursor = 0;
+  const regex = /(\b(?:const|let|var|function|return|if|else|for|while|import|export|from|class|extends|new|async|await|try|catch|switch|case|default|break|continue|type|interface|public|private|true|false|null|undefined)\b)|(["'`])(?:(?!\2)[^\\]|\\.)*\2|(\/\/.*|\/\*[\s\S]*?\*\/)/g;
+  
+  for (const match of code.matchAll(regex)) {
+    const start = match.index ?? 0;
+    if (start > cursor) tokens.push(code.slice(cursor, start));
+    
+    if (match[1]) tokens.push(<span key={cursor} style={{ color: "var(--signal)" }}>{match[0]}</span>);
+    else if (match[2]) tokens.push(<span key={cursor} style={{ color: "#a5d6ff" }}>{match[0]}</span>);
+    else if (match[3]) tokens.push(<span key={cursor} style={{ color: "var(--text-muted)" }}>{match[0]}</span>);
+    
+    cursor = start + match[0].length;
+  }
+  if (cursor < code.length) tokens.push(code.slice(cursor));
+  return <>{tokens}</>;
+}
+
 function CodeBlock({ code, language }: { code: string; language?: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -54,7 +73,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
       <span>{language || "código"}</span>
       <button onClick={() => void copy()} aria-label="Copiar código">{copied ? <Check size={13} /> : <Copy size={13} />}</button>
     </div>
-    <pre><code>{code}</code></pre>
+    <pre><code><SyntaxHighlighter code={code} /></code></pre>
   </div>;
 }
 
