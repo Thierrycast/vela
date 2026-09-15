@@ -224,7 +224,7 @@ async function execute(command: Command): Promise<string> {
 
   const call = toToolCall(command.tool, params);
   if (!call) return `ERRO [unsupported] Ferramenta desconhecida: ${command.tool}.`;
-  const { content } = await runToolCall(call, settings);
+  const { content } = await runToolCall(call, settings, () => {});
   return content;
 }
 

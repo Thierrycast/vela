@@ -29,7 +29,8 @@ export type SidecarInbound =
   | { type: "chat:takeover-closed" }
   | { type: "chat:session"; title: string; tabCount: number }
   | { type: "chat:history"; items: Array<{ id: string; title: string; updatedAt: number }> }
-  | { type: "chat:speaking"; speaking: boolean };
+  | { type: "chat:speaking"; speaking: boolean }
+  | { type: "voice:debug-state"; recording: boolean; items: number };
 
 export type SidecarOutbound =
   | { type: "chat:submit"; text: string }
@@ -49,7 +50,13 @@ export type SidecarOutbound =
   | { type: "chat:speak"; text: string; id?: string }
   | { type: "chat:speak-stop" }
   | { type: "chat:attach"; name: string; text: string }
-  | { type: "chat:detach"; index: number };
+  | { type: "chat:detach"; index: number }
+  | { type: "voice:debug-start" }
+  | { type: "voice:debug-stop" };
+
+/** Assinatura compartilhada por quem avisa a UI: o loop principal, ferramentas que fazem trabalho
+ *  assíncrono depois de já terem respondido (como delegar uma tarefa), e a ponte MCP. */
+export type Emit = (message: SidecarInbound) => void;
 
 export type SidecarPort = {
   post: (message: SidecarOutbound) => boolean;
