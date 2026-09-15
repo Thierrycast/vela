@@ -7,6 +7,9 @@ import { parseMetadata } from "./user-script";
 import { requestTakeover } from "./approvals";
 import { manageTabs } from "./tab-manager";
 import { readSetting, writeSetting } from "./settings-tool";
+import { getMemory, setMemory } from "./storage";
+import { Emit } from "./messages";
+import { runDelegatedTask } from "./background-task";
 
 type ToolArguments = {
   action?: BrowserAction["type"]; url?: string; newTab?: boolean; ref?: string; selector?: string;
@@ -16,7 +19,7 @@ type ToolArguments = {
   query?: string; limit?: number; max_results?: number; max_length?: number; reason?: string; expected?: string;
   code?: string; replaces?: string;
   op?: "list" | "activate" | "close" | "closeOthers"; tabId?: number; tabIds?: number[]; keep?: number;
-  field?: string; value?: string;
+  field?: string; value?: string; script?: string; task?: string;
 };
 
 const SEARCH_BUDGET = 4000;
@@ -38,6 +41,7 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
     case "screenshot": return { type: "screenshot" };
     case "wait": return { type: "wait", milliseconds: args.milliseconds ?? 1000 };
     case "pageTool": return args.toolName ? { type: "pageTool", name: args.toolName, arguments: args.toolArguments } : null;
+    case "evaluateScript": return args.script ? { type: "evaluateScript", script: args.script } : null;
     default: return null;
   }
 }
@@ -52,7 +56,7 @@ function renderActionResult(result: ActionResult): string {
   return parts.join("\n");
 }
 
-export async function runToolCall(call: ToolCall, settings: AppSettings): Promise<{ content: string; event: AgentEvent; image?: string }> {
+export async function runToolCall(call: ToolCall, settings: AppSettings, emit: Emit): Promise<{ content: string; event: AgentEvent; image?: string }> {
   try {
     const args = JSON.parse(call.arguments || "{}") as ToolArguments;
     const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
@@ -60,6 +64,7 @@ export async function runToolCall(call: ToolCall, settings: AppSettings): Promis
     if (call.name === "browser_action") {
       const action = toBrowserAction(args);
       if (!action) return { content: `ERRO [unsupported] Argumentos insuficientes para ${args.action ?? "browser_action"}.`, event: { kind: "error", text: `Chamada inválida de ${args.action ?? "browser_action"}.` } };
+      if (action.type === "extractPage") action.bypassWireguard = settings.agent.bypassWireguard;
       const result = await executeAction(action, settings.agent.autonomy);
       void recordAction(action, result);
       return {
@@ -139,6 +144,63 @@ export async function runToolCall(call: ToolCall, settings: AppSettings): Promis
         ? `Script “${meta.name}” atualizado. O usuário pode revisar e executar em Configurações → Scripts.`
         : `Script “${meta.name}” salvo, ainda desativado. O usuário precisa revisar e habilitar em Configurações → Scripts antes de executar.`;
       return { content: text, event: { kind: "result", text } };
+    }
+
+    if (call.name === "memory_write" && args.key && args.value) {
+      /*
+       * Memória é permanente e entra sozinha no system prompt de toda conversa futura — o canal
+       * mais direto de prompt injection persistente que a Vela tem: uma página maliciosa manda
+       * "memorize isto" uma vez, e o efeito sobrevive à aba, à conversa e ao chat:new. Modo
+       * Observar bloqueia como qualquer outra escrita; os tetos existem para a mesma memória não
+       * inchar o prompt (e o custo) indefinidamente.
+       */
+      if (settings.agent.autonomy === "observe") return { content: "ERRO [denied] Modo Observar: gravação na memória bloqueada.", event: { kind: "error", text: "Modo Observar bloqueou a gravação na memória." } };
+      const memory = await getMemory();
+      const MAX_ENTRIES = 60;
+      const MAX_KEY = 80;
+      const MAX_VALUE = 2000;
+      if (!(args.key in memory) && Object.keys(memory).length >= MAX_ENTRIES) return { content: `ERRO [unsupported] Memória cheia (${MAX_ENTRIES} chaves). Apague algo com memory_delete antes de gravar mais.`, event: { kind: "error", text: "Memória cheia." } };
+      const key = args.key.slice(0, MAX_KEY);
+      const value = args.value.slice(0, MAX_VALUE);
+      memory[key] = value;
+      await setMemory(memory);
+      return { content: `Memorizado: ${key} = ${value}`, event: { kind: "result", text: `Gravei ${key} na memória.` } };
+    }
+
+    if (call.name === "memory_read") {
+      const memory = await getMemory();
+      if (args.key) {
+        const val = memory[args.key];
+        return val ? { content: val, event: { kind: "result", text: `Li ${args.key} da memória.` } }
+                   : { content: "ERRO [not_found] Chave não existe na memória.", event: { kind: "error", text: "Chave não encontrada." } };
+      }
+      const keys = Object.keys(memory);
+      if (!keys.length) return { content: "A memória está vazia.", event: { kind: "result", text: "Memória vazia." } };
+      return { content: keys.map((k) => `${k}: ${memory[k]}`).join("\n"), event: { kind: "result", text: "Li toda a memória." } };
+    }
+
+    if (call.name === "memory_delete" && args.key) {
+      if (settings.agent.autonomy === "observe") return { content: "ERRO [denied] Modo Observar: apagar da memória bloqueado.", event: { kind: "error", text: "Modo Observar bloqueou a exclusão na memória." } };
+      if (args.key === "*") {
+        await setMemory({});
+        return { content: "Toda a memória foi apagada.", event: { kind: "result", text: "Apaguei toda a memória." } };
+      }
+      const memory = await getMemory();
+      if (args.key in memory) {
+        delete memory[args.key];
+        await setMemory(memory);
+        return { content: `Chave apagada: ${args.key}`, event: { kind: "result", text: `Apaguei ${args.key}.` } };
+      }
+      return { content: "ERRO [not_found] Chave não existe na memória.", event: { kind: "error", text: "Chave não encontrada." } };
+    }
+
+    if (call.name === "delegate_task" && args.task) {
+      if (settings.agent.autonomy === "observe") return { content: "ERRO [denied] Modo Observar: não é possível delegar tarefas.", event: { kind: "error", text: "Modo Observar bloqueou a delegação." } };
+      // Roda por conta própria, sem bloquear este turno — o modelo rápido responde e a conversa
+      // continua; o robusto trabalha por trás e o resultado chega como mensagem nova quando pronto.
+      void runDelegatedTask(args.task, emit);
+      const text = `Delegado em segundo plano: ${args.task.slice(0, 80)}`;
+      return { content: "Tarefa delegada para execução em segundo plano com o modelo robusto. Responda ao usuário agora dizendo que vai cuidar disso, e continue a conversa normalmente — o resultado chega como uma mensagem nova quando terminar. Não espere por ele nem repita o pedido.", event: { kind: "result", text } };
     }
 
     const unknown = `ERRO [unsupported] Ferramenta ou argumentos inválidos: ${call.name}.`;

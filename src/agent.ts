@@ -7,8 +7,8 @@ import { adoptTab } from "./session";
 import { cdpAvailable, preciseClick, preciseKey } from "./cdp-actuator";
 
 const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "screenshot"];
-const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find", "screenshot"];
-const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, screenshot: 10_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000, pageTool: 20_000 };
+const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find", "screenshot", "evaluateScript"];
+const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, screenshot: 10_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000, pageTool: 20_000, evaluateScript: 15_000 };
 
 export const isReadOnly = (action: BrowserAction) => READ_ONLY.includes(action.type);
 

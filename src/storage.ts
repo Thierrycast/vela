@@ -132,3 +132,13 @@ export const appendLog = async (entry: Omit<LogEntry, "id" | "createdAt">) => {
   await local.set(LOGS_KEY, [...logs, { ...entry, id: crypto.randomUUID(), createdAt: Date.now() }].slice(-250));
 };
 export const clearLogs = () => local.set(LOGS_KEY, []);
+
+const MEMORY_KEY = "vela:memory";
+
+export async function getMemory(): Promise<Record<string, string>> {
+  return await local.get<Record<string, string>>(MEMORY_KEY, {});
+}
+
+export async function setMemory(memory: Record<string, string>): Promise<void> {
+  await local.set(MEMORY_KEY, memory);
+}

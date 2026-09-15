@@ -1,5 +1,6 @@
 import { AppSettings, BrowserContext, ChatMessage, ProviderProfile } from "./types";
 import { buildStateBlock, buildSystemPrompt } from "./system-prompt";
+import { getMemory } from "./storage";
 
 export type ToolCall = { id: string; name: string; arguments: string };
 export type ChatEvent =
@@ -18,7 +19,7 @@ const browserActionTool = {
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "wait", "pageTool"] },
+        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "wait", "pageTool", "evaluateScript"] },
         url: { type: "string", description: "Para navigate." },
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
         ref: { type: "string", description: "Identificador vindo do último extractPage, ex.: ref_3_12." },
@@ -35,6 +36,7 @@ const browserActionTool = {
         limit: { type: "number", description: "Para find: quantos resultados devolver. Padrão 20." },
         toolName: { type: "string", description: "Para pageTool: nome exato de uma ferramenta listada em \"Ferramentas oferecidas pela página\"." },
         toolArguments: { type: "object", description: "Para pageTool: argumentos conforme o schema anunciado pela ferramenta." },
+        script: { type: "string", description: "Para evaluateScript: código JavaScript a ser injetado e rodado no contexto da página. Retorne valores no final se precisar ler algo do DOM ou estado." },
       },
       required: ["action"],
     },
@@ -115,7 +117,7 @@ const settingsTool = {
   type: "function",
   function: {
     name: "vela_settings",
-    description: "Lê e muda as preferências da própria Vela: voz da síntese, visual do orb, cursor, moldura de controle, máximo de etapas, tema. Chame sem argumentos para ver tudo com o valor atual, ou com field para ver as opções válidas daquele campo antes de escrever. Endereço de servidor, chaves e autonomia não passam por aqui.",
+    description: "Lê e muda as preferências da própria Vela: voz da síntese, visual do orb, cursor, moldura de controle, tema. Chame sem argumentos para ver tudo com o valor atual, ou com field para ver as opções válidas daquele campo antes de escrever. Endereço de servidor, chaves e autonomia não passam por aqui.",
     parameters: {
       type: "object",
       properties: {
@@ -126,12 +128,79 @@ const settingsTool = {
   },
 };
 
+const memoryWriteTool = {
+  type: "function",
+  function: {
+    name: "memory_write",
+    description: "Grava uma informação persistente sobre o usuário, preferências ou fatos importantes. Use para aprender coisas que devem durar entre diferentes conversas.",
+    parameters: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Chave curta e descritiva (ex: 'usuario_nome', 'linkedin_url')." },
+        value: { type: "string", description: "O conteúdo a ser memorizado." },
+      },
+      required: ["key", "value"],
+    },
+  },
+};
+
+const memoryReadTool = {
+  type: "function",
+  function: {
+    name: "memory_read",
+    description: "Lê informações persistentes gravadas anteriormente. Chame sem chave para listar tudo.",
+    parameters: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "A chave específica para ler. Omita para ver todas as chaves." },
+      },
+    },
+  },
+};
+
+const memoryDeleteTool = {
+  type: "function",
+  function: {
+    name: "memory_delete",
+    description: "Apaga uma informação persistente gravada na memória.",
+    parameters: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "A chave específica para apagar. Ou '*' para apagar toda a memória." },
+      },
+      required: ["key"],
+    },
+  },
+};
+
+const delegateTaskTool = {
+  type: "function",
+  function: {
+    name: "delegate_task",
+    description: "Só disponível quando VOCÊ é o modelo rápido de uma conversa por voz. Manda uma tarefa de várias etapas para rodar em segundo plano com o modelo robusto, sem travar a conversa. Você responde ao usuário na hora (ex.: \"vou verificar isso\") e continua ouvindo; o resultado chega como mensagem nova quando terminar, e é falado em voz alta. Não use para algo que você mesmo resolve em poucas trocas — só quando o trabalho realmente exigiria várias chamadas de ferramenta seguidas.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "Descrição completa e autocontida da tarefa — quem for executá-la não vê o resto desta conversa, então inclua todo o contexto necessário." },
+      },
+      required: ["task"],
+    },
+  },
+};
+
 type ToolDefinition = { type: string; function: { name: string; description: string; parameters: Record<string, unknown> } };
 
 export function buildTools(settings: AppSettings): ToolDefinition[] {
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
-  const tools: ToolDefinition[] = [browserActionTool, webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool];
+  const tools: ToolDefinition[] = [browserActionTool, webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool, memoryWriteTool, memoryReadTool, memoryDeleteTool];
   if (profile?.capabilities?.webFetch) tools.splice(2, 0, webFetchTool);
+  /*
+   * `delegate_task` só faz sentido quando o modelo rodando AGORA é o rápido — reconhecível porque
+   * `defaultModel` foi trocado pelo `fastModel` para esta chamada (ver agent-loop.ts). Expor a
+   * ferramenta ao modelo robusto (que já é quem executaria a tarefa) não teria efeito útil, e
+   * deixaria a tarefa "robusta" rodando dentro de si mesma sem ganho nenhum.
+   */
+  if (profile?.fastModel && profile.defaultModel === profile.fastModel) tools.push(delegateTaskTool);
   return tools;
 }
 
@@ -323,13 +392,13 @@ function wireContent(message: ChatMessage): string | WirePart[] {
   ];
 }
 
-function toWire(settings: AppSettings, messages: ChatMessage[], context: BrowserContext): WireMessage[] {
+function toWire(settings: AppSettings, messages: ChatMessage[], context: BrowserContext, memory: Record<string, string>): WireMessage[] {
   const history = messages
     .filter((message) => message.role !== "system")
     .filter((message) => !(message.role === "assistant" && !message.content && !message.tool_calls?.length))
     .map((message) => ({ role: message.role, content: wireContent(message), ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}), ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}) }));
   return [
-    { role: "system", content: buildSystemPrompt(settings) },
+    { role: "system", content: buildSystemPrompt(settings, memory) },
     ...history,
     { role: "user", content: buildStateBlock(context) },
   ];
@@ -362,7 +431,8 @@ export async function* streamChat(
   if (!profile.defaultModel) { yield { type: "error", message: "Nenhum modelo selecionado. Abra as opções e selecione um modelo válido." }; return; }
 
   const endpoint = apiUrl(profile, "chat/completions");
-  const wire = toWire(settings, messages, context);
+  const memory = await getMemory();
+  const wire = toWire(settings, messages, context, memory);
   const tools = buildTools(settings);
   const body = (variant: Variant) => JSON.stringify({
     model: profile.defaultModel,
