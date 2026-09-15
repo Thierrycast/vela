@@ -1,6 +1,7 @@
-import { AppSettings, BrowserContext, ChatMessage, ProviderProfile } from "./types";
+import { AppSettings, BrowserAction, BrowserContext, ChatMessage, ProviderProfile } from "./types";
 import { buildStateBlock, buildSystemPrompt } from "./system-prompt";
 import { getMemory } from "./storage";
+import { isActionEnabled, isToolEnabled } from "./capabilities";
 
 export type ToolCall = { id: string; name: string; arguments: string };
 export type ChatEvent =
@@ -11,7 +12,10 @@ export type ChatEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
-const browserActionTool = {
+/** A ordem aqui é a ordem em que o modelo lê as opções; as de leitura vêm antes das de ação. */
+const BROWSER_ACTIONS: Array<BrowserAction["type"]> = ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "wait", "pageTool", "evaluateScript"];
+
+const browserActionTool = (settings: AppSettings) => ({
   type: "function",
   function: {
     name: "browser_action",
@@ -19,7 +23,8 @@ const browserActionTool = {
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "wait", "pageTool", "evaluateScript"] },
+        // Habilidade desligada some do enum: anunciar uma ação que será recusada só gasta rodada.
+        action: { type: "string", enum: BROWSER_ACTIONS.filter((type) => isActionEnabled(settings, type)) },
         url: { type: "string", description: "Para navigate." },
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
         ref: { type: "string", description: "Identificador vindo do último extractPage, ex.: ref_3_12." },
@@ -41,7 +46,7 @@ const browserActionTool = {
       required: ["action"],
     },
   },
-};
+});
 
 const webSearchTool = {
   type: "function",
@@ -192,7 +197,7 @@ type ToolDefinition = { type: string; function: { name: string; description: str
 
 export function buildTools(settings: AppSettings): ToolDefinition[] {
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
-  const tools: ToolDefinition[] = [browserActionTool, webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool, memoryWriteTool, memoryReadTool, memoryDeleteTool];
+  const tools: ToolDefinition[] = [browserActionTool(settings), webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool, memoryWriteTool, memoryReadTool, memoryDeleteTool];
   if (profile?.capabilities?.webFetch) tools.splice(2, 0, webFetchTool);
   /*
    * `delegate_task` só faz sentido quando o modelo rodando AGORA é o rápido — reconhecível porque
@@ -200,7 +205,7 @@ export function buildTools(settings: AppSettings): ToolDefinition[] {
    * ferramenta ao modelo robusto (que já é quem executaria a tarefa) não teria efeito útil, e
    * deixaria a tarefa "robusta" rodando dentro de si mesma sem ganho nenhum.
    */
-  if (profile?.fastModel && profile.defaultModel === profile.fastModel) tools.push(delegateTaskTool);
+  if (profile?.fastModel && profile.defaultModel === profile.fastModel && isToolEnabled(settings, "delegate_task")) tools.push(delegateTaskTool);
   return tools;
 }
 

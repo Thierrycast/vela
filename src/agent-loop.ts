@@ -6,6 +6,7 @@ import { endTraceSessions } from "./agent";
 import { appendLog, loadSettings } from "./storage";
 import { beginTurn, record as traceRecord, span } from "./trace";
 import { collectBrowserContext, clearAttachments } from "./browser-context";
+import { recordTurn } from "./action-stats";
 import * as conversation from "./conversation";
 
 const newId = () => crypto.randomUUID();
@@ -106,6 +107,13 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
   beginTurn(newId());
   const turnSpan = span("turn", "turno completo", { autonomy: settings.agent.autonomy, maxRounds });
   const repeats = new Map<string, number>();
+  /*
+   * Rodadas e chamadas por turno são a medida da reforma de navegação: uma tarefa que antes
+   * gastava oito idas ao modelo e agora gasta duas só aparece aqui. O `round` já ia para a trilha
+   * em cada `model.request`, mas somá-lo depois exigiria reconstruir o turno evento a evento.
+   */
+  let roundsUsed = 0;
+  let toolCallsMade = 0;
   traceRecord("user.input", text.slice(0, 200), { data: { length: text.length, model: profile?.defaultModel } });
   running = true;
   controller = new AbortController();
@@ -116,6 +124,7 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
 
   try {
     for (let round = 0; round < maxRounds; round += 1) {
+      roundsUsed += 1;
       const roundSpan = span("model.request", `rodada ${round + 1}`, { round });
       let firstToken = 0;
       let chunks = 0;
@@ -211,6 +220,7 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
         if (seen === 3) record({ kind: "error", text: `${call.name} repetido sem mudar nada — bloqueei e pedi outro caminho.` }, emit);
       }
 
+      toolCallsMade += calls.length;
       const toolCalls = calls.map((call) => ({ id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } }));
       await conversation.patch(assistant.id, { status: "complete", tool_calls: toolCalls });
       emit({ type: "chat:patch", id: assistant.id, patch: { status: "complete", tool_calls: toolCalls } });
@@ -263,7 +273,8 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
      * nada. Limpar aqui mantém o anexo disponível em todas as rodadas do turno e o descarta depois.
      */
     await clearAttachments();
-    turnSpan.end({ ok: true });
+    turnSpan.end({ ok: true, data: { rounds: roundsUsed, toolCalls: toolCallsMade } });
+    void recordTurn(roundsUsed, toolCallsMade);
     running = false;
     controller = null;
     await endTraceSessions();

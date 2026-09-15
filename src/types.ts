@@ -23,6 +23,49 @@ export type ProviderProfile = {
 export type Autonomy = "observe" | "assist" | "auto";
 export type CursorSpeed = "natural" | "fast" | "instant";
 
+/**
+ * Cada habilidade da agente tem interruptor próprio.
+ *
+ * Autonomia responde "quanto ela pode agir sem perguntar"; isto responde outra pergunta —
+ * "o que ela sabe fazer". São independentes: quem confia a ponto de deixar em Auto não
+ * necessariamente quer que ela injete JavaScript no mundo da página, e quem quer o depurador
+ * anexado não necessariamente quer a leitura de rede junto.
+ *
+ * O interruptor vale nas duas pontas: a ferramenta desligada **não é anunciada** ao modelo
+ * (`buildTools`) e, se ele insistir mesmo assim, a chamada é recusada (`runToolCall`). Anunciar
+ * e não executar seria pior que não anunciar — o modelo gastaria rodadas tentando.
+ *
+ * O que nasce desligado nasce assim porque concede poder novo: script no mundo da página,
+ * depurador anexado pela tarefa inteira, leitura de console e de rede, e cache que guarda
+ * caminho de site entre sessões. Poder novo não se concede sozinho.
+ */
+export type Capabilities = {
+  /** Várias ações numa só chamada, em sequência. */
+  batch: boolean;
+  /** Esperar por texto, elemento ou rede parada em vez de chutar milissegundos. */
+  waitFor: boolean;
+  /** evaluateScript no mundo isolado: vê o DOM, não vê o estado da página. */
+  scriptIsolated: boolean;
+  /** evaluateScript no mundo da página: vê variável, framework e o que estiver em memória. */
+  scriptMain: boolean;
+  hover: boolean;
+  drag: boolean;
+  /** Voltar e avançar no histórico da aba. */
+  history: boolean;
+  /** Manter o depurador anexado durante a tarefa, em vez de por ação. */
+  cdpSession: boolean;
+  readConsole: boolean;
+  readNetwork: boolean;
+  /** Agir numa aba endereçada por número, sem tirar o foco do usuário. */
+  tabAddressing: boolean;
+  /** Lembrar por onde se chega a cada coisa em cada site. */
+  routeCache: boolean;
+  /** Pedir aprovação quando a própria página mandar ir para outro domínio. */
+  domainGate: boolean;
+  /** Tocar uma tarefa de várias etapas em segundo plano. */
+  delegate: boolean;
+};
+
 export type AppSettings = {
   theme: ThemeMode;
   brand: BrandTheme;
@@ -40,6 +83,7 @@ export type AppSettings = {
     /** Desabilita o bloqueio e pedido de intervenção do usuário para senhas e formulários sensíveis. */
     bypassWireguard: boolean;
   };
+  capabilities: Capabilities;
   context: { currentPage: boolean; selection: boolean; sessionTabs: boolean; outsideTabs: boolean };
   bridge: { enabled: boolean; port: number; token: string; scriptPath: string };
   /** A voz fala com outro servidor que não o do chat: o gateway de texto não serve áudio. */
@@ -157,6 +201,22 @@ export const defaultSettings: AppSettings = {
     maxRounds: 12,
     preciseMode: false,
     bypassWireguard: false,
+  },
+  capabilities: {
+    batch: true,
+    waitFor: true,
+    scriptIsolated: true,
+    scriptMain: false,
+    hover: true,
+    drag: true,
+    history: true,
+    cdpSession: false,
+    readConsole: false,
+    readNetwork: false,
+    tabAddressing: true,
+    routeCache: false,
+    domainGate: true,
+    delegate: true,
   },
   context: { currentPage: true, selection: true, sessionTabs: true, outsideTabs: false },
   bridge: { enabled: false, port: 8792, token: "", scriptPath: "" },

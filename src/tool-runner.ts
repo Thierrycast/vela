@@ -10,6 +10,7 @@ import { readSetting, writeSetting } from "./settings-tool";
 import { getMemory, setMemory } from "./storage";
 import { Emit } from "./messages";
 import { runDelegatedTask } from "./background-task";
+import { CAPABILITY_LABELS, actionCapability, isEnabled, refuse, toolCapability } from "./capabilities";
 
 type ToolArguments = {
   action?: BrowserAction["type"]; url?: string; newTab?: boolean; ref?: string; selector?: string;
@@ -61,9 +62,20 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
     const args = JSON.parse(call.arguments || "{}") as ToolArguments;
     const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
 
+    // A ferramenta desligada nem foi anunciada (ver buildTools); chegar aqui significa que o
+    // modelo a chamou de memória, e a recusa precisa dizer qual chave está desligada.
+    const toolGate = toolCapability(call.name);
+    if (toolGate && !isEnabled(settings, toolGate)) {
+      return { content: refuse(toolGate), event: { kind: "error", text: `${CAPABILITY_LABELS[toolGate]}: habilidade desligada.` } };
+    }
+
     if (call.name === "browser_action") {
       const action = toBrowserAction(args);
       if (!action) return { content: `ERRO [unsupported] Argumentos insuficientes para ${args.action ?? "browser_action"}.`, event: { kind: "error", text: `Chamada inválida de ${args.action ?? "browser_action"}.` } };
+      const actionGate = actionCapability(action.type);
+      if (actionGate && !isEnabled(settings, actionGate)) {
+        return { content: refuse(actionGate), event: { kind: "error", text: `${CAPABILITY_LABELS[actionGate]}: habilidade desligada.` } };
+      }
       if (action.type === "extractPage") action.bypassWireguard = settings.agent.bypassWireguard;
       const result = await executeAction(action, settings.agent.autonomy);
       void recordAction(action, result);

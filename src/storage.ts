@@ -38,6 +38,13 @@ export function normalizeSettings(stored: Partial<AppSettings> | undefined): App
     ...(stored ?? {}),
     brand: { ...defaultSettings.brand, ...(stored?.brand ?? {}) },
     agent: { ...defaultSettings.agent, ...(stored?.agent ?? {}) },
+    /*
+     * Sem esta linha, um settings salvo antes das habilidades existirem (que não tem o campo)
+     * passaria pelo espalhamento de cima como `capabilities: undefined` e derrubaria toda
+     * consulta a `settings.capabilities.x`. Todo subobjeto novo precisa da sua própria linha
+     * aqui — o espalhamento raiz não alcança um nível abaixo.
+     */
+    capabilities: { ...defaultSettings.capabilities, ...(stored?.capabilities ?? {}) },
     context: { ...defaultSettings.context, ...(stored?.context ?? {}) },
     bridge: { ...defaultSettings.bridge, ...(stored?.bridge ?? {}) },
     voice: { ...defaultSettings.voice, ...(stored?.voice ?? {}) },

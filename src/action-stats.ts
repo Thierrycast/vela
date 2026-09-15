@@ -8,15 +8,24 @@ export type ActionStats = {
   failures: number;
   byCode: Record<string, number>;
   byType: Record<string, number>;
+  /** Turnos completos, e o que cada um custou em idas ao modelo. A razão entre os dois é a
+   *  medida de fluidez: quantas vezes a Vela teve que parar e perguntar ao modelo o que fazer. */
+  turns: number;
+  rounds: number;
+  toolCalls: number;
+  /** Ações executadas dentro de um lote — o que o lote economizou em rodadas. */
+  batchItems: number;
   since: number;
 };
 
-const empty = (): ActionStats => ({ total: 0, noEffect: 0, failures: 0, byCode: {}, byType: {}, since: Date.now() });
+const empty = (): ActionStats => ({ total: 0, noEffect: 0, failures: 0, byCode: {}, byType: {}, turns: 0, rounds: 0, toolCalls: 0, batchItems: 0, since: Date.now() });
 
 export async function loadActionStats(): Promise<ActionStats> {
   if (typeof chrome === "undefined" || !chrome.storage?.local) return empty();
   const stored = await chrome.storage.local.get(KEY);
-  return (stored[KEY] as ActionStats | undefined) ?? empty();
+  // Contagem salva antes dos campos novos existirem não tem `turns`/`rounds`: sem o merge, a
+  // tela mostraria `undefined` e a soma seguinte viraria NaN, apagando o histórico em silêncio.
+  return { ...empty(), ...((stored[KEY] as Partial<ActionStats> | undefined) ?? {}) };
 }
 
 export const clearActionStats = () => chrome.storage.local.set({ [KEY]: empty() });
@@ -36,5 +45,17 @@ export async function recordAction(action: BrowserAction, result: ActionResult) 
   } else if (result.summary.includes("sem efeito perceptível")) {
     stats.noEffect += 1;
   }
+  await chrome.storage.local.set({ [KEY]: stats });
+}
+
+/** Fecha o turno na contagem. Sem isto, "rodadas por tarefa" só existiria na trilha, que é uma
+ *  janela de 20 mil eventos — some justamente quando se quer comparar semana passada com hoje. */
+export async function recordTurn(rounds: number, toolCalls: number, batchItems = 0) {
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+  const stats = await loadActionStats();
+  stats.turns += 1;
+  stats.rounds += rounds;
+  stats.toolCalls += toolCalls;
+  stats.batchItems += batchItems;
   await chrome.storage.local.set({ [KEY]: stats });
 }

@@ -95,6 +95,16 @@ export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>
           <button className="secondary-button" onClick={() => void clearActionStats().then(refresh)}>Zerar contagem</button>
         </Row>
       </>}
+      {/* Idas ao modelo por tarefa é o número que mede fluidez: é ele que cai quando a Vela
+          consegue prever dois passos à frente em vez de parar e perguntar a cada clique. */}
+      {stats && stats.turns > 0 && <>
+        <Row label="Idas ao modelo por tarefa" description={`${stats.turns} tarefa(s) concluída(s), ${stats.rounds} rodada(s) no total. Quanto menor, mais fluida a Vela está.`}>
+          <span className={stats.rounds / stats.turns > 6 ? "probe-off" : "probe-ok"}>{(stats.rounds / stats.turns).toFixed(1)} por tarefa</span>
+        </Row>
+        <Row label="Ferramentas por rodada" description={stats.batchItems ? `${stats.batchItems} dessas ações vieram dentro de um lote.` : "Acima de 1 significa que ela agrupou trabalho em vez de gastar uma ida por ação."}>
+          <span className="status-badge">{(stats.toolCalls / Math.max(1, stats.rounds)).toFixed(2)}</span>
+        </Row>
+      </>}
     </div>
 
     <h2 className="subsection">Trilha de execução</h2>
