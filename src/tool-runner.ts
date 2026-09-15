@@ -1,7 +1,7 @@
 import { ActionResult, AgentEvent, AppSettings, BrowserAction } from "./types";
 import { ToolCall, fetchUrl, searchProvider } from "./provider";
 import { executeAction } from "./agent";
-import { recordAction } from "./action-stats";
+import { recordAction, recordBatch } from "./action-stats";
 import { findScriptByName, listScripts, saveScript } from "./script-store";
 import { parseMetadata } from "./user-script";
 import { requestTakeover } from "./approvals";
@@ -11,11 +11,13 @@ import { getMemory, setMemory } from "./storage";
 import { Emit } from "./messages";
 import { runDelegatedTask } from "./background-task";
 import { CAPABILITY_LABELS, actionCapability, isEnabled, refuse, toolCapability } from "./capabilities";
+import { BatchItem, batchSize, runBatch } from "./batch-runner";
 
 type ToolArguments = {
   action?: BrowserAction["type"]; url?: string; newTab?: boolean; ref?: string; selector?: string;
   text?: string; submit?: boolean; mode?: "replace" | "append"; key?: string;
   deltaX?: number; deltaY?: number; milliseconds?: number; extractMode?: "outline" | "text"; offset?: number;
+  gone?: boolean; networkIdle?: boolean; timeoutMs?: number;
   toolName?: string; toolArguments?: unknown;
   query?: string; limit?: number; max_results?: number; max_length?: number; reason?: string; expected?: string;
   code?: string; replaces?: string;
@@ -41,6 +43,7 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
     case "find": return { type: "find", query: args.query, selector: args.selector, limit: args.limit };
     case "screenshot": return { type: "screenshot" };
     case "wait": return { type: "wait", milliseconds: args.milliseconds ?? 1000 };
+    case "waitFor": return { type: "waitFor", text: args.text, selector: args.selector, gone: args.gone, networkIdle: args.networkIdle, timeoutMs: args.timeoutMs };
     case "pageTool": return args.toolName ? { type: "pageTool", name: args.toolName, arguments: args.toolArguments } : null;
     case "evaluateScript": return args.script ? { type: "evaluateScript", script: args.script } : null;
     default: return null;
@@ -67,6 +70,15 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
     const toolGate = toolCapability(call.name);
     if (toolGate && !isEnabled(settings, toolGate)) {
       return { content: refuse(toolGate), event: { kind: "error", text: `${CAPABILITY_LABELS[toolGate]}: habilidade desligada.` } };
+    }
+
+    if (call.name === "browser_batch") {
+      // O lote não se executa: ele reentra aqui, item a item. É o que garante que cada passo
+      // continue passando pelos mesmos gates (autonomia, habilidade, ação irreversível) que
+      // passaria se o modelo o tivesse chamado sozinho.
+      const result = await runBatch((args as { items?: BatchItem[] }).items ?? [], settings, emit, (item, itemSettings) => runToolCall(item, itemSettings, emit));
+      void recordBatch(batchSize((args as { items?: unknown }).items));
+      return result;
     }
 
     if (call.name === "browser_action") {

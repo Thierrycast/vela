@@ -131,7 +131,9 @@ export type BrowserAction =
   | { type: "screenshot" }
   | { type: "pageTool"; name: string; arguments?: unknown }
   | { type: "evaluateScript"; script: string }
-  | { type: "wait"; milliseconds: number };
+  | { type: "wait"; milliseconds: number }
+  /** Espera por uma condição da página, não por um número que o modelo chutou. */
+  | { type: "waitFor"; text?: string; selector?: string; gone?: boolean; networkIdle?: boolean; timeoutMs?: number };
 
 /*
  * `stale_snapshot` saiu com o fim dos refs por leitura: não existe mais "o retrato mudou", porque

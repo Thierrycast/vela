@@ -13,7 +13,7 @@ export type ChatEvent =
   | { type: "error"; message: string };
 
 /** A ordem aqui é a ordem em que o modelo lê as opções; as de leitura vêm antes das de ação. */
-const BROWSER_ACTIONS: Array<BrowserAction["type"]> = ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "wait", "pageTool", "evaluateScript"];
+const BROWSER_ACTIONS: Array<BrowserAction["type"]> = ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "waitFor", "wait", "pageTool", "evaluateScript"];
 
 const browserActionTool = (settings: AppSettings) => ({
   type: "function",
@@ -35,6 +35,9 @@ const browserActionTool = (settings: AppSettings) => ({
         key: { type: "string", description: "Para keyPress, ex.: Enter, Tab, ArrowDown." },
         deltaX: { type: "number" }, deltaY: { type: "number" },
         milliseconds: { type: "number", description: "Para wait, máximo 10000." },
+        gone: { type: "boolean", description: "Para waitFor: espera o texto ou o elemento DESAPARECER em vez de aparecer (um “carregando”, um modal)." },
+        networkIdle: { type: "boolean", description: "Para waitFor: espera a página parar de fazer requisições." },
+        timeoutMs: { type: "number", description: "Para waitFor: quanto esperar no máximo. Padrão 8000, teto 30000." },
         extractMode: { type: "string", enum: ["outline", "text"], description: "Para extractPage. outline traz só estrutura e elementos; text inclui o texto da página." },
         offset: { type: "number", description: "Para extractPage: continua a leitura a partir deste ponto quando o resultado veio truncado." },
         query: { type: "string", description: "Para find: o texto a procurar na página inteira, mesmo fora da tela. Sem acento e sem caixa importa." },
@@ -47,6 +50,32 @@ const browserActionTool = (settings: AppSettings) => ({
     },
   },
 });
+
+const browserBatchTool = {
+  type: "function",
+  function: {
+    name: "browser_batch",
+    description: "Executa uma sequência de ações numa única chamada. Use sempre que você já souber dois ou mais passos à frente — navegar, clicar no campo, digitar, pressionar Enter, capturar. As ações rodam em ordem, uma depois da outra, e o lote para no primeiro erro, devolvendo o que rodou e o que não chegou a rodar. Não aninhe lotes.",
+    parameters: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          description: "Até 10 passos, na ordem em que devem acontecer.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", enum: ["browser_action", "tab_manage"], description: "A ferramenta deste passo." },
+              input: { type: "object", description: "Os mesmos argumentos que você passaria ao chamá-la sozinha." },
+            },
+            required: ["name", "input"],
+          },
+        },
+      },
+      required: ["items"],
+    },
+  },
+};
 
 const webSearchTool = {
   type: "function",
@@ -197,7 +226,7 @@ type ToolDefinition = { type: string; function: { name: string; description: str
 
 export function buildTools(settings: AppSettings): ToolDefinition[] {
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
-  const tools: ToolDefinition[] = [browserActionTool(settings), webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool, memoryWriteTool, memoryReadTool, memoryDeleteTool];
+  const tools: ToolDefinition[] = [browserActionTool(settings), ...(isToolEnabled(settings, "browser_batch") ? [browserBatchTool] : []), webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool, memoryWriteTool, memoryReadTool, memoryDeleteTool];
   if (profile?.capabilities?.webFetch) tools.splice(2, 0, webFetchTool);
   /*
    * `delegate_task` só faz sentido quando o modelo rodando AGORA é o rápido — reconhecível porque

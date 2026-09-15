@@ -1,5 +1,5 @@
 import { ActionResult, BrowserAction } from "./types";
-import { accessibleName, roleOf } from "./dom-semantics";
+import { accessibleName, fold, roleOf } from "./dom-semantics";
 import { captureSnapshot, findElements } from "./page-snapshot";
 import { resolveRef } from "./element-registry";
 import { callPageTool, describePageTools, listPageTools } from "./page-tools";
@@ -38,6 +38,77 @@ function serializeEvalResult(result: unknown): string {
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const MAX_WAIT = 30_000;
+const DEFAULT_WAIT = 8_000;
+
+/**
+ * Esperar por uma condição, em vez de por um número.
+ *
+ * `wait` pede ao modelo que adivinhe quanto tempo a página vai levar, e ele erra dos dois lados:
+ * curto demais e a ação seguinte acontece antes de a tela existir; longo demais e a tarefa fica
+ * parada olhando para algo que já terminou. A condição resolve o dilema — volta assim que o que
+ * se espera aconteceu, e diz **por que** voltou. Um retorno que não explica o motivo obrigaria a
+ * uma leitura extra só para descobrir se valeu a pena esperar.
+ */
+async function waitForCondition(action: Extract<BrowserAction, { type: "waitFor" }>): Promise<ActionResult> {
+  const limit = Math.min(Math.max(action.timeoutMs ?? DEFAULT_WAIT, 200), MAX_WAIT);
+  const needle = action.text ? fold(action.text) : "";
+  if (!needle && !action.selector && !action.networkIdle) {
+    return failure("unsupported", "Diga o que esperar: text (um texto que deve aparecer), selector (um elemento) ou networkIdle.");
+  }
+
+  const present = () => {
+    if (action.selector) {
+      try { if (!document.querySelector(action.selector)) return false; } catch { return false; }
+    }
+    if (needle && !fold(document.body?.innerText ?? "").includes(needle)) return false;
+    return true;
+  };
+  /** `gone: true` inverte a pergunta: espera-se o sumiço de um carregando, de um modal, de um erro. */
+  const satisfied = () => (action.gone ? !present() : present());
+
+  const started = performance.now();
+  let lastRequest = performance.now();
+  const cleanup: Array<() => void> = [];
+
+  if (action.networkIdle && typeof PerformanceObserver !== "undefined") {
+    try {
+      const resources = new PerformanceObserver(() => { lastRequest = performance.now(); });
+      resources.observe({ type: "resource", buffered: false });
+      cleanup.push(() => resources.disconnect());
+    } catch { /* navegador sem observador de recursos: a espera cai no intervalo curto */ }
+  }
+
+  try {
+    // Mutação acorda a verificação na hora; o intervalo curto cobre o que muda sem tocar no DOM
+    // (uma requisição que termina, um atributo em shadow root que o observador não alcança).
+    const done = await new Promise<string | null>((resolve) => {
+      const check = () => {
+        const quiet = !action.networkIdle || performance.now() - lastRequest > 600;
+        if (satisfied() && quiet) {
+          resolve(action.networkIdle && !needle && !action.selector ? "a rede parou" : action.gone ? "o que você esperava sumir sumiu" : "o que você esperava apareceu");
+          return true;
+        }
+        if (performance.now() - started > limit) { resolve(null); return true; }
+        return false;
+      };
+      if (check()) return;
+      const timer = setInterval(() => { if (check()) clearInterval(timer); }, 150);
+      cleanup.push(() => clearInterval(timer));
+      const observer = new MutationObserver(() => { if (check()) clearInterval(timer); });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+      cleanup.push(() => observer.disconnect());
+    });
+
+    const spent = Math.round(performance.now() - started);
+    if (done) return { ok: true, summary: `Esperei ${spent} ms e ${done}.` };
+    const alvo = action.text ? `o texto “${action.text}”` : action.selector ? `o elemento ${action.selector}` : "a rede parar";
+    return failure("timeout", `Passaram-se ${spent} ms e ${alvo} ${action.gone ? "continua na página" : "não apareceu"}. Leia a página (extractPage) para ver o que está acontecendo em vez de esperar de novo.`);
+  } finally {
+    for (const undo of cleanup) undo();
+  }
+}
 
 export type Target = { element: Element | null; error?: ActionResult; note?: string };
 
@@ -223,6 +294,8 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
       return failure("unsupported", `Erro no script: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+
+  if (action.type === "waitFor") return waitForCondition(action);
 
   if (action.type === "wait") {
     await wait(Math.min(Math.max(action.milliseconds, 0), 10_000));

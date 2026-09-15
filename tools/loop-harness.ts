@@ -314,6 +314,50 @@ console.log("tag <anexo> presente:", corpo.includes("anexo") ? "sim" : "não");
 // E some depois: anexo é contexto do turno, não permanente.
 console.log("anexos restantes depois do turno:", (await listAttachments()).length);
 
+// 18b. O lote: varias acoes numa ida so ao modelo, parando no primeiro erro.
+await run("lote executa em sequencia", [
+  [delta("Vou fazer tudo de uma vez."), toolCall("c1", "browser_batch", { items: [
+    { name: "browser_action", input: { action: "navigate", url: "https://exemplo.com" } },
+    { name: "browser_action", input: { action: "extractPage" } },
+    { name: "browser_action", input: { action: "click", selector: "#enviar" } },
+  ] }), DONE],
+  [delta("Pronto."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// O lote para no primeiro erro e diz o que nao chegou a rodar: continuar executaria os passos
+// seguintes contra uma pagina em estado desconhecido.
+await run("lote para no primeiro erro", [
+  [delta("Sequencia."), toolCall("c1", "browser_batch", { items: [
+    { name: "browser_action", input: { action: "extractPage" } },
+    { name: "browser_action", input: { action: "click", ref: "e999" } },
+    { name: "browser_action", input: { action: "click", selector: "#enviar" } },
+  ] }), DONE],
+  [delta("Entendi onde parou."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// O rodape e a parte que importa quando o lote quebra: ele diz onde parou e o que nao rodou.
+{
+  const ultima = [...(await conversation.all())].reverse().find((message) => message.role === "tool");
+  console.log("rodapé:", (ultima?.content ?? "").split("\n").filter(Boolean).pop());
+}
+
+// Ferramenta que nao e de navegador nao entra no lote.
+await run("lote recusa ferramenta de fora", [
+  [delta("Tentando."), toolCall("c1", "browser_batch", { items: [
+    { name: "memory_write", input: { key: "a", value: "b" } },
+  ] }), DONE],
+  [delta("Ok, chamo separado."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// Habilidade desligada: a ferramenta nem e anunciada, e a chamada de memoria e recusada com o
+// nome da chave que precisa ser ligada.
+await run("habilidade desligada recusa a chamada", [
+  [delta("Vou agrupar."), toolCall("c1", "browser_batch", { items: [
+    { name: "browser_action", input: { action: "extractPage" } },
+  ] }), DONE],
+  [delta("Entendi."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" }, capabilities: { ...defaultSettings.capabilities, batch: false } });
+
 // 18. O registro de refs, exercitado direto — é lógica pura e não precisa do loop inteiro.
 // O que importa aqui é a **estabilidade**: o mesmo elemento, relido, tem de receber o mesmo ref.
 // Sem isso, todo clique depois de uma releitura exigiria uma rodada só para reconquistar o alvo.

@@ -31,10 +31,12 @@ export const CAPABILITY_LABELS: Record<keyof Capabilities, string> = {
 
 const ACTION_CAPABILITY: Partial<Record<BrowserAction["type"], keyof Capabilities>> = {
   evaluateScript: "scriptIsolated",
+  waitFor: "waitFor",
 };
 
 const TOOL_CAPABILITY: Record<string, keyof Capabilities> = {
   delegate_task: "delegate",
+  browser_batch: "batch",
 };
 
 export const actionCapability = (type: BrowserAction["type"]) => ACTION_CAPABILITY[type];

@@ -7,9 +7,10 @@ import { adoptTab } from "./session";
 import { cdpAvailable, preciseClick, preciseFill, preciseKey } from "./cdp-actuator";
 import { allocateRefs, resolveRoute } from "./ref-registry";
 
-const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "screenshot"];
+const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "waitFor", "screenshot"];
 const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find", "screenshot", "evaluateScript"];
-const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, screenshot: 10_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, navigate: 20_000, pageTool: 20_000, evaluateScript: 15_000 };
+// `waitFor` tem teto próprio dentro da página (30 s); a margem aqui é para a resposta voltar.
+const TIMEOUTS: Record<BrowserAction["type"], number> = { extractPage: 12_000, find: 12_000, screenshot: 10_000, click: 8_000, type: 12_000, keyPress: 6_000, scroll: 5_000, wait: 14_000, waitFor: 34_000, navigate: 20_000, pageTool: 20_000, evaluateScript: 15_000 };
 
 export const isReadOnly = (action: BrowserAction) => READ_ONLY.includes(action.type);
 

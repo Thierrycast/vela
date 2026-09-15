@@ -36,6 +36,8 @@ type Section = typeof sections[number];
  * ela custa; é por ela que a pessoa decide, não pelo nome.
  */
 const CAPABILITY_ROWS: Array<{ key: keyof Capabilities; label: string; description: string }> = [
+  { key: "batch", label: "Ações em lote", description: "Deixa a Vela executar vários passos previsíveis de uma vez — abrir, clicar, digitar, enviar — em vez de consultar o modelo a cada clique. É o que mais acelera tarefas longas. Em modo Assistir, você aprova o plano inteiro num cartão só." },
+  { key: "waitFor", label: "Espera inteligente", description: "Em vez de pausar por um tempo chutado, a Vela espera pelo que deve acontecer — um texto aparecer, um “carregando” sumir, a página parar de pedir dados — e segue no instante em que acontece." },
   { key: "scriptIsolated", label: "Injetar script na página", description: "Deixa a Vela rodar JavaScript próprio para ler ou mexer no DOM quando clicar e digitar não resolvem. Roda isolado do código do site: vê a página, não vê o que o site guardou em memória." },
   { key: "delegate", label: "Tarefas em segundo plano", description: "Durante uma conversa por voz, deixa a Vela mandar uma tarefa longa para rodar por trás enquanto continua falando com você." },
 ];

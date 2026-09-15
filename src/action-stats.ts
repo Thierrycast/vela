@@ -48,6 +48,14 @@ export async function recordAction(action: BrowserAction, result: ActionResult) 
   await chrome.storage.local.set({ [KEY]: stats });
 }
 
+/** Ações que couberam num lote — a diferença entre elas e o total de rodadas é o que o lote poupou. */
+export async function recordBatch(items: number) {
+  if (!items || typeof chrome === "undefined" || !chrome.storage?.local) return;
+  const stats = await loadActionStats();
+  stats.batchItems += items;
+  await chrome.storage.local.set({ [KEY]: stats });
+}
+
 /** Fecha o turno na contagem. Sem isto, "rodadas por tarefa" só existiria na trilha, que é uma
  *  janela de 20 mil eventos — some justamente quando se quer comparar semana passada com hoje. */
 export async function recordTurn(rounds: number, toolCalls: number, batchItems = 0) {
