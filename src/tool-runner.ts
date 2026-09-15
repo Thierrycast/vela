@@ -12,6 +12,7 @@ import { Emit } from "./messages";
 import { runDelegatedTask } from "./background-task";
 import { CAPABILITY_LABELS, actionCapability, isEnabled, refuse, scriptCapability, toolCapability } from "./capabilities";
 import { BatchItem, batchSize, runBatch } from "./batch-runner";
+import { readConsole, readNetwork, startWatching } from "./page-observability";
 
 type ToolArguments = {
   action?: BrowserAction["type"]; url?: string; newTab?: boolean; ref?: string; selector?: string;
@@ -107,6 +108,37 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
         // numa mensagem do usuário.
         ...(result.ok && result.image ? { image: result.image } : {}),
       };
+    }
+
+    if (call.name === "read_console_messages" || call.name === "read_network_requests") {
+      const kind = call.name === "read_console_messages" ? "console" : "network";
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tabId = args.tabId ?? active?.id;
+      if (tabId === undefined) return { content: "ERRO [no_tab] Nenhuma aba para observar.", event: { kind: "error", text: "Sem aba para observar." } };
+
+      const started = await startWatching(tabId, kind);
+      if (!started.ok) return { content: `ERRO [unsupported] ${started.motivo}`, event: { kind: "error", text: `Não consegui observar a aba ${tabId}.` } };
+
+      const limit = Math.min(Math.max(args.limit ?? 40, 1), 200);
+      const linhas = kind === "console"
+        ? readConsole(tabId, args.query, limit).map((entry) => `[${entry.level}] ${entry.text}`)
+        : readNetwork(tabId, args.query, limit).map((entry) => `${entry.method} ${entry.status ?? "…"} ${entry.url}${entry.type ? ` (${entry.type}${entry.size ? `, ${Math.round(entry.size / 1024)} kB` : ""})` : ""}`);
+
+      /*
+       * A distinção entre "não gravei nada ainda" e "a página não fez nada" é a informação mais
+       * importante desta resposta. Sem ela o modelo concluiria que a página é inerte e seguiria
+       * para outro caminho — quando bastava repetir a ação com a gravação já ligada.
+       */
+      if (!started.jaEstava) {
+        return {
+          content: `A gravação ${kind === "console" ? "do console" : "da rede"} desta aba começou agora, então ainda não há nada registrado — o que aconteceu antes deste momento não foi capturado. Repita a ação que você quer observar (ou recarregue a página) e chame esta ferramenta de novo.${linhas.length ? `\n\nJá registrado desde então:\n${linhas.join("\n")}` : ""}`,
+          event: { kind: "status", text: `Comecei a observar ${kind === "console" ? "o console" : "a rede"} da aba ${tabId}.` },
+        };
+      }
+      if (!linhas.length) {
+        return { content: `Nada ${kind === "console" ? "no console" : "na rede"} casa com ${args.query ? `“${args.query}”` : "o período gravado"}.`, event: { kind: "result", text: `Nada encontrado ${kind === "console" ? "no console" : "na rede"}.` } };
+      }
+      return { content: linhas.join("\n"), event: { kind: "result", text: `${linhas.length} registro(s) ${kind === "console" ? "do console" : "da rede"}.` } };
     }
 
     if (call.name === "web_search" && args.query) {

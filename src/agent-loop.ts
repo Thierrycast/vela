@@ -3,6 +3,7 @@ import { Emit, LoopSnapshot } from "./messages";
 import { ToolCall, streamChat } from "./provider";
 import { runToolCall } from "./tool-runner";
 import { endTraceSessions } from "./agent";
+import { configureSticky, endCdpSessions } from "./cdp-session";
 import { appendLog, loadSettings } from "./storage";
 import { beginTurn, record as traceRecord, span } from "./trace";
 import { collectBrowserContext, clearAttachments } from "./browser-context";
@@ -140,6 +141,9 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
   let roundsUsed = 0;
   let toolCallsMade = 0;
   traceRecord("user.input", text.slice(0, 200), { data: { length: text.length, model: profile?.defaultModel } });
+  // A promoção do depurador é decisão do turno, não de cada ação: quem liga a habilidade aceita
+  // ver a faixa de aviso durante uma tarefa que insista no caminho confiável.
+  configureSticky(settings.capabilities.cdpSession);
   running = true;
   controller = new AbortController();
   emit({ type: "chat:running", running: true });
@@ -303,6 +307,7 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
     running = false;
     controller = null;
     await endTraceSessions();
+    await endCdpSessions();
     await conversation.flush();
     emit({ type: "chat:running", running: false });
   }

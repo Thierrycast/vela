@@ -85,6 +85,38 @@ const browserBatchTool = {
   },
 };
 
+const readConsoleTool = {
+  type: "function",
+  function: {
+    name: "read_console_messages",
+    description: "Lê o que a página escreveu no console do navegador (console.log, erros de JavaScript, avisos). Serve para descobrir por que uma ação não teve efeito — o motivo costuma estar escrito ali. A gravação começa quando você chama isto pela primeira vez naquela aba: o que aconteceu antes não foi capturado, então chame, repita a ação, e leia de novo.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: { type: "number", description: "Aba a observar. Omita para a ativa." },
+        query: { type: "string", description: "Filtra por um trecho do texto, ou por nível (error, warning, log). Recomendado: sem filtro vem muita coisa irrelevante." },
+        limit: { type: "number", description: "Quantas mensagens devolver. Padrão 40." },
+      },
+    },
+  },
+};
+
+const readNetworkTool = {
+  type: "function",
+  function: {
+    name: "read_network_requests",
+    description: "Lê as requisições que a página fez (XHR, fetch, documentos, imagens) com método, status e tamanho. É como se descobre o endereço que devolve os dados prontos de uma lista — chegar por ali resolve em um passo o que a interface resolveria em vários, sem rolagem nem paginação. A gravação começa quando você chama isto pela primeira vez naquela aba: chame, dispare a ação que quer observar, e leia de novo.",
+    parameters: {
+      type: "object",
+      properties: {
+        tabId: { type: "number", description: "Aba a observar. Omita para a ativa." },
+        query: { type: "string", description: "Filtra pelo endereço, por exemplo “/api/” ou o nome do recurso." },
+        limit: { type: "number", description: "Quantas requisições devolver. Padrão 40." },
+      },
+    },
+  },
+};
+
 const webSearchTool = {
   type: "function",
   function: {
@@ -236,6 +268,8 @@ export function buildTools(settings: AppSettings): ToolDefinition[] {
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
   const tools: ToolDefinition[] = [browserActionTool(settings), ...(isToolEnabled(settings, "browser_batch") ? [browserBatchTool] : []), webSearchTool, tabManageTool, settingsTool, requestUserTool, scriptWriteTool, scriptListTool, memoryWriteTool, memoryReadTool, memoryDeleteTool];
   if (profile?.capabilities?.webFetch) tools.splice(2, 0, webFetchTool);
+  if (isToolEnabled(settings, "read_console_messages")) tools.push(readConsoleTool);
+  if (isToolEnabled(settings, "read_network_requests")) tools.push(readNetworkTool);
   /*
    * `delegate_task` só faz sentido quando o modelo rodando AGORA é o rápido — reconhecível porque
    * `defaultModel` foi trocado pelo `fastModel` para esta chamada (ver agent-loop.ts). Expor a

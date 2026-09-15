@@ -46,6 +46,8 @@ export function scriptCapability(world: string | undefined): keyof Capabilities 
 const TOOL_CAPABILITY: Record<string, keyof Capabilities> = {
   delegate_task: "delegate",
   browser_batch: "batch",
+  read_console_messages: "readConsole",
+  read_network_requests: "readNetwork",
 };
 
 export const actionCapability = (type: BrowserAction["type"]) => ACTION_CAPABILITY[type];

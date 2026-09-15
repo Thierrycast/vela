@@ -5,7 +5,8 @@ import { approvalKey, describeAction, isRisky, requestApproval } from "./approva
 import { span } from "./trace";
 import { adoptTab } from "./session";
 import { isSessionTab } from "./tab-manager";
-import { cdpAvailable, preciseClick, preciseFill, preciseKey } from "./cdp-actuator";
+import { preciseClick, preciseFill, preciseKey } from "./cdp-actuator";
+import { cdpAvailable } from "./cdp-session";
 import { allocateRefs, resolveRoute } from "./ref-registry";
 import { evaluateInMainWorld } from "./script-world";
 
