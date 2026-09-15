@@ -358,6 +358,17 @@ await run("habilidade desligada recusa a chamada", [
   [delta("Entendi."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" }, capabilities: { ...defaultSettings.capabilities, batch: false } });
 
+// 18c. Endereçar aba por numero: so as abas da sessao, e o ref manda sobre o tabId.
+await run("aba de fora e recusada", [
+  [delta("Lendo a outra aba."), toolCall("c1", "browser_action", { action: "extractPage", tabId: 99 }), DONE],
+  [delta("Entendi, nao e minha."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+await run("aba da sessao e aceita por numero", [
+  [delta("Lendo a aba 7."), toolCall("c1", "browser_action", { action: "extractPage", tabId: 7 }), DONE],
+  [delta("Pronto."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
 // 18. O registro de refs, exercitado direto — é lógica pura e não precisa do loop inteiro.
 // O que importa aqui é a **estabilidade**: o mesmo elemento, relido, tem de receber o mesmo ref.
 // Sem isso, todo clique depois de uma releitura exigiria uma rodada só para reconquistar o alvo.

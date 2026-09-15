@@ -34,6 +34,7 @@ function summarizeSearch(results: Array<{ title: string; url: string; snippet?: 
 }
 
 function toBrowserAction(args: ToolArguments): BrowserAction | null {
+  const kind = ((): BrowserAction | null => {
   switch (args.action) {
     case "navigate": return args.url ? { type: "navigate", url: args.url, newTab: args.newTab } : null;
     case "click": return { type: "click", ref: args.ref, selector: args.selector };
@@ -53,6 +54,9 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
     case "evaluateScript": return args.script ? { type: "evaluateScript", script: args.script, world: args.world === "main" ? "main" : "isolated" } : null;
     default: return null;
   }
+  })();
+  // `tabId` atravessa todas as ações por interseção; anexar aqui evita repeti-lo em cada ramo.
+  return kind ? { ...kind, tabId: args.tabId } : null;
 }
 
 function renderActionResult(result: ActionResult): string {

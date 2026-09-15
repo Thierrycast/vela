@@ -4,6 +4,7 @@ import { loadSettings } from "./storage";
 import { approvalKey, describeAction, isRisky, requestApproval } from "./approvals";
 import { span } from "./trace";
 import { adoptTab } from "./session";
+import { isSessionTab } from "./tab-manager";
 import { cdpAvailable, preciseClick, preciseFill, preciseKey } from "./cdp-actuator";
 import { allocateRefs, resolveRoute } from "./ref-registry";
 import { evaluateInMainWorld } from "./script-world";
@@ -66,6 +67,21 @@ async function sendToTab(tabId: number, message: unknown, timeoutMs: number, fra
 type Routed =
   | { ok: true; tabId: number; frameId: number; ref: string | undefined }
   | { ok: false; failure: ActionResult };
+
+/**
+ * Sem ref, quem decide a aba é `tabId` — e a regra de quem pode ser endereçada é a mesma de
+ * `tab_manage`: só as abas do grupo da Vela. Endereçar por número é o caminho por onde um engano
+ * passaria despercebido, porque não há nada na tela confirmando onde a ação caiu.
+ */
+async function routeTab(action: BrowserAction, activeId: number | undefined): Promise<Routed> {
+  if (action.tabId === undefined || action.tabId === activeId) {
+    return { ok: true, tabId: activeId ?? -1, frameId: 0, ref: undefined };
+  }
+  if (!(await isSessionTab(action.tabId))) {
+    return { ok: false, failure: failure("denied", `A aba ${action.tabId} não é da sessão da Vela — ela é do usuário, e você não age nela por número. Use tab_manage com op "list" para ver quais abas são suas.`) };
+  }
+  return { ok: true, tabId: action.tabId, frameId: 0, ref: undefined };
+}
 
 function routeRef(ref: string | undefined, fallbackTabId: number): Routed {
   if (!ref) return { ok: true, tabId: fallbackTabId, frameId: 0, ref: undefined };
@@ -290,8 +306,14 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
    * lido na aba A e usado depois que o usuário trocou para a aba B era aplicado em B, onde o
    * número por acaso apontava para outro elemento.
    */
-  const routed = routeRef("ref" in action ? action.ref : undefined, active?.id ?? -1);
+  const refInAction = "ref" in action ? action.ref : undefined;
+  const routed = refInAction ? routeRef(refInAction, active?.id ?? -1) : await routeTab(action, active?.id);
   if (!routed.ok) return routed.failure;
+  // Ref e tabId juntos, discordando, é engano de quem escreveu: o ref já sabe onde mora, e adivinhar
+  // qual dos dois vale acertaria metade das vezes.
+  if (refInAction && action.tabId !== undefined && action.tabId !== routed.tabId) {
+    return failure("ref_desconhecido", `Você passou tabId ${action.tabId} junto com o ref ${refInAction}, que foi lido na aba ${routed.tabId}. Um ref pertence à aba onde apareceu — omita o tabId quando usar um ref.`);
+  }
   if (routed.tabId < 0) return failure("no_tab", "Nenhuma aba ativa disponível.");
   const tab = routed.tabId === active?.id ? active : await chrome.tabs.get(routed.tabId).catch(() => null);
   if (!tab?.id) return failure("page_gone", `A aba ${routed.tabId}, onde esse elemento foi lido, não existe mais. Leia a página de novo na aba em que você quer trabalhar.`);
@@ -398,6 +420,12 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
    */
   if (action.type === "screenshot") {
     if (tab.windowId === undefined) return failure("no_tab", "A aba ativa não pertence a nenhuma janela.");
+    /*
+     * `captureVisibleTab` fotografa a aba **visível** da janela, não a que foi endereçada. Numa
+     * aba de segundo plano ela devolveria a imagem de outra página sem avisar — o tipo de erro que
+     * o modelo não teria como perceber, porque a imagem parece legítima.
+     */
+    if (!tab.active) return failure("unsupported", `A aba ${tab.id} não está em foco, e a captura só alcança a aba visível — ela devolveria a imagem de outra página. Use tab_manage (activate) para trazê-la à frente, ou leia com extractPage, que funciona em segundo plano.`);
     try {
       const raw = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 55 });
       if (!raw) return failure("unsupported", "O Chrome não devolveu a captura desta aba.");
@@ -428,7 +456,9 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
     ? { ...raw, content: allocateRefs(raw.content, { tabId: tab.id, frameId, epoch: raw.epoch ?? "" }) }
     : raw;
 
-  if (frameId === 0 && wantsEscalation(action, result) && cdpAvailable() && (await loadSettings()).agent.preciseMode) {
+  // Coordenada de viewport só faz sentido numa aba que está renderizando: em segundo plano o
+  // layout pode estar desatualizado, e o clique confiável cairia no lugar errado.
+  if (frameId === 0 && tab.active && wantsEscalation(action, result) && cdpAvailable() && (await loadSettings()).agent.preciseMode) {
     return escalate(tab.id, localAction, result);
   }
 

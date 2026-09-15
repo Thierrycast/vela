@@ -19,12 +19,13 @@ const browserActionTool = (settings: AppSettings) => ({
   type: "function",
   function: {
     name: "browser_action",
-    description: "Opera a aba ativa. Comece por extractPage: ele devolve os refs dos elementos e, quando existirem, as ferramentas próprias da página. Quando souber o texto do que procura, use find em vez de rolar — ele varre a página inteira, inclusive o que está fora da tela, e devolve refs prontos. Prefira pageTool a simular cliques.",
+    description: "Opera uma aba — a ativa por padrão, ou a que você indicar em tabId. Comece por extractPage: ele devolve os refs dos elementos e, quando existirem, as ferramentas próprias da página. Quando souber o texto do que procura, use find em vez de rolar — ele varre a página inteira, inclusive o que está fora da tela, e devolve refs prontos. Prefira pageTool a simular cliques.",
     parameters: {
       type: "object",
       properties: {
         // Habilidade desligada some do enum: anunciar uma ação que será recusada só gasta rodada.
         action: { type: "string", enum: BROWSER_ACTIONS.filter((type) => isActionEnabled(settings, type)) },
+        tabId: { type: "number", description: "Em qual aba agir. Omita para a aba ativa. Use o número mostrado em <abas_da_sessao> quando quiser trabalhar numa aba sem tirar o usuário da dele. Não passe junto com ref: o ref já sabe de que aba veio." },
         url: { type: "string", description: "Para navigate." },
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
         ref: { type: "string", description: "Identificador de elemento, como e412, copiado de um extractPage ou de um find. Continua válido em releituras da mesma página e diz sozinho em que aba agir; deixa de valer quando aquela aba navega. Nunca deduza um ref a partir de outro." },

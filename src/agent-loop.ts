@@ -83,7 +83,22 @@ async function compactSnapshots() {
   }
 
   const snapshots = messages.filter((item) => item.role === "tool" && item.tool_call_id && extractCallIds.has(item.tool_call_id));
-  for (const message of snapshots.slice(0, -1)) {
+
+  /*
+   * A compactação é por aba, não global.
+   *
+   * Guardar só a última leitura do histórico inteiro funcionava quando havia uma aba só. Com o
+   * lote multi-aba, ler a aba B apagaria a leitura da aba A no mesmo instante — e o modelo, que
+   * está trabalhando nas duas, ficaria cego de um lado sem entender por quê. A aba vem do próprio
+   * conteúdo, que começa com o cabeçalho escrito por `readAllFrames`.
+   */
+  const porAba = new Map<string, typeof snapshots>();
+  for (const message of snapshots) {
+    const aba = /^## aba (\d+)/m.exec(message.content)?.[1] ?? "?";
+    porAba.set(aba, [...(porAba.get(aba) ?? []), message]);
+  }
+
+  for (const message of [...porAba.values()].flatMap((lista) => lista.slice(0, -1))) {
     if (message.content.startsWith("[leitura anterior")) continue;
     await conversation.patch(message.id, { content: "[leitura anterior da página, removida para poupar contexto. Os refs que ela mostrou continuam válidos enquanto aquela aba não navegar — releia só se precisar ver o estado atual da página.]" });
   }

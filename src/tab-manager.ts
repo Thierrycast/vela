@@ -23,6 +23,18 @@ async function sessionTabs() {
   return tabs;
 }
 
+/**
+ * A Vela pode agir numa aba endereçada por número — desde que seja dela.
+ *
+ * Mesma regra de `close`, pelo mesmo motivo: a aba que a pessoa abriu é dela. Endereçar por
+ * número é justamente o caminho por onde um engano passaria despercebido, porque não há nada na
+ * tela confirmando em qual aba a ação caiu.
+ */
+export async function isSessionTab(tabId: number) {
+  const tabs = await sessionTabs();
+  return !!tabs?.some((tab) => tab.id === tabId);
+}
+
 function describe(tab: chrome.tabs.Tab) {
   return `[${tab.id}] ${tab.title ?? "sem título"} — ${tab.url ?? ""}${tab.active ? " (ativa)" : ""}`;
 }

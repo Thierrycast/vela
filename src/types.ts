@@ -120,7 +120,16 @@ export type ChatMessage = {
   tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
 };
 
-export type BrowserAction =
+/**
+ * `tabId` vale para toda ação, por interseção.
+ *
+ * Sem ele, tudo ia para a aba ativa — e trabalhar em duas abas significava alternar o foco,
+ * roubando a tela do usuário a cada passo. Com ele, a Vela trabalha numa aba em segundo plano
+ * enquanto a pessoa continua na dela. Omitir continua valendo o de sempre: a aba ativa.
+ */
+export type BrowserAction = BrowserActionKind & { tabId?: number };
+
+type BrowserActionKind =
   | { type: "navigate"; url: string; newTab?: boolean }
   | { type: "click"; ref?: string; selector?: string }
   | { type: "type"; ref?: string; selector?: string; text: string; submit?: boolean; mode?: "replace" | "append" }
