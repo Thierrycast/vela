@@ -133,8 +133,16 @@ export type BrowserAction =
   | { type: "evaluateScript"; script: string }
   | { type: "wait"; milliseconds: number };
 
+/*
+ * `stale_snapshot` saiu com o fim dos refs por leitura: não existe mais "o retrato mudou", porque
+ * o ref não pertence ao retrato. No lugar entraram três causas que antes se confundiam numa só —
+ * a página trocou (`page_gone`), o ref virou outro elemento (`ref_changed`) e o ref nunca existiu
+ * ou é de um formato que não se usa mais (`ref_desconhecido`). A recuperação de cada uma é
+ * diferente, e é por isso que o código precisa distingui-las.
+ */
 export type ActionErrorCode =
-  | "no_tab" | "restricted_url" | "no_content_script" | "timeout" | "stale_snapshot"
+  | "no_tab" | "restricted_url" | "no_content_script" | "timeout"
+  | "page_gone" | "ref_changed" | "ref_desconhecido"
   | "element_not_found" | "element_not_interactable" | "nav_error" | "aborted" | "denied" | "unsupported";
 
 export type ActionSuccess = {
@@ -143,7 +151,9 @@ export type ActionSuccess = {
   content?: string;
   /** Captura da aba, em data URL, quando a ação foi `screenshot`. */
   image?: string;
-  snapshotId?: number;
+  /** Identifica o documento que respondeu. O background usa para saber se os refs que ele tem
+   *  em mãos pertencem a esta página ou a uma que já foi substituída. */
+  epoch?: string;
   truncated?: boolean;
   nextOffset?: number;
   url?: string;

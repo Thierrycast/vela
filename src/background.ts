@@ -1,5 +1,6 @@
 import { ChatMessage } from "./types";
 import { adoptTab, endSession, ensureSession, forgetTab, getSession, renameSession } from "./session";
+import { evictFrame, evictTab } from "./ref-registry";
 import { listScripts } from "./script-store";
 import { parseMetadata } from "./user-script";
 import { SIDECAR_PORT, SidecarInbound, SidecarOutbound, VoiceState } from "./messages";
@@ -446,7 +447,17 @@ async function runLensAction(payload: { intent: LensIntent; text: string; url: s
 chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
   void getSession().then((session) => { if (session?.tabIds.includes(details.sourceTabId)) void adoptTab(details.tabId).then(publishSession); });
 });
-chrome.tabs.onRemoved.addListener((tabId) => { void forgetTab(tabId).then(publishSession); });
+chrome.tabs.onRemoved.addListener((tabId) => { evictTab(tabId); void forgetTab(tabId).then(publishSession); });
+
+/*
+ * Documento trocado: os refs daquele frame morrem junto com ele.
+ *
+ * `onCommitted` é a granularidade certa. Navegação de SPA passa por `onHistoryStateUpdated`, onde
+ * o documento e o content script continuam vivos — e, com refs por elemento, os refs continuam
+ * válidos. Invalidar ali seria jogar fora o ganho inteiro: era exatamente o que o modelo antigo
+ * fazia a cada clique que mexesse no DOM.
+ */
+chrome.webNavigation.onCommitted.addListener((details) => evictFrame(details.tabId, details.frameId, details.url));
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.groupId === undefined) return;
   void getSession().then((session) => { if (session && changeInfo.groupId === session.groupId) void adoptTab(tabId).then(publishSession); });

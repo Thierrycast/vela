@@ -57,7 +57,17 @@ async function compactImages() {
   }
 }
 
-/** Snapshots antigos são peso morto: o DOM já mudou e o modelo não deve consultá-los. */
+/**
+ * Retratos antigos saem do contexto, mas os refs deles continuam valendo.
+ *
+ * O motivo mudou junto com o registro de refs. Antes o retrato velho era **perigoso**: ele
+ * convidava a usar refs que já tinham morrido. Agora é só **redundante** — ele mente sobre o
+ * estado (o que estava marcado, o que estava na tela), enquanto os identificadores que mostrou
+ * seguem perfeitamente utilizáveis. Como retrato continua sendo o maior consumidor de contexto do
+ * turno, ele sai; mas o texto que fica no lugar precisa dizer que os refs sobrevivem. Dizer o
+ * contrário ensinaria o modelo a reler a página a cada passo — exatamente o hábito que o registro
+ * de refs existe para curar.
+ */
 async function compactSnapshots() {
   const messages = await conversation.all();
   const extractCallIds = new Set<string>();
@@ -74,8 +84,8 @@ async function compactSnapshots() {
 
   const snapshots = messages.filter((item) => item.role === "tool" && item.tool_call_id && extractCallIds.has(item.tool_call_id));
   for (const message of snapshots.slice(0, -1)) {
-    if (message.content.startsWith("[retrato anterior")) continue;
-    await conversation.patch(message.id, { content: "[retrato anterior da página — descartado por estar obsoleto]" });
+    if (message.content.startsWith("[leitura anterior")) continue;
+    await conversation.patch(message.id, { content: "[leitura anterior da página, removida para poupar contexto. Os refs que ela mostrou continuam válidos enquanto aquela aba não navegar — releia só se precisar ver o estado atual da página.]" });
   }
 }
 

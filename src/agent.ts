@@ -5,6 +5,7 @@ import { approvalKey, describeAction, isRisky, requestApproval } from "./approva
 import { span } from "./trace";
 import { adoptTab } from "./session";
 import { cdpAvailable, preciseClick, preciseFill, preciseKey } from "./cdp-actuator";
+import { allocateRefs, resolveRoute } from "./ref-registry";
 
 const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "screenshot"];
 const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find", "screenshot", "evaluateScript"];
@@ -50,17 +51,35 @@ async function sendToTab(tabId: number, message: unknown, timeoutMs: number, fra
   }
 }
 
-const FRAME_REF = /^f(\d+)\.(ref_\d+_\d+)$/;
+/**
+ * Traduz o ref público que o modelo escreveu no endereço interno: aba, frame e número local.
+ *
+ * Um ref é autorroteável — ele sabe de qual aba e de qual frame veio —, e é por isso que o modelo
+ * não precisa (nem deve) dizer onde o elemento está. Quando a tradução falha, o texto do erro é a
+ * parte que importa: ele é a instrução que faz o modelo se recuperar em uma rodada em vez de duas.
+ */
+type Routed =
+  | { ok: true; tabId: number; frameId: number; ref: string | undefined }
+  | { ok: false; failure: ActionResult };
 
-/** Índices são por frame; sem o prefixo, ref_1_3 do topo colidiria com ref_1_3 de um iframe. */
-function splitFrameRef(ref: string | undefined): { frameId: number; ref: string | undefined } {
-  if (!ref) return { frameId: 0, ref: undefined };
-  const match = FRAME_REF.exec(ref);
-  return match ? { frameId: Number(match[1]), ref: match[2] } : { frameId: 0, ref };
+function routeRef(ref: string | undefined, fallbackTabId: number): Routed {
+  if (!ref) return { ok: true, tabId: fallbackTabId, frameId: 0, ref: undefined };
+  const lookup = resolveRoute(ref);
+  if (lookup.status === "ok") return { ok: true, tabId: lookup.route.tabId, frameId: lookup.route.frameId, ref: `#${lookup.route.localId}` };
+  if (lookup.status === "legacy") {
+    return { ok: false, failure: failure("ref_desconhecido", `“${ref}” é o formato antigo de ref e não existe mais. Os refs agora são como e412 e vêm da última leitura da página. Chame extractPage.`) };
+  }
+  if (lookup.status === "navigated") {
+    // A URL de origem pode faltar quando o primeiro commit daquele frame aconteceu antes de o
+    // service worker subir. Dizer "navegou de  para X" seria pior que não dizer de onde.
+    const trajeto = lookup.from ? `de ${safeHost(lookup.from)} para ${safeHost(lookup.to)}` : `para ${safeHost(lookup.to)}`;
+    return { ok: false, failure: failure("page_gone", `A aba ${lookup.tabId} navegou ${trajeto} depois que você leu a página. Todos os refs daquela leitura, incluindo ${ref}, deixaram de existir. Chame extractPage nesta aba antes de agir.`) };
+  }
+  return { ok: false, failure: failure("ref_desconhecido", `Não existe nenhum elemento ${ref}. Refs só vêm de um extractPage ou de um find — não os deduza a partir de outros refs nem os invente. Leia a página e use o ref exatamente como ele apareceu.`) };
 }
 
 /** Checkout, login e captcha vivem em iframes de outra origem: sem ler todos, o agente é cego. */
-async function readAllFrames(tabId: number, action: Extract<BrowserAction, { type: "extractPage" }>): Promise<ActionResult> {
+async function readAllFrames(tabId: number, tabUrl: string | undefined, action: Extract<BrowserAction, { type: "extractPage" }>): Promise<ActionResult> {
   let frames: Array<{ frameId: number; url: string }> = [];
   try { frames = (await chrome.webNavigation.getAllFrames({ tabId })) ?? []; } catch { /* sem permissão nesta aba */ }
   const usable = frames.filter((frame) => !isRestrictedUrl(frame.url)).slice(0, 10);
@@ -74,13 +93,16 @@ async function readAllFrames(tabId: number, action: Extract<BrowserAction, { typ
     const result = await sendToTab(tabId, { type: "agent:action", action, actionId: crypto.randomUUID() }, TIMEOUTS.extractPage, frame.frameId);
     if (!result?.ok || !result.content) continue;
     anySuccess = true;
-    const labelled = result.content.replace(/\[(ref_\d+_\d+)\]/g, (_full, ref: string) => `[f${frame.frameId}.${ref}]`);
+    const labelled = allocateRefs(result.content, { tabId, frameId: frame.frameId, epoch: result.epoch ?? "" });
     parts.push(frame.frameId === 0 ? labelled : `\n--- iframe f${frame.frameId} (${safeHost(frame.url)}) ---\n${labelled}`);
     total += 1;
   }
 
   if (!anySuccess) return failure("no_content_script", "Não consegui ler nenhum frame desta página.");
-  return { ok: true, summary: `Página lida em ${total} frame(s).`, content: parts.join("\n") };
+  // A aba encabeça o bloco em vez de aparecer dentro de cada ref: o modelo precisa saber onde
+  // está agindo uma vez, não cento e cinquenta vezes.
+  const header = `## aba ${tabId} — ${safeHost(tabUrl ?? "")}`;
+  return { ok: true, summary: `Página lida em ${total} frame(s).`, content: [header, ...parts].join("\n") };
 }
 
 function safeHost(url: string) {
@@ -91,16 +113,22 @@ function originOf(url: string | undefined) {
   try { return url ? new URL(url).origin : "página desconhecida"; } catch { return "página desconhecida"; }
 }
 
-async function targetLabel(tabId: number, action: BrowserAction) {
-  if (!("ref" in action) && !("selector" in action)) return "";
-  const { frameId, ref } = splitFrameRef("ref" in action ? action.ref : undefined);
+/**
+ * O rótulo que vai no cartão de aprovação.
+ *
+ * `status` importa tanto quanto o texto: se o ref virou outro elemento, o cartão **não pode** ser
+ * exibido com o rótulo antigo. Aprovar "Cancelar pedido #1043" e a Vela cancelar o #2211 é falha
+ * de segurança, não de usabilidade — quem autorizou autorizou outra coisa.
+ */
+async function targetLabel(tabId: number, frameId: number, action: BrowserAction, ref: string | undefined) {
+  if (!("ref" in action) && !("selector" in action)) return { label: "", changed: false };
   try {
     const response = await Promise.race([
-      chrome.tabs.sendMessage(tabId, { type: "agent:describe", action: { ...action, ref } }, { frameId }) as Promise<{ label?: string }>,
+      chrome.tabs.sendMessage(tabId, { type: "agent:describe", action: { ...action, ref } }, { frameId }) as Promise<{ label?: string; status?: string }>,
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 800)),
     ]);
-    return response?.label ?? "";
-  } catch { return ""; }
+    return { label: response?.label ?? "", changed: response?.status === "changed" };
+  } catch { return { label: "", changed: false }; }
 }
 
 /**
@@ -249,8 +277,21 @@ export async function executeAction(action: BrowserAction, autonomy: Autonomy): 
 
 async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<ActionResult> {
   const denied = autonomy === "observe" && !isReadOnly(action);
-  const tab = await activeTab();
-  if (!tab?.id) return failure("no_tab", "Nenhuma aba ativa disponível.");
+  const active = await activeTab();
+
+  /*
+   * O ref decide em que aba a ação acontece — ele guarda de onde foi lido. Sem ref, a aba é a
+   * ativa, como sempre foi. Isso elimina uma classe inteira de erro silencioso: antes, um ref
+   * lido na aba A e usado depois que o usuário trocou para a aba B era aplicado em B, onde o
+   * número por acaso apontava para outro elemento.
+   */
+  const routed = routeRef("ref" in action ? action.ref : undefined, active?.id ?? -1);
+  if (!routed.ok) return routed.failure;
+  if (routed.tabId < 0) return failure("no_tab", "Nenhuma aba ativa disponível.");
+  const tab = routed.tabId === active?.id ? active : await chrome.tabs.get(routed.tabId).catch(() => null);
+  if (!tab?.id) return failure("page_gone", `A aba ${routed.tabId}, onde esse elemento foi lido, não existe mais. Leia a página de novo na aba em que você quer trabalhar.`);
+  const frameId = routed.frameId;
+  const localAction = routed.ref !== undefined && "ref" in action ? { ...action, ref: routed.ref } : action;
 
   // Recusas baratas vêm antes da aprovação: não faz sentido consultar o usuário
   // sobre uma ação que já vai falhar por causa da página.
@@ -260,7 +301,10 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
   }
 
   if (!isReadOnly(action) && !denied) {
-    const label = await targetLabel(tab.id, action);
+    const { label, changed } = await targetLabel(tab.id, frameId, localAction, routed.ref);
+    // Um cartão de aprovação com rótulo obsoleto faria o usuário autorizar uma coisa e a Vela
+    // executar outra. Diante de dúvida sobre o que o ref virou, não se pergunta: recusa-se.
+    if (changed) return failure("ref_changed", `O elemento ${"ref" in action ? action.ref : ""} não é mais o que era quando você o leu. Não fiz nada. Chame find com o texto do que você procura para pegar o ref atual.`);
     const origin = originOf(tab.url);
     if (autonomy === "assist" || isRisky(action, label)) {
       const decision = await requestApproval(approvalKey(action, origin), describeAction(action, label), origin);
@@ -291,7 +335,7 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
     return { ok: true, summary: `Abri ${outcome.url ?? action.url}${outcome.partial ? " (ainda carregando)" : ""}. Chame extractPage para ler a página.`, navigatedTo: outcome.url ?? action.url };
   }
 
-  if (action.type === "extractPage") return readAllFrames(tab.id, action);
+  if (action.type === "extractPage") return readAllFrames(tab.id, tab.url, action);
 
   /*
    * A captura é o único caminho para o que existe só em pixel — legenda dentro de miniatura,
@@ -315,22 +359,26 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
 
   if (!isReadOnly(action) && !NO_CURSOR.includes(action.type)) await beginTrace(tab.id);
 
-  const { frameId, ref } = splitFrameRef("ref" in action ? action.ref : undefined);
-  const routed = "ref" in action && ref !== action.ref ? { ...action, ref } : action;
-
   const urlBefore = tab.url;
-  const result = await sendToTab(tab.id, {
+  const raw = await sendToTab(tab.id, {
     type: "agent:action",
-    action: routed,
+    action: localAction,
     actionId: crypto.randomUUID(),
     ghost: denied,
     trace: await traceConfig(),
   }, TIMEOUTS[action.type], frameId);
 
-  if (!result?.ok) return result ?? failure("timeout", "Sem resposta da página.");
+  if (!raw?.ok) return raw ?? failure("timeout", "Sem resposta da página.");
+
+  // Refs também voltam de `find`, não só do retrato. Antes, só a leitura de página os reescrevia,
+  // e os do find saíam sem identificação de frame — funcionavam por acaso, enquanto o alvo
+  // estivesse no frame de cima.
+  const result: ActionResult = raw.content
+    ? { ...raw, content: allocateRefs(raw.content, { tabId: tab.id, frameId, epoch: raw.epoch ?? "" }) }
+    : raw;
 
   if (frameId === 0 && wantsEscalation(action, result) && cdpAvailable() && (await loadSettings()).agent.preciseMode) {
-    return escalate(tab.id, routed, result);
+    return escalate(tab.id, localAction, result);
   }
 
   // Clique pode disparar navegação implícita; sem detectar isso o próximo snapshot vem da página velha.

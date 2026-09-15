@@ -27,7 +27,7 @@ const browserActionTool = (settings: AppSettings) => ({
         action: { type: "string", enum: BROWSER_ACTIONS.filter((type) => isActionEnabled(settings, type)) },
         url: { type: "string", description: "Para navigate." },
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
-        ref: { type: "string", description: "Identificador vindo do último extractPage, ex.: ref_3_12." },
+        ref: { type: "string", description: "Identificador de elemento, como e412, copiado de um extractPage ou de um find. Continua válido em releituras da mesma página e diz sozinho em que aba agir; deixa de valer quando aquela aba navega. Nunca deduza um ref a partir de outro." },
         selector: { type: "string", description: "Seletor CSS. Use apenas se o elemento não estiver no extractPage." },
         text: { type: "string", description: "Para type." },
         submit: { type: "boolean", description: "Para type: pressiona Enter ao final." },

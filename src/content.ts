@@ -1,6 +1,6 @@
 import { BrowserAction } from "./types";
-import { performAction } from "./page-actions";
-import { resolveRef } from "./page-snapshot";
+import { Target, performAction, resolveTarget } from "./page-actions";
+import { epoch, resolveRef } from "./element-registry";
 import { TraceConfig, traceLayer } from "./trace-layer";
 import { PulsePanel } from "./pulse";
 import { MotionState } from "./motion-tokens";
@@ -22,7 +22,9 @@ function start() {
   traceLayer.setPauseHandler(() => send({ type: "agent:pause" }));
 
   chrome.runtime.onMessage.addListener((message: { type: string; action?: BrowserAction; actionId?: string; trace?: TraceConfig; ghost?: boolean; state?: string; motion?: string; sessionTitle?: string; metrics?: VoiceVisualMetrics; text?: string; id?: string; summary?: string; detail?: string; reason?: string; expected?: string; visual?: string; shader?: string; milliseconds?: number }, _sender, sendResponse) => {
-    if (message.type === "agent:ping") { sendResponse({ ok: true }); return false; }
+    // O epoch identifica este documento. O background compara com o que gravou junto de cada ref:
+    // se mudou, o content script recarregou e os refs daquela leitura morreram com ele.
+    if (message.type === "agent:ping") { sendResponse({ ok: true, epoch: epoch() }); return false; }
 
     if (message.type === "trace:session") {
       if (message.state === "start") traceLayer.beginSession(message.trace ?? { cursor: true, border: true, highlight: true }, message.sessionTitle);
@@ -35,11 +37,16 @@ function start() {
       return true;
     }
 
+    /*
+     * O rótulo do cartão de aprovação. `status` viaja junto porque um ref que virou outro elemento
+     * não pode ser mostrado com o nome antigo: a pessoa aprovaria uma coisa e a Vela faria outra.
+     */
     if (message.type === "agent:describe" && message.action) {
       const action = message.action as { ref?: string; selector?: string };
-      const element = action.ref ? resolveRef(action.ref).element : action.selector ? document.querySelector(action.selector) : null;
+      const resolution = action.ref ? resolveRef(action.ref) : null;
+      const element = resolution ? (resolution.status === "ok" ? resolution.element : null) : action.selector ? document.querySelector(action.selector) : null;
       const label = element ? (element.getAttribute("aria-label") ?? element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
-      sendResponse({ label });
+      sendResponse({ label, status: resolution?.status ?? "ok" });
       return false;
     }
 
@@ -50,7 +57,10 @@ function start() {
      */
     if (message.type === "agent:locate" && message.action) {
       const action = message.action as { ref?: string; selector?: string };
-      const element = action.ref ? resolveRef(action.ref).element : action.selector ? document.querySelector(action.selector) : null;
+      // A conferência de assinatura é obrigatória aqui: esta resposta vira uma coordenada de tela
+      // e um clique confiável do CDP. Errar o elemento aqui é clicar de verdade no lugar errado.
+      const resolved = resolveTarget(action);
+      const element = resolved.element;
       if (!(element instanceof Element)) { sendResponse(null); return false; }
       element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" as ScrollBehavior });
       const rect = element.getBoundingClientRect();
@@ -63,7 +73,7 @@ function start() {
      * pode aceitar o texto sem mexer em mais nada, e aí `agent:watch` diria que nada aconteceu. */
     if (message.type === "agent:value" && message.action) {
       const action = message.action as { ref?: string; selector?: string };
-      const element = action.ref ? resolveRef(action.ref).element : action.selector ? document.querySelector(action.selector) : null;
+      const element = resolveTarget(action).element;
       const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement
         ? element.value
         : element instanceof HTMLElement && element.isContentEditable ? (element.textContent ?? "")
@@ -106,8 +116,21 @@ function start() {
   if (isTopFrame) installLens();
 }
 
+/** `keyPress` sem ref é legítimo — vai para o elemento em foco. Só se resolve o que foi endereçado. */
+const addressed = (action: BrowserAction) => ("ref" in action && !!action.ref) || ("selector" in action && !!action.selector);
+
 async function runTracedAction(action: BrowserAction, actionId: string, trace: TraceConfig, ghost: boolean) {
-  const target = "ref" in action && action.ref ? resolveRef(action.ref).element : "selector" in action && action.selector ? document.querySelector(action.selector) : null;
+  /*
+   * O alvo é resolvido **uma vez** e reaproveitado pela ação.
+   *
+   * Antes eram duas resoluções separadas — uma aqui, para o cursor mirar, outra dentro de
+   * `performAction` — com um `scrollIntoView` e um quadro de animação entre elas. Numa lista
+   * virtualizada isso basta para a linha ser reciclada no intervalo, e aí o cursor mira um item
+   * e a ação acerta outro.
+   */
+  const resolved: Target | undefined = addressed(action) ? resolveTarget(action as { ref?: string; selector?: string }) : undefined;
+  if (resolved?.error) return resolved.error;
+  const target = resolved?.element ?? null;
 
   // Rola antes de mirar: senão o cursor persegue a posição que o elemento tinha.
   if (target) { target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior }); await new Promise((resolve) => requestAnimationFrame(resolve)); }
@@ -118,7 +141,10 @@ async function runTracedAction(action: BrowserAction, actionId: string, trace: T
 
   try {
     if (ghost) { await new Promise((resolve) => setTimeout(resolve, 350)); return { ok: false, code: "denied", summary: "Modo Observar: a ação foi mostrada mas não executada." }; }
-    return await performAction(action);
+    // O epoch acompanha toda resposta: é por ele que o background sabe se os refs que acabou de
+    // receber vieram do mesmo documento em que ele os registrou.
+    const result = await performAction(action, resolved);
+    return { ...result, epoch: epoch() };
   } finally {
     setTimeout(() => traceLayer.end(actionId), action.type === "click" ? 400 : 200);
   }

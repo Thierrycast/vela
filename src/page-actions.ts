@@ -1,5 +1,7 @@
 import { ActionResult, BrowserAction } from "./types";
-import { accessibleName, captureSnapshot, findElements, invalidateSnapshot, resolveRef, roleOf } from "./page-snapshot";
+import { accessibleName, roleOf } from "./dom-semantics";
+import { captureSnapshot, findElements } from "./page-snapshot";
+import { resolveRef } from "./element-registry";
 import { callPageTool, describePageTools, listPageTools } from "./page-tools";
 
 function failure(code: Extract<ActionResult, { ok: false }>["code"], summary: string): ActionResult { return { ok: false, code, summary }; }
@@ -37,12 +39,31 @@ function serializeEvalResult(result: unknown): string {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function locate(action: { ref?: string; selector?: string }): { element: Element | null; error?: ActionResult } {
+export type Target = { element: Element | null; error?: ActionResult; note?: string };
+
+/**
+ * Do ref ao elemento — e à recusa, quando o elemento não é mais o que foi mostrado.
+ *
+ * Cada desfecho tem código próprio porque a recuperação de cada um é diferente: sumiu da página
+ * pede releitura, virou outra coisa pede `find` pelo texto lembrado. Um erro genérico custaria
+ * uma rodada só para o modelo descobrir qual dos dois aconteceu.
+ */
+export function resolveTarget(action: { ref?: string; selector?: string }): Target {
   if (action.ref) {
-    const { element, stale } = resolveRef(action.ref);
-    if (stale) return { element: null, error: failure("stale_snapshot", "O snapshot mudou. Chame extractPage de novo antes de agir.") };
-    if (!element) return { element: null, error: failure("element_not_found", `Elemento ${action.ref} não existe mais na página.`) };
-    return { element };
+    const resolution = resolveRef(action.ref);
+    if (resolution.status === "unknown") {
+      return { element: null, error: failure("ref_desconhecido", "Esse ref não existe nesta página. Refs vêm de um extractPage ou de um find — leia a página e use o ref como ele apareceu.") };
+    }
+    if (resolution.status === "gone") {
+      return { element: null, error: failure("element_not_found", `O elemento “${resolution.recorded}” não está mais nesta página, mas a página não mudou de endereço — provavelmente um modal fechou ou a lista recarregou. Chame extractPage para ver o estado atual.`) };
+    }
+    if (resolution.status === "changed") {
+      return { element: null, error: failure("ref_changed", `Esse elemento ainda existe, mas agora é outra coisa: quando você o leu era “${resolution.recorded}” e agora é “${resolution.current}”. Isso acontece em listas que reaproveitam as mesmas linhas conforme você rola. Não fiz nada. Chame find com query “${resolution.recorded}” para pegar o ref atual desse item — é mais direto que reler a página inteira.`) };
+    }
+    const note = resolution.rebound
+      ? " (a lista reaproveitou os elementos ao rolar; reencontrei o item pelo texto)"
+      : resolution.verdict === "drifted" ? ` (o rótulo era “${resolution.recorded}” quando você leu)` : undefined;
+    return { element: resolution.element, note };
   }
   if (action.selector) {
     const element = document.querySelector(action.selector);
@@ -158,13 +179,21 @@ function pressKey(element: Element | null, key: string) {
   return consumed ? "a página tratou a tecla" : "tecla despachada";
 }
 
-export async function performAction(action: BrowserAction): Promise<ActionResult> {
+/**
+ * `resolved` chega de fora quando quem chamou já traduziu o ref em elemento.
+ *
+ * O content script precisa do alvo antes de agir — é para ele que o cursor viaja — e resolver de
+ * novo aqui abriria uma janela entre as duas resoluções: o `scrollIntoView` e o quadro de
+ * animação que existem entre elas bastam para uma lista virtualizada reciclar a linha, e a ação
+ * cairia num elemento diferente daquele que o usuário viu ser mirado.
+ */
+export async function performAction(action: BrowserAction, resolved?: Target): Promise<ActionResult> {
   if (action.type === "extractPage") {
     const snapshot = captureSnapshot({ mode: action.mode, offset: action.offset, bypassWireguard: action.bypassWireguard });
     const pageTools = await listPageTools();
     const content = snapshot.content + describePageTools(pageTools);
     const extra = pageTools.length ? ` A página oferece ${pageTools.length} ferramenta(s) própria(s).` : "";
-    return { ok: true, summary: `Página lida: ${snapshot.elementCount} elementos interativos.${extra}`, content, snapshotId: snapshot.snapshotId, truncated: snapshot.truncated, nextOffset: snapshot.nextOffset, url: snapshot.url, title: snapshot.title };
+    return { ok: true, summary: `Página lida: ${snapshot.elementCount} elementos interativos.${extra}`, content, truncated: snapshot.truncated, nextOffset: snapshot.nextOffset, url: snapshot.url, title: snapshot.title };
   }
 
   if (action.type === "find") {
@@ -175,7 +204,6 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
       ok: true,
       summary: `Achei ${result.total} correspondência(s)${result.shown < result.total ? `, mostrando as ${result.shown} melhores` : ""}.`,
       content: result.content,
-      snapshotId: result.snapshotId,
     };
   }
 
@@ -211,12 +239,10 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
   }
 
   if (action.type === "keyPress") {
-    const target = action.ref ? locate(action) : { element: null as Element | null, error: undefined };
+    const target = action.ref ? (resolved ?? resolveTarget(action)) : { element: null as Element | null, error: undefined };
     if (target.error) return target.error;
-    const urlBefore = location.href;
     const detail = pressKey(target.element, action.key);
     await wait(150);
-    if (location.href !== urlBefore) invalidateSnapshot();
     return { ok: true, summary: `Tecla ${action.key}: ${detail}.` };
   }
 
@@ -224,7 +250,7 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
   // A captura precisa da API de abas, que só existe no background: a página não fotografa a si.
   if (action.type === "screenshot") return failure("unsupported", "A captura é tratada fora da página.");
 
-  const { element, error } = locate(action);
+  const { element, error, note } = resolved ?? resolveTarget(action);
   if (error) return error;
   if (!element) return failure("element_not_found", "Elemento não encontrado.");
   if (element.hasAttribute("disabled")) return failure("element_not_interactable", `${describeTarget(element)} está desabilitado.`);
@@ -243,14 +269,13 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
     const toggled = after.checked !== before.checked;
     const stateChanged = after.expanded !== before.expanded || after.selected !== before.selected;
     const refocused = after.focus !== before.focus;
-    if (navigated || mutated || toggled || stateChanged) invalidateSnapshot();
     const effect = navigated ? `a página navegou para ${after.url}`
       : toggled ? `agora está ${after.checked ? "marcado" : "desmarcado"}`
       : stateChanged ? "o estado do elemento mudou"
       : mutated ? "a página reagiu"
       : refocused ? "o foco mudou"
       : "sem efeito perceptível";
-    return { ok: true, summary: `Cliquei em ${describeTarget(element)} — ${effect}.` };
+    return { ok: true, summary: `Cliquei em ${describeTarget(element)}${note ?? ""} — ${effect}.` };
   }
 
   if (action.type === "type") {
@@ -267,8 +292,8 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
       return { ok: true, summary: `Tentei digitar em ${describeTarget(element)} e o campo continua com “${outcome.value.slice(0, 60)}” — sem efeito perceptível.` };
     }
     let detail = "";
-    if (action.submit) { await wait(80); detail = ` ${pressKey(element, "Enter")}`; await wait(300); invalidateSnapshot(); }
-    return { ok: true, summary: `Digitei em ${describeTarget(element)} (valor agora: “${outcome.value.slice(0, 60)}”).${detail}` };
+    if (action.submit) { await wait(80); detail = ` ${pressKey(element, "Enter")}`; await wait(300); }
+    return { ok: true, summary: `Digitei em ${describeTarget(element)}${note ?? ""} (valor agora: “${outcome.value.slice(0, 60)}”).${detail}` };
   }
 
   return failure("unsupported", "Ação não executável na página.");
