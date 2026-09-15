@@ -15,6 +15,7 @@ export type ProviderProfile = {
   protocol: "omnirouter" | "openai-compatible" | "custom";
   apiKey: string;
   defaultModel: string;
+  fastModel: string;
   enabled: boolean;
   capabilities: ProviderCapabilities;
 };
@@ -36,6 +37,8 @@ export type AppSettings = {
     maxRounds: number;
     /** Repetir a ação por evento confiável (CDP) quando o caminho DOM não surtiu efeito. */
     preciseMode: boolean;
+    /** Desabilita o bloqueio e pedido de intervenção do usuário para senhas e formulários sensíveis. */
+    bypassWireguard: boolean;
   };
   context: { currentPage: boolean; selection: boolean; sessionTabs: boolean; outsideTabs: boolean };
   bridge: { enabled: boolean; port: number; token: string; scriptPath: string };
@@ -49,6 +52,9 @@ export type AppSettings = {
     streamingUrl: string;
     /** Toca enquanto o servidor gera, em vez de esperar o arquivo inteiro. */
     streamSpeech: boolean;
+    /** Multiplicador de velocidade da fala (1 = ritmo do servidor). Ajustado no cliente porque o
+     *  servidor de voz não expõe controle de taxa — o piper fala num ritmo fixo por voz. */
+    speechRate: number;
     /** A janelinha flutuante na página. Desligada por padrão: o palco fica no painel. */
     showPulse: boolean;
     /** Qual visual representa a Vela quando ela ouve e fala. Ver voice-visuals.ts. */
@@ -76,10 +82,11 @@ export type BrowserAction =
   | { type: "type"; ref?: string; selector?: string; text: string; submit?: boolean; mode?: "replace" | "append" }
   | { type: "keyPress"; key: string; ref?: string }
   | { type: "scroll"; deltaX?: number; deltaY?: number }
-  | { type: "extractPage"; mode?: "outline" | "text"; offset?: number }
+  | { type: "extractPage"; mode?: "outline" | "text"; offset?: number; bypassWireguard?: boolean }
   | { type: "find"; query?: string; selector?: string; limit?: number }
   | { type: "screenshot" }
   | { type: "pageTool"; name: string; arguments?: unknown }
+  | { type: "evaluateScript"; script: string }
   | { type: "wait"; milliseconds: number };
 
 export type ActionErrorCode =
@@ -137,10 +144,20 @@ export const defaultSettings: AppSettings = {
     protocol: "omnirouter",
     apiKey: "",
     defaultModel: "",
+    fastModel: "",
     enabled: true,
     capabilities: { streaming: true, tools: true, vision: true, audio: false, webFetch: false },
   }],
-  agent: { autonomy: "assist", showCursor: true, showControlBorder: true, showTargetHighlights: true, cursorSpeed: "natural", maxRounds: 12, preciseMode: false },
+  agent: {
+    autonomy: "assist",
+    showCursor: true,
+    showControlBorder: true,
+    showTargetHighlights: true,
+    cursorSpeed: "natural",
+    maxRounds: 12,
+    preciseMode: false,
+    bypassWireguard: false,
+  },
   context: { currentPage: true, selection: true, sessionTabs: true, outsideTabs: false },
   bridge: { enabled: false, port: 8792, token: "", scriptPath: "" },
   voice: {
@@ -150,6 +167,7 @@ export const defaultSettings: AppSettings = {
     speechModel: "tts-1",
     speechVoice: "piper:pt_BR-cadu-medium",
     streamSpeech: true,
+    speechRate: 1.15,
     showPulse: false,
     streamingUrl: "ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream",
     visual: "liquid-blob",
