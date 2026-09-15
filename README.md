@@ -104,8 +104,19 @@ anexar o depurador faz o Chrome exibir uma faixa de aviso; ela some assim que a 
 linha. Apagar não tem volta, então a linha pergunta antes: *Apagar de vez?*
 
 **Mudar as próprias preferências.** "Troca para a voz do Cadu", "usa o mesh field", "desliga o
-cursor", "aumenta o limite de etapas" — `vela_settings` faz na hora, sem mandar você abrir a tela
-de configurações. Endereço de servidor, chaves e a autonomia ficam fora do alcance dela.
+cursor" — `vela_settings` faz na hora, sem mandar você abrir a tela de configurações. Endereço de
+servidor, chaves e a autonomia ficam fora do alcance dela.
+
+**Lembrar de um fato entre conversas.** `memory_write`/`memory_read`/`memory_delete` guardam
+preferências ou informações que você pediu para ela lembrar — entram sozinhas na conversa seguinte,
+mesmo depois de fechar e abrir de novo. Modo Observar bloqueia escrita e exclusão como bloqueia
+qualquer outra ação que muda estado, e há um teto (60 chaves, 2000 caracteres por valor) para a
+memória não crescer sem limite.
+
+**Rodar um script na página, como último recurso.** Quando clicar/digitar/teclado não alcançam —
+Shadow DOM fechado, evento que só um script dispara — `evaluateScript` injeta JavaScript e lê o
+retorno, inclusive de elementos do DOM. Não enxerga variável ou estado que o próprio JavaScript da
+página guardou em memória, só o DOM em si.
 
 ## Scripts do usuário
 
@@ -206,8 +217,26 @@ do tempo do AudioContext, em vez de esperar o arquivo inteiro.
 **Texto ao vivo** mostra as palavras aparecendo enquanto você fala, no modo de voz ao vivo, em vez
 de deixar a tela em branco até a frase acabar. É rascunho: vem do Vosk pelo WebSocket em
 Configurações → Voz, muda enquanto você fala e **nunca vira comando** — quem decide o que a Vela
-vai obedecer continua sendo a transcrição final. Em branco, o campo desliga o recurso e o resto da
-voz segue igual.
+vai obedecer continua sendo a transcrição final. Por isso aparece esmaecido/em itálico enquanto é
+só rascunho, e vira texto normal quando o final chega — sem essa distinção visual, um rascunho
+errado (esperado, é o motor rápido) passava a impressão de que a transcrição inteira era ruim. Em
+branco, o campo desliga o recurso e o resto da voz segue igual.
+
+**Velocidade da fala** é um multiplicador aplicado no cliente (Configurações → Voz), porque o
+servidor fala num ritmo fixo por voz e não tem parâmetro de taxa.
+
+**Um modelo rápido para a primeira resposta.** Configurações → Providers → "Modelo rápido (Voz)"
+faz o Live Voice responder com um modelo mais ágil na primeira rodada, e só troca para o modelo
+padrão se a tarefa realmente precisar de ferramentas — que precisa suportar tool calling. Quando o
+modelo rápido reconhece uma tarefa de várias etapas, ele pode delegá-la para rodar em segundo
+plano com o modelo robusto (`delegate_task`, só disponível nessa situação): você continua a
+conversa sem esperar, e o resultado chega falado quando termina. Só uma tarefa em segundo plano por
+vez.
+
+**Gravar uma sessão para depurar.** O botão vermelho no palco de voz grava o áudio do microfone por
+enunciado (com a transcrição que cada um virou) e a fala da Vela, e baixa um `.zip` com um
+manifesto cronológico ao parar — para revisar depois um comportamento estranho sem depender de
+lembrar de memória o que aconteceu.
 
 **Ler uma mensagem em voz alta** é o botão de alto-falante em cada resposta. O orb fica pequeno no
 alto — quem pede para ouvir quer continuar vendo o texto — e a palavra sendo falada **acende no
@@ -324,6 +353,8 @@ lógica aparecem antes de você carregar a extensão.
   a ação é recusada e o modelo é informado disso.
 - A captura de tela mostra **só a parte visível** da janela: o que está abaixo da dobra exige
   rolar e capturar de novo. E ela é uma foto — o que dá para clicar continua vindo do retrato.
-- **Não existe fila de pedidos.** Um turno por vez: falar por cima interrompe o turno atual e o
-  substitui. Se a Vela disser que "colocou na fila", é invenção dela — não há nada guardado para
-  depois.
+- **Não existe fila de pedidos comuns.** Um turno por vez: falar por cima interrompe o turno atual
+  e o substitui. A exceção é `delegate_task`: durante o Live Voice, uma tarefa de várias etapas
+  pode ser mandada para rodar em segundo plano enquanto a conversa continua — mas é uma tarefa por
+  vez, não uma fila de várias. Fora dessa situação específica, se a Vela disser que "colocou na
+  fila", é invenção dela.

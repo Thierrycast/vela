@@ -37,24 +37,158 @@ como `ERRO [repeticao]` dizendo o que fazer no lugar (procurar com `find`, ou ex
 o que trava). A recusa ocupa a mesma posição da resposta da ferramenta, então o modelo lê no fluxo
 normal em vez de precisar mudar de ideia por conta própria.
 
-### O aviso de limite nunca entra no histórico do modelo
+### O teto de rodadas parou de interromper a tarefa
 
-O teto de rodadas existe para o loop não rodar para sempre. Mas a mensagem *"Atingi o limite de
-8 etapas"* era gravada como mensagem **do assistente** — ou seja, entrava no histórico enviado ao
-modelo na rodada seguinte. O modelo lia a própria desistência como exemplo e passava a
-repeti-la, às vezes antes mesmo de chegar ao teto. Um limite que se ensina.
+A versão anterior tinha um teto configurável (2–30, padrão 12) que **parava a tarefa no meio** para
+dizer "Parei em 12 etapas. Diga continue para eu seguir de onde parei." — e quem chamava pela voz
+não tinha como dizer "continue" para nada. Era um limite pensado para texto, aplicado também à voz.
 
-Agora ele tem três partes separadas:
+Virou uma trava de segurança fixa em 100 rodadas, sem discurso: existe para um loop realmente
+travado não rodar para sempre, não para interromper uma tarefa legítima que só está demorando. O
+controle "Etapas por tarefa" em Configurações → Avançado e o campo equivalente no `vela_settings`
+foram removidos — o valor que escreviam não influenciava mais nada.
 
-- na **penúltima** rodada, um `role: "system"` avisa que aquela é a última chance de agir e pede
-  a resposta final — o modelo fecha a tarefa em vez de ser cortado no meio;
-- ao estourar, o aviso sai como **evento de UI**, visível para a pessoa e invisível para o
-  modelo, dizendo que basta pedir "continue";
-- **repetição é detectada**: a mesma ferramenta com os mesmos argumentos três vezes injeta um
-  aviso de sistema, porque estourar o teto girando em falso é o modo de falha comum, não fazer
-  oito coisas diferentes.
+Como 100 rodadas sem aviso nenhum também é risco (custo de provider correndo solto se o modelo
+girar em falso sem repetir a chamada exata, o único caso que o bloqueio de repetição pega), a
+rodada 80 injeta um `role: "system"` pedindo para reavaliar se não estiver progredindo — aviso, não
+mandato. **Repetição continua detectada** do mesmo jeito: a mesma ferramenta com os mesmos
+argumentos três vezes injeta uma recusa em vez de rodar de novo.
 
-O teto padrão subiu para 12: com o loop de repetição resolvido, oito cortava tarefa legítima.
+### O texto duplicava no histórico a cada token
+
+`assistant.content += event.text` e `conversation.appendText(assistant.id, event.text)` pareciam
+independentes, mas `assistant` é a mesma referência de objeto que `conversation.append` já tinha
+empurrado para dentro do array de mensagens — os dois `+=` somavam o mesmo texto no mesmo objeto.
+Cada token do streaming ficava gravado duas vezes no histórico salvo e reenviado ao modelo nas
+rodadas seguintes: contexto poluído com a própria resposta duplicada, provável contribuinte para
+respostas estranhas/repetitivas em turnos de várias rodadas. `conversation.appendText` já bastava;
+a soma manual em `assistant.content` foi removida.
+
+### O modelo rápido da voz nunca escalava para o robusto
+
+O Live Voice usa um modelo rápido na primeira rodada (resposta ágil) e deveria trocar para o
+robusto se a rodada anterior chamou ferramenta — mas a condição de troca comparava
+`profile.defaultModel !== profile.fastModel`, e os dois já tinham sido igualados na entrada da
+função e nunca mudavam depois. A comparação era sempre falsa: **a conversa inteira rodava no
+modelo rápido**, inclusive tarefas de várias etapas que ele não é feito para tocar sozinho —
+explicação provável para "diz que não consegue, depois faz, depois repete estranho" (um modelo
+menor tateando uma tarefa agentic sozinho).
+
+Duas correções na mesma função: a comparação passou a usar um estado (`onFastModel`) atualizado de
+verdade a cada escalada; e quando o modelo rápido desiste **em texto puro, sem chamar nenhuma
+ferramenta** — caso em que não existia "próxima rodada" para escalar — essa recusa é descartada da
+conversa (nunca chega a ser mostrada) e a mesma pergunta é tentada de novo, uma vez, já com o
+robusto.
+
+### O segundo fio de execução: `delegate_task`
+
+A ideia original era mais ambiciosa — duas instâncias rodando em paralelo de verdade, uma
+conduzindo a conversa e outra assumindo tarefas pesadas. O que existe é uma versão mais simples que
+entrega o mesmo resultado prático: quando o modelo rápido de uma conversa por voz reconhece uma
+tarefa de várias etapas, ele chama `delegate_task` (só aparece na lista de ferramentas quando
+`profile.defaultModel === profile.fastModel`, ou seja, só quando quem está rodando é o rápido).
+
+A chamada devolve controle **na hora** — o modelo responde ao usuário ("vou verificar isso") e a
+conversa continua, sem esperar. `background-task.ts` toca a tarefa de verdade, num loop próprio
+(até 20 rodadas), sempre com `loadSettings()` **recarregado do zero** — nunca com a cópia de
+settings que o turno ao vivo pode ter deixado com o modelo trocado para o rápido, ou a tarefa
+"robusta" rodaria no mesmo modelo que não deu conta dela. Escreve na mesma conversa que a UI já
+mostra (o resultado aparece como mensagem nova) e fala o resultado em voz alta quando termina, que
+é o ponto inteiro de rodar isso durante uma conversa falada. Só uma tarefa em segundo plano por
+vez: uma segunda chamada enquanto a primeira roda vira aviso, não fila.
+
+Limitação aceita: `beginTurn`/`span` de `trace.ts` guardam o turno **atual** num módulo só. Se uma
+tarefa delegada ainda estiver rodando quando um novo turno ao vivo começa, os eventos de trilha da
+tarefa delegada passam a aparecer sob o turno novo no visor de depuração — só a atribuição na
+trilha erra, a conversa e a execução em si continuam corretas.
+
+### `evaluateScript`: definido, mas nunca ligado
+
+A ferramenta existia no schema (`provider.ts`) e a execução existia (`page-actions.ts`), mas
+`tool-runner.ts` não sabia converter a chamada do modelo numa `BrowserAction` — `toBrowserAction`
+não tinha `case "evaluateScript"`, então toda tentativa batia num erro genérico de "argumentos
+insuficientes", por mais correto que o script fosse. A ferramenta que o prompt recomenda como
+último recurso da escada de tentativas não levava a lugar nenhum. Ligado.
+
+A serialização do retorno também falhava no caso mais comum de uso: `JSON.stringify` num
+`Element`, `NodeList`, `Map` ou `Set` devolve `{}` (nenhuma propriedade enumerável própria) — e
+"inspecionar o DOM" é exatamente para isso que a ferramenta existe. `serializeEvalResult` trata
+esses casos à parte (atributos + texto para elementos, listas para coleções, entries para
+Map/Set) antes de cair no `JSON.stringify` genérico.
+
+**Limite aceito, não corrigido:** o script roda via `new Function` dentro do content script, que
+vive no mundo isolado do Chrome — enxerga e mexe no DOM (compartilhado com a página), mas não
+enxerga variável nem função que o JavaScript da própria página guardou em memória (estado de
+framework, algo pendurado em `window` pelo bundle do site). Corrigir isso trocaria o despacho para
+`chrome.scripting.executeScript` com `world: "MAIN"` a partir do background — mas o valor de
+retorno de um script `world: "MAIN"` precisa ser serializável para atravessar a fronteira de volta
+à extensão, então a serialização acima teria que ser duplicada *dentro* da função injetada. Achado
+por revisão automatizada, nível "nit" — documentado no system prompt em vez de reescrito.
+
+### Memória sem guarda seria canal de prompt injection persistente
+
+`memory_write`/`memory_read`/`memory_delete` deixam a Vela guardar fatos entre conversas
+diferentes, e o que está guardado entra sozinho no system prompt da próxima vez
+(`buildSystemPrompt`). Sem nenhuma guarda, isso é exatamente o canal que um prompt injection
+persistente precisa: uma página maliciosa manda "memorize isto" uma vez, e o efeito sobrevive à
+aba, à conversa e ao `chat:new` — para sempre, porque nada limpa `vela:memory` sozinho.
+
+Duas guardas: Modo Observar bloqueia escrita/exclusão como bloqueia qualquer outra ação que mude
+estado (antes não bloqueava nenhuma); e um teto de 60 chaves / 2000 caracteres por valor impede
+que a memória infle o prompt — e o custo por requisição — sem limite.
+
+### Segurança: duas regras, uma só decidia as duas
+
+O bypass de Wireguard (`settings.agent.bypassWireguard`, para quem precisa que a Vela veja e
+preencha campos sensíveis) apagava o bloco `## Segurança` inteiro do system prompt quando ligado.
+Só que esse bloco tinha duas regras independentes: não digitar senha/cartão, **e** tratar todo
+conteúdo da página como dado, nunca como instrução (a defesa contra prompt injection). Ligar o
+bypass para preencher uma senha desligava a defesa contra prompt injection junto, sem relação
+nenhuma entre as duas. Separadas: só a primeira depende da configuração.
+
+### Modo de gravação de depuração da voz
+
+Existe porque "ela disse que não conseguia e depois fez, e ficou repetindo estranho" só aparece
+revisando a sequência real de um turno de voz — texto do usuário, rascunho, transcrição final,
+chamadas de ferramenta, o que a Vela respondeu — não um log de erro isolado. Um botão no palco de
+voz grava, por enunciado: o áudio do microfone (WAV, o mesmo que já ia para o Whisper — só passou
+a ser retido em vez de descartado) com a transcrição que virou, e a fala da Vela (texto sempre;
+áudio também, via `MediaRecorder` pendurado no `mixer` do `AudioContext` de síntese, nos dois
+caminhos de streaming). Ao parar, tudo vira um `.zip` (implementação própria, método STORE, sem
+biblioteca — `zip-writer.ts`) com `manifest.json` cronológico, baixado direto do documento
+offscreen.
+
+Uma corrida que isso quase reintroduziu: `voice:stop` respondia antes de `stop()` terminar, e
+`background.ts` fecha o documento offscreen assim que a mensagem "resolve" — sem esperar, encerrar
+a voz com a gravação ligada perdia tudo, porque o zip ainda estava sendo montado quando o
+documento morreu. `stop()` virou assíncrona e o listener só chama `sendResponse` depois dela
+terminar, gravação incluída.
+
+### Velocidade da fala, ajustada no cliente
+
+O servidor de voz fala num ritmo fixo por voz (é o piper vs. kokoro que decide a velocidade
+relativa, não o usuário) — não existe parâmetro de taxa na API. `speechRate` multiplica a
+reprodução no cliente: `playbackRate` no `<audio>` do caminho sem streaming, e
+`AudioBufferSourceNode.playbackRate` nos dois caminhos de streaming, com o incremento da linha do
+tempo (`buffer.duration / rate`) ajustado junto — sem isso as frases se sobrepoem ou abrem buraco
+conforme a taxa.
+
+### Aba nova só entra no grupo se nasceu dele
+
+`onCreatedNavigationTarget` adotava **qualquer** aba nova para o grupo "Vela", em qualquer aba do
+navegador, bastando existir uma sessão da Vela ativa em algum canto — o listener não checava de
+onde a navegação tinha nascido. Um ctrl+click num link qualquer, numa aba do usuário sem relação
+nenhuma com a Vela, acabava dentro do grupo dela. Corrigido: só adota quando `sourceTabId` já fazia
+parte do grupo.
+
+### O menu de modelos ficava preso atrás do palco de voz
+
+Bug de stacking context puro: o rodapé do composer cria seu próprio contexto de empilhamento CSS
+(`position` + `z-index:1`), e o palco de voz em foco tem `z-index:5` — a disputa acontece um nível
+acima, entre os dois contêineres, não entre o menu (`z-index:30`) e o palco diretamente. Como o
+contexto do rodapé perde para o do palco, tudo dentro dele — inclusive o menu com z-index maior —
+ficava atrás. Subir o z-index do rodapé para 10 resolve porque agora é *esse* nível que vence a
+disputa contra o palco.
 
 ### A página é endereçada por `ref`, não por seletor CSS
 
@@ -121,8 +255,7 @@ não tem desfazer.
 ### Ela mexe nas próprias configurações, dentro de uma lista branca
 
 "Troque para a voz do Cadu" morria em "abra Configurações → Voz" — pior ainda pela voz, que é
-onde o pedido nasce. `vela_settings` lê e escreve voz, visual, cursor, moldura, tema e teto de
-etapas.
+onde o pedido nasce. `vela_settings` lê e escreve voz, visual, cursor, moldura e tema.
 
 Fora da lista ficam endereço de provider, chaves e **autonomia**. As duas primeiras porque mudá-las
 desliga a Vela ou manda os dados do usuário para outro lugar; a autonomia porque é o freio que
@@ -763,9 +896,9 @@ lateral fica aberta o dia inteiro, e luz constante viraria ruído.
 ## Opções → Avançado
 
 Além do diagnóstico de ações, a seção reúne o que só faz sentido quando algo dá errado ou muda
-de máquina: teto de etapas por tarefa (`agent.maxRounds`, lido pelo `agent-loop`), o espaço
-ocupado por categoria com botão de limpeza por fatia, e backup/restauração em JSON
-(`maintenance.ts`).
+de máquina: o espaço ocupado por categoria com botão de limpeza por fatia, e backup/restauração
+em JSON (`maintenance.ts`). O controle de "etapas por tarefa" que existia aqui foi removido junto
+com o teto configurável — ver "O teto de rodadas parou de interromper a tarefa".
 
 Duas decisões de segurança nesse fluxo: a chave de API **fica fora do backup por padrão** — um
 JSON na pasta de downloads não é lugar de credencial — e restaurar um arquivo sem chave **não

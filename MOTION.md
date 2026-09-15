@@ -13,8 +13,9 @@ os controladores locais fazem o trabalho contínuo.
   e suavização de `energy`, `bass`, `mid`, `high` e `speaking`. Alimenta o orb.
 - `vad.ts` — segmentação de fala por silêncio. Não alimenta o orb; decide onde um enunciado
   começa e termina.
-- `cursor-motion.ts` — interpolação com aceleração e amortecimento para o cursor virtual, mais a
-  compressão do clique.
+- `cursor-motion.ts` — suavização exponencial (LERP) para o cursor virtual, mais a compressão do
+  clique. Era mola com velocidade e amortecimento; produzia overshoot perto do alvo ("chacoalho").
+  Sem estado de velocidade para carregar entre quadros, chega sem passar do ponto.
 - `trace-layer.ts` — o Trace: cursor, alvo, ripple e borda de controle, em Shadow DOM. Um único
   `requestAnimationFrame` para todas as ações simultâneas.
 - `pulse.ts` — o HUD flutuante, também em Shadow DOM, com o orb de canvas.
