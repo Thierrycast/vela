@@ -58,6 +58,13 @@ function App() {
   const [liveSession, setLiveSession] = useState(false);
   const [voiceMuted, setVoiceMuted] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
+  /** O que está na tela é rascunho (Vosk, ainda mudando) ou já é o texto final (Whisper)? A
+   *  diferença de qualidade entre os dois é esperada — o rascunho existe só para não deixar a
+   *  tela em silêncio enquanto a pessoa fala — mas sem sinal visual os dois pareciam a mesma
+   *  coisa, e o rascunho pior passava a impressão de que a transcrição inteira era ruim. */
+  const [liveTranscriptFinal, setLiveTranscriptFinal] = useState(true);
+  const [debugRecording, setDebugRecording] = useState(false);
+  const [debugItems, setDebugItems] = useState(0);
   /** Qual linha do histórico está pedindo confirmação. Apagar não tem volta: exige dois cliques. */
   const [forgetting, setForgetting] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -67,11 +74,18 @@ function App() {
   const [session, setSession] = useState<{ title: string; tabCount: number }>({ title: "", tabCount: 0 });
   const [history, setHistory] = useState<Array<{ id: string; title: string; updatedAt: number }>>([]);
   const portRef = useRef<SidecarPort | null>(null);
-  const streamRef = useRef<HTMLDivElement>(null);
+  const streamRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLElement>(null);
   const liveRef = useRef(false);
+
+  useEffect(() => {
+    if (composerRef.current) {
+      composerRef.current.style.height = "auto";
+      composerRef.current.style.height = `${Math.min(composerRef.current.scrollHeight, 180)}px`;
+    }
+  }, [input]);
 
   useTheme(settings);
   useReadingHighlight(streamRef, speakingId);
@@ -102,13 +116,14 @@ function App() {
       if (message.type === "chat:session") setSession({ title: message.title, tabCount: message.tabCount });
       if (message.type === "chat:history") setHistory(message.items);
       if (message.type === "chat:speaking" && !message.speaking) setSpeakingId(null);
-      if (message.type === "voice:state") { setVoiceState(message.state); if (message.state === "idle") { setDictating(false); setSpeakingId(null); setLiveSession(false); liveRef.current = false; } }
+      if (message.type === "voice:state") { setVoiceState(message.state); if (message.state === "idle") { setDictating(false); setSpeakingId(null); setLiveSession(false); liveRef.current = false; setDebugRecording(false); setDebugItems(0); } }
+      if (message.type === "voice:debug-state") { setDebugRecording(message.recording); setDebugItems(message.items); }
       if (message.type === "voice:error") { setVoiceState("error"); setDictating(false); setSpeakingId(null); setEvents((current) => [...current, { kind: "error", text: message.message }]); }
       // Só no palco: no ditado o rascunho brigaria com o que você já digitou no campo.
-      if (message.type === "voice:partial" && liveRef.current) setLiveTranscript(message.text);
+      if (message.type === "voice:partial" && liveRef.current) { setLiveTranscript(message.text); setLiveTranscriptFinal(false); }
       if (message.type === "voice:transcript") {
         // No Live Voice o que você falou já virou turno; repetir no campo de texto seria ruído.
-        if (liveRef.current) setLiveTranscript(message.text);
+        if (liveRef.current) { setLiveTranscript(message.text); setLiveTranscriptFinal(true); }
         else { setInput((current) => `${current}${current ? " " : ""}${message.text}`); composerRef.current?.focus(); }
       }
       if (message.type === "chat:prefill") { setInput(message.text); composerRef.current?.focus(); }
@@ -175,12 +190,16 @@ function App() {
     trace(starting ? "ligou o Live Voice" : "desligou o Live Voice", { visual: settings.voice.visual, voz: settings.voice.speechVoice });
     liveRef.current = starting;
     setLiveSession(starting);
-    if (starting) { setVoiceFocused(true); setLiveTranscript(""); setVoiceMuted(false); }
+    if (starting) { setVoiceFocused(true); setLiveTranscript(""); setLiveTranscriptFinal(true); setVoiceMuted(false); }
     post({ type: starting ? "voice:start-live" : "voice:stop-live" });
     setEvents((current) => {
       const text = starting ? "Iniciando Live Voice…" : "Live Voice encerrado.";
       return current.at(-1)?.text === text ? current : [...current, { kind: "status", text }];
     });
+  };
+  const toggleDebug = () => {
+    trace(debugRecording ? "parou a gravação de depuração" : "iniciou a gravação de depuração");
+    post({ type: debugRecording ? "voice:debug-stop" : "voice:debug-start" });
   };
   const toggleDictation = () => {
     trace(dictating ? "parou o ditado" : "começou o ditado");
@@ -256,11 +275,15 @@ function App() {
       visual={settings.voice.visual}
       focused={voiceFocused}
       transcript={liveTranscript}
+      transcriptFinal={liveTranscriptFinal}
       muted={voiceMuted}
       onToggleFocus={() => setVoiceFocused((value) => !value)}
       onToggleMute={() => { setVoiceMuted((value) => !value); void chrome.runtime?.sendMessage({ type: "voice:toggle-mute" }).catch(() => undefined); }}
       mode={reading ? "leitura" : "live"}
       onClose={reading ? stopReading : toggleLive}
+      debugRecording={debugRecording}
+      debugItems={debugItems}
+      onToggleDebug={reading ? undefined : toggleDebug}
     />}
 
     <section className={`conversation ${live && voiceFocused ? "atras-do-palco" : ""}`} ref={streamRef}>
