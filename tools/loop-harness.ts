@@ -40,6 +40,8 @@ function fakePage(): (message: { type: string; action?: BrowserAction }, frameId
     // O modo preciso pergunta onde o alvo está e, depois, se a página reagiu.
     if (message.type === "agent:locate") return { x: 120, y: 340 } as unknown as ActionResult;
     if (message.type === "agent:watch") return { mutated: true, navigated: false } as unknown as ActionResult;
+    // A digitação se confere lendo o campo: o travado devolve vazio até o CDP escrever nele.
+    if (message.type === "agent:value") return { value: textoInserido ?? "" } as unknown as ActionResult;
     if (message.type !== "agent:action" || !message.action) return { ok: true };
     const action = message.action;
     if (action.type === "click" && action.ref && !action.ref.startsWith(`ref_${snapshotId}_`)) {
@@ -48,12 +50,16 @@ function fakePage(): (message: { type: string; action?: BrowserAction }, frameId
     // O alvo que o caminho DOM não move: é ele que provoca a escalada para o modo preciso.
     if (action.type === "click" && action.selector === "#inerte") return { ok: true, summary: "Cliquei em button “Inerte” — sem efeito perceptível." };
     if (action.type === "click") return { ok: true, summary: "Cliquei em button “Enviar” — a página reagiu." };
+    // Campo que ignora evento sintético: o caminho DOM sai sem efeito e a escalada tem de entrar.
+    if (action.type === "type" && action.selector === "#travado") return { ok: true, summary: "Tentei digitar em textbox “Travado” e o campo continua com “” — sem efeito perceptível." };
     if (action.type === "type") return { ok: true, summary: "Digitei em textbox “Buscar” (valor agora: “notebook”)." };
     return { ok: true, summary: `Ação ${action.type} concluída.` };
   };
 }
 
 const cdpLog: string[] = [];
+/** O que o caminho confiável conseguiu escrever no campo travado. Null enquanto ninguém escreveu. */
+let textoInserido: string | null = null;
 
 function installChrome(store: Record<string, unknown>, page: ReturnType<typeof fakePage>) {
   const navListeners: Array<(details: { tabId: number; frameId: number; url: string }) => void> = [];
@@ -93,7 +99,11 @@ function installChrome(store: Record<string, unknown>, page: ReturnType<typeof f
     debugger: {
       attach: async () => { cdpLog.push("attach"); },
       detach: async () => { cdpLog.push("detach"); },
-      sendCommand: async (_target: unknown, method: string, params: Record<string, unknown>) => { cdpLog.push(`${method}:${params.type ?? params.key ?? ""}`); },
+      sendCommand: async (_target: unknown, method: string, params: Record<string, unknown>) => {
+        cdpLog.push(`${method}:${params.type ?? params.key ?? ""}`);
+        // O campo travado só aceita texto pelo caminho confiável — é isso que o cenário prova.
+        if (method === "Input.insertText") textoInserido = String(params.text ?? "");
+      },
     },
   };
 }
@@ -264,6 +274,17 @@ await run("modo preciso desligado não anexa nada", [
   [delta("Não deu."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto", preciseMode: false } });
 console.log("CDP:", cdpLog.join(" → ") || "(não escalou)");
+
+// 15. Digitação que não pega pelo caminho DOM escala para o confiável — e a resposta afirma o
+// valor lido do campo, não a intenção de ter digitado.
+cdpLog.length = 0;
+textoInserido = null;
+await run("modo preciso preenche o campo travado", [
+  [delta("Vou digitar."), toolCall("c1", "browser_action", { action: "type", selector: "#travado", text: "notebook" }), DONE],
+  [delta("Pronto."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto", preciseMode: true } });
+console.log("CDP:", cdpLog.join(" → ") || "(não escalou)");
+console.log("texto que chegou ao campo:", textoInserido ?? "(nenhum)");
 
 // 17. O anexo tem de chegar ao modelo. O chip aparece na tira, o arquivo entra no storage — mas
 // nada disso importa se ele não estiver no corpo da requisição.

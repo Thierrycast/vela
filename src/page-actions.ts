@@ -90,7 +90,16 @@ function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: 
   if (setter) setter.call(element, value); else element.value = value;
 }
 
-async function typeInto(element: Element, text: string, mode: "replace" | "append") {
+type TypeOutcome = { value: string; kind: "field" | "editable" | "select" };
+
+/**
+ * A digitação diz o que o campo ficou valendo **e** por qual caminho — e os dois importam.
+ *
+ * Um `<select>` devolve o texto da opção escolhida, que não tem por que parecer com o que foi
+ * pedido ("br" seleciona "Brasil"); um campo de texto, sim. Sem distinguir os dois, conferir se
+ * a digitação pegou daria falso alarme em toda combobox.
+ */
+async function typeInto(element: Element, text: string, mode: "replace" | "append"): Promise<TypeOutcome | null> {
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     element.focus({ preventScroll: true });
     const start = mode === "append" ? element.value : "";
@@ -104,13 +113,13 @@ async function typeInto(element: Element, text: string, mode: "replace" | "appen
       element.dispatchEvent(new KeyboardEvent("keyup", { key: character, bubbles: true }));
     }
     element.dispatchEvent(new Event("change", { bubbles: true }));
-    return element.value;
+    return { value: element.value, kind: "field" };
   }
   if (element instanceof HTMLElement && element.isContentEditable) {
     element.focus({ preventScroll: true });
     if (mode === "replace") document.execCommand("selectAll", false);
     document.execCommand("insertText", false, text);
-    return element.textContent ?? "";
+    return { value: element.textContent ?? "", kind: "editable" };
   }
   if (element instanceof HTMLSelectElement) {
     const options = Array.from(element.options);
@@ -121,10 +130,18 @@ async function typeInto(element: Element, text: string, mode: "replace" | "appen
     if (best) {
       element.value = best.value;
       element.dispatchEvent(new Event("change", { bubbles: true }));
-      return best.text;
+      return { value: best.text, kind: "select" };
     }
   }
   return null;
+}
+
+/** O campo ficou mesmo com o que foi pedido? É esta conta que decide se vale escalar para o
+ *  caminho confiável — sem ela, "digitei" era afirmação de intenção, não de resultado. */
+function typeLanded(outcome: TypeOutcome, text: string, mode: "replace" | "append") {
+  if (outcome.kind === "select") return true;
+  if (!text) return true;
+  return mode === "replace" ? outcome.value.trim() === text.trim() : outcome.value.includes(text);
 }
 
 function pressKey(element: Element | null, key: string) {
@@ -237,11 +254,21 @@ export async function performAction(action: BrowserAction): Promise<ActionResult
   }
 
   if (action.type === "type") {
-    const value = await typeInto(element, action.text, action.mode ?? "replace");
-    if (value === null) return failure("element_not_interactable", `${describeTarget(element)} não aceita digitação.`);
+    const mode = action.mode ?? "replace";
+    const outcome = await typeInto(element, action.text, mode);
+    if (outcome === null) return failure("element_not_interactable", `${describeTarget(element)} não aceita digitação.`);
+    /*
+     * Campo que ignora evento sintético devolvia "Digitei em X (valor agora: '')" — uma frase que
+     * afirma sucesso e descreve fracasso na mesma linha, e que o modelo lia como sucesso. Dizer
+     * "sem efeito perceptível" usa o mesmo vocabulário do clique, que é o que a escalada para o
+     * caminho confiável já sabe reconhecer.
+     */
+    if (!typeLanded(outcome, action.text, mode)) {
+      return { ok: true, summary: `Tentei digitar em ${describeTarget(element)} e o campo continua com “${outcome.value.slice(0, 60)}” — sem efeito perceptível.` };
+    }
     let detail = "";
     if (action.submit) { await wait(80); detail = ` ${pressKey(element, "Enter")}`; await wait(300); invalidateSnapshot(); }
-    return { ok: true, summary: `Digitei em ${describeTarget(element)} (valor agora: “${value.slice(0, 60)}”).${detail}` };
+    return { ok: true, summary: `Digitei em ${describeTarget(element)} (valor agora: “${outcome.value.slice(0, 60)}”).${detail}` };
   }
 
   return failure("unsupported", "Ação não executável na página.");

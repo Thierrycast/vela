@@ -4,7 +4,7 @@ import { loadSettings } from "./storage";
 import { approvalKey, describeAction, isRisky, requestApproval } from "./approvals";
 import { span } from "./trace";
 import { adoptTab } from "./session";
-import { cdpAvailable, preciseClick, preciseKey } from "./cdp-actuator";
+import { cdpAvailable, preciseClick, preciseFill, preciseKey } from "./cdp-actuator";
 
 const READ_ONLY: Array<BrowserAction["type"]> = ["extractPage", "find", "scroll", "wait", "screenshot"];
 const NO_CURSOR: Array<BrowserAction["type"]> = ["pageTool", "find", "screenshot", "evaluateScript"];
@@ -159,9 +159,22 @@ const KEY_IGNORED = "tecla despachada";
 
 function wantsEscalation(action: BrowserAction, result: ActionResult): boolean {
   if (!result.ok) return false;
-  if (action.type === "click") return result.summary.includes(NO_EFFECT);
+  if (action.type === "click" || action.type === "type") return result.summary.includes(NO_EFFECT);
   if (action.type === "keyPress") return result.summary.includes(KEY_IGNORED);
   return false;
+}
+
+/** O valor que o campo tem **agora**, lido depois da escalada. Sem isto a resposta seria
+ *  "tentei de novo", que não é informação — com isto, ou o texto entrou e isso é dito, ou não
+ *  entrou e o modelo para de insistir neste campo. */
+async function readValue(tabId: number, action: BrowserAction): Promise<string | null> {
+  try {
+    const response = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: "agent:value", action }, { frameId: 0 }) as Promise<{ value?: string } | null>,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 800)),
+    ]);
+    return response?.value ?? null;
+  } catch { return null; }
 }
 
 async function watchPage(tabId: number, milliseconds: number): Promise<{ mutated: boolean; navigated: boolean }> {
@@ -180,12 +193,27 @@ async function escalate(tabId: number, action: BrowserAction, result: ActionResu
   const attempt = span("action", `modo preciso: ${action.type}`, { action });
 
   let dispatched: { ok: boolean; detail: string };
-  if (action.type === "click") {
+  if (action.type === "click" || action.type === "type") {
     const point = await chrome.tabs.sendMessage(tabId, { type: "agent:locate", action }, { frameId: 0 })
       .catch(() => null) as { x: number; y: number } | null;
     if (!point) {
       attempt.end({ ok: false, data: { motivo: "o alvo não pôde ser localizado na tela" } });
       return result;
+    }
+    if (action.type === "type") {
+      dispatched = await preciseFill(tabId, point, action.text, action.mode ?? "replace");
+      if (!dispatched.ok) {
+        attempt.end({ ok: false, data: { detail: dispatched.detail } });
+        return { ...result, summary: `${result.summary} Tentei repetir pelo modo preciso e não deu: ${dispatched.detail}.` };
+      }
+      // Digitação se confere lendo o campo, não observando a página: um campo preenchido pode não
+      // mudar nada em volta, e `agent:watch` diria "nada mudou" sobre uma digitação bem-sucedida.
+      const value = await readValue(tabId, action);
+      const landed = value !== null && (action.mode === "append" ? value.includes(action.text) : value.trim() === action.text.trim());
+      attempt.end({ ok: landed, data: { detail: dispatched.detail, value } });
+      return landed
+        ? { ok: true, summary: `Preenchi o campo pelo modo preciso (evento confiável): ele agora tem “${(value ?? "").slice(0, 60)}”.` }
+        : { ...result, summary: `${result.summary} Repeti pelo modo preciso (evento confiável) e o campo continua ${value === null ? "ilegível" : `com “${value.slice(0, 60)}”`} — este campo não aceita ser preenchido por fora. Peça ao usuário (request_user) ou procure outro caminho.` };
     }
     dispatched = await preciseClick(tabId, point);
   } else if (action.type === "keyPress") {

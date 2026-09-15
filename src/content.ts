@@ -59,6 +59,19 @@ function start() {
       return false;
     }
 
+    /* O valor atual de um campo. A escalada da digitação se confere lendo o campo: uma página
+     * pode aceitar o texto sem mexer em mais nada, e aí `agent:watch` diria que nada aconteceu. */
+    if (message.type === "agent:value" && message.action) {
+      const action = message.action as { ref?: string; selector?: string };
+      const element = action.ref ? resolveRef(action.ref).element : action.selector ? document.querySelector(action.selector) : null;
+      const value = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement
+        ? element.value
+        : element instanceof HTMLElement && element.isContentEditable ? (element.textContent ?? "")
+        : null;
+      sendResponse({ value });
+      return false;
+    }
+
     /* Observa por um tempo e diz se a página reagiu — é assim que a escalada sabe se valeu. */
     if (message.type === "agent:watch") {
       const before = location.href;
