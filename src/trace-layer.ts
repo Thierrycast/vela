@@ -35,13 +35,11 @@ const STYLE = `
 .pill{position:fixed;top:9px;left:50%;transform:translateX(-50%);background:#0d1012;color:#f1f4f4;border:1px solid #252c30;border-radius:999px;padding:6px 10px;font:11px system-ui;box-shadow:0 5px 18px #0005;display:flex;align-items:center;gap:7px;pointer-events:auto}
 .pill i{width:5px;height:5px;border-radius:50%;background:#58d8cd;box-shadow:0 0 0 3px #143a36}
 .pill button{pointer-events:auto;border:0;border-left:1px solid #252c30;background:none;color:#9aa4a5;padding:0 0 0 7px;cursor:pointer;font:inherit}
-.cursor{position:fixed;width:18px;height:26px;transform:translate(-2px,-1px);transform-origin:2px 1px;transition:opacity 180ms ease;filter:drop-shadow(0 1px 3px #00000073) drop-shadow(0 0 7px #58d8cd66);pointer-events:none}
+.cursor{position:fixed;width:24px;height:24px;margin-left:-12px;margin-top:-12px;transform-origin:12px 12px;transition:opacity 180ms ease;filter:drop-shadow(0 2px 5px rgba(0,0,0,0.3));pointer-events:none}
 .cursor svg{display:block;width:100%;height:100%}
-/* O contorno escuro é o que faz a seta existir sobre página clara; paint-order o joga para trás
-   do preenchimento, senão a linha come 1px de cada lado da silhueta e a ponta engorda. */
-.cursor path{stroke:#080c0d;stroke-width:1.2;stroke-linejoin:round;paint-order:stroke fill}
-.cursor.ghost{opacity:.72}
-.cursor.ghost path{fill:#58d8cd24;stroke:#3fbfb4;stroke-width:1.5}
+.cursor.ghost{opacity:.5}
+.cursor.ghost circle:first-child{fill:#58d8cd44}
+.cursor.ghost circle:last-child{stroke:#58d8cd44}
 .target{position:fixed;border:2px solid #58d8cd;border-radius:5px;box-shadow:0 0 0 3px #143a3666;transition:opacity 130ms ease;pointer-events:none}
 .ripple{position:fixed;width:18px;height:18px;border:1px solid #79e9df;border-radius:50%;transform:translate(-50%,-50%);animation:ripple 420ms cubic-bezier(.16,1,.3,1) forwards;pointer-events:none}
 @keyframes ripple{to{opacity:0;transform:translate(-50%,-50%) scale(3.2)}}
@@ -60,15 +58,9 @@ const STYLE = `
  * O gradiente vai do ciano de `acting` ao violeta do accent, na diagonal do corpo — a mesma dupla
  * do orb de voz, para as duas superfícies falarem a mesma língua.
  */
-const CURSOR_SVG = `<svg viewBox="0 0 18 26" aria-hidden="true">
-  <defs>
-    <linearGradient id="vela-cursor" x1="2" y1="1" x2="12" y2="24" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#d4fff9"/>
-      <stop offset=".36" stop-color="#58d8cd"/>
-      <stop offset="1" stop-color="#8b7bf0"/>
-    </linearGradient>
-  </defs>
-  <path fill="url(#vela-cursor)" d="M2 1 L2 20.4 L6.1 16.3 L8.5 23.6 L11.1 22.5 L8.7 15.2 L13.4 14 Q6.9 6.3 2 1 Z"/>
+const CURSOR_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true">
+  <circle cx="12" cy="12" r="7" fill="#58d8cd" />
+  <circle cx="12" cy="12" r="10" fill="none" stroke="#58d8cd" stroke-width="2" opacity="0.4" />
 </svg>`;
 
 class TraceLayer {
@@ -218,8 +210,8 @@ class TraceLayer {
       if (this.cursor) {
         this.cursor.style.left = `${point.x}px`;
         this.cursor.style.top = `${point.y}px`;
-        // A ponta é o ponto de ação, não o centro: o deslocamento põe (2,1) do SVG sobre o alvo.
-        this.cursor.style.transform = `translate(-2px,-1px) scale(${1 - point.compression * 0.3})`;
+        // O cursor agora é um ponto centralizado; o deslocamento já está na margem (-12px).
+        this.cursor.style.transform = `scale(${1 - point.compression * 0.3})`;
       }
       if (this.arrivals.length) {
         const arrived = this.motion.distanceToTarget <= ARRIVAL_TOLERANCE;
