@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Mic, MicOff, Square, X } from "lucide-react";
+import { Circle, Mic, MicOff, Square, X } from "lucide-react";
 import { VelaOrb, VelaState } from "./vela-components";
 import { VoiceVisualMetrics } from "./audio-metrics";
 import { traceFrom } from "./trace-client";
@@ -17,11 +17,16 @@ const trace = traceFrom("painel");
  * O mesmo componente serve aos dois estados: o que muda é a classe, então a transição é contínua
  * em vez de uma troca de tela.
  */
-export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, onToggleMute, muted, onClose, mode = "live" }: {
+export function VoiceStage({ state, visual, focused, transcript, transcriptFinal = true, onToggleFocus, onToggleMute, muted, onClose, mode = "live", debugRecording, debugItems = 0, onToggleDebug }: {
   state: VelaState;
   visual?: string;
   focused: boolean;
   transcript?: string;
+  /** `false` enquanto o texto na tela é o rascunho do reconhecedor rápido (Vosk) — pior de
+   *  propósito, existe só para a tela não ficar muda enquanto a pessoa fala. `true` quando já é
+   *  o texto final (Whisper), que é o que de fato vira turno. Sem essa distinção visual, o
+   *  rascunho pior passa a impressão de que a transcrição inteira é ruim. */
+  transcriptFinal?: boolean;
   onToggleFocus: () => void;
   onToggleMute: () => void;
   muted: boolean;
@@ -32,6 +37,11 @@ export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, 
    * errada: o que se quer é parar a leitura.
    */
   mode?: "live" | "leitura";
+  /** Grava a sessão (áudio do mic por enunciado + fala da Vela + transcrições) e baixa um .zip ao
+   *  parar — para revisar depois um comportamento estranho sem depender de descrever de memória. */
+  debugRecording?: boolean;
+  debugItems?: number;
+  onToggleDebug?: () => void;
 }) {
   // O offscreen transmite a telemetria para toda a extensão; ouvir aqui evita passar 20 amostras
   // por segundo pelo estado do painel, o que re-renderizaria a conversa inteira a cada uma.
@@ -70,7 +80,7 @@ export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, 
 
     {focused && <>
       <span className="voice-label">{label}</span>
-      {transcript && <p className="voice-transcript">{transcript}</p>}
+      {transcript && <p className={`voice-transcript ${transcriptFinal ? "" : "rascunho"}`}>{transcript}</p>}
     </>}
 
     <div className="voice-controls">
@@ -80,6 +90,16 @@ export function VoiceStage({ state, visual, focused, transcript, onToggleFocus, 
           <button className={`voice-control ${muted ? "mudo" : ""}`} onClick={onToggleMute} aria-label={muted ? "Reativar o microfone" : "Silenciar o microfone"}>
             {muted ? <MicOff size={16} /> : <Mic size={16} />}
           </button>
+          {onToggleDebug && (
+            <button
+              className={`voice-control ${debugRecording ? "gravando" : ""}`}
+              onClick={onToggleDebug}
+              aria-label={debugRecording ? `Parar gravação de depuração e baixar (${debugItems} evento(s))` : "Gravar sessão para depuração"}
+              title={debugRecording ? `Gravando — ${debugItems} evento(s). Clique para parar e baixar.` : "Gravar áudio + trilha desta sessão para revisar depois"}
+            >
+              <Circle size={14} fill={debugRecording ? "currentColor" : "none"} />
+            </button>
+          )}
           <button className="voice-control encerrar" onClick={onClose} aria-label="Encerrar a conversa por voz"><X size={16} /></button>
         </>}
     </div>
