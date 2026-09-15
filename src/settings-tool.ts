@@ -80,16 +80,6 @@ export const SETTINGS_FIELDS: Record<string, Field> = {
     },
     opcoes: async () => ["natural", "fast", "instant"],
   },
-  "maximo-de-etapas": {
-    descricao: "Quantas rodadas de ferramenta a Vela pode gastar num pedido, de 2 a 30.",
-    ler: (settings) => String(settings.agent.maxRounds),
-    escrever: (settings, value) => {
-      const parsed = Number(value);
-      if (!Number.isFinite(parsed) || parsed < 2 || parsed > 30) return "O máximo de etapas vai de 2 a 30.";
-      settings.agent.maxRounds = Math.round(parsed);
-      return null;
-    },
-  },
   tema: {
     descricao: "light, dark ou system.",
     ler: (settings) => settings.theme,

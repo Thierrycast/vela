@@ -5,16 +5,6 @@ import { clearLogs, loadLogs } from "./storage";
 import { ActionStats, clearActionStats, loadActionStats } from "./action-stats";
 import { StorageSlice, buildBackup, clearSlice, formatBytes, measureStorage, resetPreferences, restoreBackup } from "./maintenance";
 import { clearTrace, readTrace, toJsonl, traceSize } from "./trace";
-import { Select } from "./select";
-
-const ROUND_OPTIONS = [
-  { value: "4", label: "4 etapas", hint: "tarefas curtas, resposta rápida" },
-  { value: "8", label: "8 etapas", hint: "conversa curta" },
-  { value: "12", label: "12 etapas", hint: "padrão" },
-  { value: "18", label: "18 etapas", hint: "navegação em site pesado" },
-  { value: "28", label: "28 etapas", hint: "pesquisa longa, gasta mais" },
-] as const;
-
 function Row({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
   return <div className="setting-row"><div><strong>{label}</strong>{description && <small>{description}</small>}</div><div className="setting-control">{children}</div></div>;
 }
@@ -30,7 +20,7 @@ function StorageBar({ slices }: { slices: StorageSlice[] }) {
   </div>;
 }
 
-export function AdvancedPanel({ settings, update }: { settings: AppSettings; update: (patch: Partial<AppSettings>) => void }) {
+export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>) => void }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState<ActionStats | null>(null);
   const [slices, setSlices] = useState<StorageSlice[]>([]);
@@ -123,13 +113,6 @@ export function AdvancedPanel({ settings, update }: { settings: AppSettings; upd
       </Row>
       <Row label="Apagar a trilha">
         <button className="secondary-button" onClick={() => void clearTrace().then(refresh)}><Trash2 size={14} /> Apagar</button>
-      </Row>
-    </div>
-
-    <h2 className="subsection">Limites da execução</h2>
-    <div className="settings-group">
-      <Row label="Etapas por tarefa" description="Cada etapa é uma ida ao modelo. Ao bater no teto, a Vela avisa e para em vez de gastar em silêncio.">
-        <Select value={String(settings.agent.maxRounds)} label="Etapas por tarefa" options={ROUND_OPTIONS} onChange={(value) => update({ agent: { ...settings.agent, maxRounds: Number(value) } })} />
       </Row>
     </div>
 

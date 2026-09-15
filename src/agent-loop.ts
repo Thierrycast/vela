@@ -1,5 +1,5 @@
 import { AgentEvent, ChatMessage } from "./types";
-import { LoopSnapshot, SidecarInbound } from "./messages";
+import { Emit, LoopSnapshot } from "./messages";
 import { ToolCall, streamChat } from "./provider";
 import { runToolCall } from "./tool-runner";
 import { endTraceSessions } from "./agent";
@@ -7,8 +7,6 @@ import { appendLog, loadSettings } from "./storage";
 import { beginTurn, record as traceRecord, span } from "./trace";
 import { collectBrowserContext, clearAttachments } from "./browser-context";
 import * as conversation from "./conversation";
-
-type Emit = (message: SidecarInbound) => void;
 
 const newId = () => crypto.randomUUID();
 
@@ -61,7 +59,19 @@ async function compactImages() {
 /** Snapshots antigos são peso morto: o DOM já mudou e o modelo não deve consultá-los. */
 async function compactSnapshots() {
   const messages = await conversation.all();
-  const snapshots = messages.filter((item) => item.role === "tool" && item.content.includes("# Elementos interativos"));
+  const extractCallIds = new Set<string>();
+  
+  for (const msg of messages) {
+    if (msg.role === "assistant" && msg.tool_calls) {
+      for (const call of msg.tool_calls) {
+        if (call.function?.name === "browser_action" && call.function?.arguments?.includes('"extractPage"')) {
+          extractCallIds.add(call.id);
+        }
+      }
+    }
+  }
+
+  const snapshots = messages.filter((item) => item.role === "tool" && item.tool_call_id && extractCallIds.has(item.tool_call_id));
   for (const message of snapshots.slice(0, -1)) {
     if (message.content.startsWith("[retrato anterior")) continue;
     await conversation.patch(message.id, { content: "[retrato anterior da página — descartado por estar obsoleto]" });
@@ -69,11 +79,29 @@ async function compactSnapshots() {
 }
 
 /** Devolve se o turno foi aceito: quem chama pela voz precisa saber que a fala se perdeu. */
-export async function submit(text: string, emit: Emit): Promise<boolean> {
+/** Respostas em que o modelo rápido desiste em texto puro, sem tentar nenhuma ferramenta.
+ *  Não precisa ser precisa: um falso positivo só custa uma repetição extra com o modelo robusto,
+ *  que — se a recusa era mesmo correta (senha, captcha) — chega à mesma conclusão. */
+const DECLINE_PATTERN = /\b(não consigo|não posso|não tenho como|não é poss[íi]vel|não tenho acesso|não sei como fazer|infelizmente não)\b/i;
+
+export async function submit(text: string, emit: Emit, options: { useFastModel?: boolean } = {}): Promise<boolean> {
   if (running) return false;
   const settings = await loadSettings();
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
-  const maxRounds = Math.min(30, Math.max(2, Math.round(settings.agent.maxRounds || 8)));
+  const fastModelId = options.useFastModel ? profile?.fastModel?.trim() : "";
+  const robustModelId = profile?.defaultModel;
+  const usingFastModel = !!(fastModelId && robustModelId);
+  let onFastModel = usingFastModel;
+  let escalatedByRefusal = false;
+  const escalate = () => {
+    if (!profile || !robustModelId || !onFastModel) return;
+    onFastModel = false;
+    settings.providers = settings.providers.map((p) => p.id === profile.id ? { ...p, defaultModel: robustModelId } : p);
+  };
+  if (usingFastModel && profile) {
+    settings.providers = settings.providers.map((p) => p.id === profile.id ? { ...p, defaultModel: fastModelId! } : p);
+  }
+  const maxRounds = 100;
   // Um id por turno costura tudo o que vem depois: rodadas, chamadas de tool, ações e falhas.
   beginTurn(newId());
   const turnSpan = span("turn", "turno completo", { autonomy: settings.agent.autonomy, maxRounds });
@@ -100,12 +128,19 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
       await compactSnapshots();
       const context = await collectBrowserContext(settings);
 
+      // Multi-tier Voice: começa com o fastModel; se precisar de mais de uma rodada (chamou
+      // ferramenta na anterior), sobe para o defaultModel mais robusto a partir daqui.
+      if (round > 0 && onFastModel) escalate();
+
       for await (const event of streamChat(settings, await conversation.all(), context, controller.signal)) {
         if (event.type === "text") {
+          chunks += 1;
+          if (!firstToken) firstToken = Math.round(performance.now() - started);
+          // `assistant` é a mesma referência guardada em conversation.messages — appendText já
+          // soma o texto ao objeto de verdade. Somar aqui também duplicava cada token gravado.
           await conversation.appendText(assistant.id, event.text);
           emit({ type: "chat:delta", id: assistant.id, text: event.text });
         }
-        if (event.type === "text") { chunks += 1; if (!firstToken) firstToken = Math.round(performance.now() - started); }
         if (event.type === "telemetry") {
           const line = `${event.values["x-omniroute-provider"] ?? "provider"} · ${event.values["x-omniroute-latency-ms"] ?? "latência n/d"} ms`;
           telemetry = [...telemetry.slice(-5), line];
@@ -116,6 +151,7 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
         if (event.type === "tool_call") calls.push(event.call);
         if (event.type === "error") {
           failed = true;
+          assistant.content = event.message;
           await conversation.patch(assistant.id, { content: event.message, status: "error" });
           emit({ type: "chat:patch", id: assistant.id, patch: { content: event.message, status: "error" } });
           void appendLog({ level: "error", event: "chat.provider_error", detail: event.message });
@@ -129,11 +165,34 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
       if (failed || controller.signal.aborted) break;
 
       if (!calls.length) {
-        // A resposta final inteira entra na trilha: é o lado "saída do modelo" do material de
-        // ajuste fino, e sem ela sobram medições sem o que foi de fato dito.
-        traceRecord("model.text", "resposta ao usuário", { ok: true, data: { texto: assistant.content, chars: assistant.content.length, round } });
-        await conversation.patch(assistant.id, { status: "complete" });
-        emit({ type: "chat:patch", id: assistant.id, patch: { status: "complete" } });
+        /*
+         * O modelo rápido pode desistir em texto puro, sem chamar nenhuma ferramenta — e nesse
+         * caso o laço ia parar aqui, aceitando a recusa como resposta final. É o bug relatado como
+         * "ela fala que não consegue, depois vai lá e faz": a escalada por rodada (acima) só ajuda
+         * quando a rodada anterior *chamou* uma ferramenta; se a primeira resposta já foi uma
+         * desistência em prosa, nunca havia rodada seguinte para escalar. Aqui a recusa nem chega a
+         * ser mostrada: apaga a mensagem e tenta de novo, uma vez só, com o modelo robusto.
+         */
+        if (onFastModel && !escalatedByRefusal && DECLINE_PATTERN.test(assistant.content)) {
+          escalatedByRefusal = true;
+          escalate();
+          await conversation.truncateFrom(assistant.id);
+          emit({ type: "chat:snapshot", ...(await snapshot()) });
+          traceRecord("turn", "recusa do modelo rápido descartada; tentando com o robusto", { data: { texto: assistant.content.slice(0, 200) } });
+          round -= 1;
+          continue;
+        }
+        if (!assistant.content.trim()) {
+          const errorMsg = "O modelo encerrou a resposta prematuramente sem enviar texto ou ferramentas.";
+          await conversation.patch(assistant.id, { content: errorMsg, status: "error" });
+          emit({ type: "chat:patch", id: assistant.id, patch: { content: errorMsg, status: "error" } });
+        } else {
+          // A resposta final inteira entra na trilha: é o lado "saída do modelo" do material de
+          // ajuste fino, e sem ela sobram medições sem o que foi de fato dito.
+          traceRecord("model.text", "resposta ao usuário", { ok: true, data: { texto: assistant.content, chars: assistant.content.length, round } });
+          await conversation.patch(assistant.id, { status: "complete" });
+          emit({ type: "chat:patch", id: assistant.id, patch: { status: "complete" } });
+        }
         break;
       }
 
@@ -163,7 +222,7 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
           continue;
         }
         const callSpan = span("tool.call", call.name, { arguments: safeParse(call.arguments) });
-        const { content, event, image } = await runToolCall(call, settings);
+        const { content, event, image } = await runToolCall(call, settings, emit);
         callSpan.end({ ok: event.kind !== "error", data: { name: call.name, arguments: safeParse(call.arguments), result: content.slice(0, 600) } });
         record(event, emit);
         void appendLog({ level: event.kind === "error" ? "error" : "info", event: event.kind === "error" ? "agent.tool_error" : "agent.tool_completed", detail: `${call.name}: ${content.slice(0, 200)}` });
@@ -176,19 +235,18 @@ export async function submit(text: string, emit: Emit): Promise<boolean> {
         }
       }
 
-      if (round === maxRounds - 2) {
-        await conversation.append({
-          id: newId(),
-          role: "system",
-          content: "Esta é a sua última etapa nesta tarefa. Pare de usar ferramentas e responda ao usuário agora, com o que você conseguiu até aqui e o que ficou faltando.",
-          createdAt: Date.now(),
-          status: "complete",
-        });
+      /*
+       * O teto de 100 é trava de segurança, não conversa — ninguém deve sentir ele no uso normal.
+       * Mas sem aviso nenhum, uma tarefa realmente travada (que varia os argumentos a cada
+       * chamada, escapando do bloqueio de repetição acima) gastaria as 100 rodadas em silêncio.
+       * Um empurrão às 80 dá 20 rodadas de folga para o modelo se recompor sozinho — não é ordem
+       * de parar, é lembrete de que insistir sem mudar de estratégia não é gastar bem o que sobrou.
+       */
+      if (round === maxRounds - 20) {
+        await conversation.append({ id: newId(), role: "system", content: "Esta tarefa já vai longe (muitas rodadas). Se não está progredindo, pare, explique ao usuário o que tentou e o que falta, e pergunte como seguir — em vez de continuar tentando variações da mesma abordagem.", createdAt: Date.now(), status: "complete" });
+        record({ kind: "status", text: "Tarefa longa — avisei o modelo para reavaliar o caminho." }, emit);
       }
-      if (round === maxRounds - 1) {
-        record({ kind: "status", text: `Parei em ${maxRounds} etapas. Diga "continue" para eu seguir de onde parei.` }, emit);
-        traceRecord("turn", "limite de etapas atingido", { ok: false, code: "max_rounds", data: { maxRounds } });
-      }
+      if (round === maxRounds - 1) traceRecord("turn", "teto de segurança de rodadas atingido", { ok: false, code: "max_rounds", data: { maxRounds } });
     }
   } catch (error) {
     const message = error instanceof DOMException && error.name === "AbortError" ? "Execução interrompida." : error instanceof Error ? error.message : "Falha inesperada na execução.";
