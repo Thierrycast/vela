@@ -98,6 +98,28 @@ export function fold(value: string) {
   return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Um seletor que tem chance de continuar valendo amanha.
+ *
+ * Prefere o que o proprio site declarou como identidade — id, data-testid, name — porque isso
+ * costuma sobreviver a redesenho. Cai para um caminho curto de classes so quando nao ha nada
+ * melhor, e desiste quando nem isso existe: um seletor fragil guardado no cache e pior que
+ * nenhum, porque sera tentado com confianca e acertara outro elemento.
+ */
+export function stableSelector(element: Element): string {
+  const id = element.getAttribute("id");
+  if (id && /^[A-Za-z][\w-]*$/.test(id)) return `#${id}`;
+  for (const attribute of ["data-testid", "data-test", "data-qa", "name", "aria-label"]) {
+    const value = element.getAttribute(attribute);
+    if (value && value.length < 60) return `${element.tagName.toLowerCase()}[${attribute}="${CSS.escape(value)}"]`;
+  }
+  const type = element.getAttribute("type");
+  if (type && ["search", "submit", "email", "password"].includes(type)) return `${element.tagName.toLowerCase()}[type="${type}"]`;
+  const role = element.getAttribute("role");
+  if (role) return `[role="${role}"]`;
+  return "";
+}
+
 export function everyElement(root: Document | ShadowRoot, found: Element[], limit: number) {
   const walker = root.ownerDocument
     ? document.createTreeWalker(root as unknown as Node, NodeFilter.SHOW_ELEMENT)

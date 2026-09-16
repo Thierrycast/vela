@@ -1,7 +1,9 @@
-import { accessibleName, everyElement, fold, isInteractive, isSensitive, isVisible, roleOf } from "./dom-semantics";
-import { registerElement, sweep } from "./element-registry";
+import { accessibleName, everyElement, fold, isInteractive, isSensitive, isVisible, roleOf, stableSelector } from "./dom-semantics";
+import { registerElement, resolveRef, sweep } from "./element-registry";
 
 const MAX_NODES = 150;
+/** Moldura nao concorre com os elementos pela cota: ela custa pouco e e o que da sentido a eles. */
+const MAX_STRUCTURE = 60;
 /** Teto da varredura, para não passear por uma página infinita — o corte de verdade é o de cima. */
 const HARD_LIMIT = 1200;
 const MAX_NAME = 100;
@@ -47,29 +49,73 @@ function describe(element: Element, bypassWireguard: boolean = false) {
   return `${parts.join(" ")} />`;
 }
 
-function collect(root: Document | ShadowRoot, found: Element[]) {
-  const walker = root.ownerDocument
-    ? document.createTreeWalker(root as unknown as Node, NodeFilter.SHOW_ELEMENT)
-    : document.createTreeWalker((root as Document).body ?? root, NodeFilter.SHOW_ELEMENT);
+/** Sobe um nível, atravessando a fronteira do shadow DOM — que `parentElement` não cruza. */
+function parentOf(element: Element): Element | null {
+  if (element.parentElement) return element.parentElement;
+  const root = element.getRootNode();
+  return root instanceof ShadowRoot ? root.host : null;
+}
+
+/** Elementos que não se clica, mas que dizem **onde** as coisas estão: seções, formulários, títulos. */
+function isLandmark(element: Element) {
+  const tag = element.tagName.toLowerCase();
+  if (["h1", "h2", "h3", "h4", "nav", "main", "header", "footer", "form", "table", "aside", "article", "section", "dialog", "ul", "ol", "li"].includes(tag)) return true;
+  const role = element.getAttribute("role") ?? "";
+  return ["navigation", "main", "banner", "contentinfo", "form", "dialog", "list", "listitem", "table", "row", "region", "search", "tablist", "menu"].includes(role);
+}
+
+/**
+ * A profundidade que o modelo vê é a de **contenção entre o que foi mostrado**, não a do DOM.
+ *
+ * Um `<div>` dentro de outro dentro de outro não significa nada para quem lê o retrato; o que
+ * significa é que aquele botão "Adicionar" está dentro daquela linha da tabela. Contar só os
+ * ancestrais que também entraram no retrato produz exatamente essa leitura, e é o que faltava
+ * para o modelo saber a qual item pertence cada botão numa lista de itens iguais.
+ */
+function depthOf(element: Element, chosen: Set<Element>) {
+  let depth = 0;
+  let node = parentOf(element);
+  while (node) {
+    if (chosen.has(node)) depth += 1;
+    node = parentOf(node);
+  }
+  return depth;
+}
+
+/** Varre na ordem do documento, separando o que se clica do que só situa. */
+function collect(root: Document | ShadowRoot | Element, interactive: Element[], structure: Element[]) {
+  const start = root instanceof Element ? root : ((root as Document).body ?? root);
+  const walker = document.createTreeWalker(start as Node, NodeFilter.SHOW_ELEMENT);
   let node = walker.currentNode as Element | null;
   while (node) {
     if (node instanceof Element) {
       if (node.hasAttribute("data-vela-ui")) { node = walker.nextSibling() as Element | null; continue; }
-      if (node.shadowRoot) collect(node.shadowRoot, found);
-      // O corte acontece **depois** da ordenação por viewport, não aqui: cortando na ordem do
-      // documento, um menu de navegação com cem links consumia a cota sozinho e o conteúdo que
-      // a pessoa quer nunca aparecia no retrato.
-      if (found.length < HARD_LIMIT && isInteractive(node) && isVisible(node)) found.push(node);
+      if (node.shadowRoot) collect(node.shadowRoot, interactive, structure);
+      if (interactive.length < HARD_LIMIT && isVisible(node)) {
+        // O corte acontece **depois** da ordenação por viewport, não aqui: cortando na ordem do
+        // documento, um menu de navegação com cem links consumia a cota sozinho e o conteúdo que
+        // a pessoa quer nunca aparecia no retrato.
+        if (isInteractive(node)) interactive.push(node);
+        else if (structure.length < MAX_STRUCTURE && isLandmark(node)) structure.push(node);
+      }
     }
     node = walker.nextNode() as Element | null;
   }
 }
 
-function headings() {
-  return [...document.querySelectorAll("h1,h2,h3")]
-    .filter((element) => isVisible(element))
-    .slice(0, 25)
-    .map((element) => `${"#".repeat(Number(element.tagName[1]))} ${(element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME)}`);
+/**
+ * A moldura: seção, formulário, linha de tabela, título.
+ *
+ * Não leva ref porque não se clica nela — leva o nome, que é o que dá sentido ao que está dentro.
+ * Um `[e412] button "Adicionar"` sozinho não diz nada; sob `listitem "Café moído 500g"`, diz tudo.
+ */
+function describeStructure(element: Element) {
+  const role = roleOf(element);
+  const tag = element.tagName.toLowerCase();
+  const heading = /^h[1-6]$/.test(tag);
+  const name = (heading ? (element.textContent ?? "") : accessibleName(element)).replace(/\s+/g, " ").trim().slice(0, MAX_NAME);
+  const label = heading ? `${"#".repeat(Number(tag[1]))} ${name}` : `<${role === "generic" ? tag : role}${name ? ` name="${name.replace(/"/g, "'")}"` : ""}>`;
+  return label;
 }
 
 function readableText() {
@@ -91,7 +137,7 @@ function readableText() {
   return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export type FindOptions = { query?: string; selector?: string; limit?: number; role?: string };
+export type FindOptions = { query?: string; selector?: string; limit?: number; role?: string; hint?: string };
 
 /**
  * Palavras que descrevem **o que a coisa é**, não como ela se chama.
@@ -150,7 +196,7 @@ function readIntent(query: string) {
  * resposta — clicar no contêiner acerta o alvo errado com frequência.
  */
 export function findElements(options: FindOptions) {
-  const { query = "", selector, limit = 20, role } = options;
+  const { query = "", selector, limit = 20, role, hint } = options;
   const needle = fold(query);
   const intent = readIntent(query);
   if (role) intent.roles.add(role.toLowerCase());
@@ -165,6 +211,19 @@ export function findElements(options: FindOptions) {
   const hinted = new Set<Element>();
   for (const candidate of intent.selectors) {
     try { for (const element of document.querySelectorAll(candidate)) hinted.add(element); } catch { /* seletor da tabela, sempre válido */ }
+  }
+  /*
+   * O atalho lembrado de outra vez neste mesmo site. Entra como candidato forte, não como
+   * resposta: se o site mudou e ele casa com outra coisa — ou com nada —, a varredura normal
+   * decide, e o cache é esquecido lá fora. Exigir um único casamento visível é o que impede
+   * um seletor genérico demais de sequestrar a busca.
+   */
+  let remembered: Element | null = null;
+  if (hint) {
+    try {
+      const casam = document.querySelectorAll(hint);
+      if (casam.length === 1 && isVisible(casam[0])) { remembered = casam[0]; hinted.add(casam[0]); }
+    } catch { /* seletor guardado que deixou de ser válido */ }
   }
 
   const scored: Array<{ element: Element; score: number; text: string }> = [];
@@ -205,6 +264,12 @@ export function findElements(options: FindOptions) {
     }
   }
 
+  // O atalho pode não casar o texto procurado (o rótulo mudou, a busca é por papel): ainda assim
+  // é o melhor palpite que existe, e entra na disputa em vez de ficar de fora por tecnicismo.
+  if (remembered && !scored.some((item) => item.element === remembered)) {
+    scored.push({ element: remembered, score: 50, text: accessibleName(remembered) || (remembered.textContent ?? "").trim() });
+  }
+
   // Contêiner que só casa porque um descendente casou não é resposta.
   const specific = scored.filter((item) => !scored.some((other) => other !== item && item.element.contains(other.element)));
   specific.sort((first, second) => second.score - first.score);
@@ -223,30 +288,75 @@ export function findElements(options: FindOptions) {
     content: lines.join("\n"),
     total: specific.length,
     shown: winners.length,
+    // O caminho até o melhor resultado, para não ser redescoberto na próxima conversa.
+    bestSelector: winners[0] ? stableSelector(winners[0].element) : "",
   };
 }
 
-export type SnapshotOptions = { mode?: "outline" | "text"; offset?: number; budget?: number; bypassWireguard?: boolean };
+export type SnapshotOptions = { mode?: "outline" | "text"; offset?: number; budget?: number; bypassWireguard?: boolean; depth?: number; rootRef?: string };
 
+/**
+ * O retrato como árvore, e não como lista.
+ *
+ * A lista plana dizia o que existe e escondia a única coisa que o modelo não consegue deduzir:
+ * a qual item cada botão pertence. Numa página de resultados com vinte "Adicionar" idênticos, ou
+ * numa tabela com um "Editar" por linha, a lista obrigava a adivinhar pela ordem — e a ordem
+ * mente sempre que o site reorganiza alguma coisa. O recuo resolve isso sem custar quase nada:
+ * cada elemento aparece dentro do bloco a que pertence.
+ *
+ * A prioridade do viewport, que antes era **ordenação**, virou **poda**. Reordenar por "o que
+ * está na tela primeiro" destruía a hierarquia — o filho vinha antes do pai, e o recuo passava a
+ * mentir. Agora a ordem é sempre a do documento, e o que está fora da tela é o primeiro a ser
+ * cortado quando o retrato não cabe.
+ */
 export function captureSnapshot(options: SnapshotOptions = {}) {
-  const { mode = "outline", offset = 0, budget = DEFAULT_BUDGET, bypassWireguard = false } = options;
-  const found: Element[] = [];
-  collect(document, found);
-  const viewport = found.filter((element) => { const rect = element.getBoundingClientRect(); return rect.bottom > 0 && rect.top < innerHeight; });
-  const rest = found.filter((element) => !viewport.includes(element));
-  const nodes = [...viewport, ...rest].slice(0, MAX_NODES);
+  const { mode = "outline", offset = 0, budget = DEFAULT_BUDGET, bypassWireguard = false, depth: maxDepth = 12, rootRef } = options;
+
+  let root: Document | Element = document;
+  let zoom = "";
+  if (rootRef) {
+    const resolution = resolveRef(rootRef);
+    if (resolution.status !== "ok") return { content: "", truncated: false, nextOffset: 0, url: location.href, title: document.title, elementCount: 0, missingRoot: true };
+    root = resolution.element;
+    zoom = `(só o que está dentro de ${roleOf(resolution.element)} “${accessibleName(resolution.element).slice(0, 60)}”)`;
+  }
+
+  const interactive: Element[] = [];
+  const structure: Element[] = [];
+  collect(root, interactive, structure);
+
+  // Cabe o que cabe: o que está na tela sobrevive primeiro, mas a ordem final é a do documento.
+  const onScreen = interactive.filter((element) => { const rect = element.getBoundingClientRect(); return rect.bottom > 0 && rect.top < innerHeight; });
+  const offScreen = interactive.filter((element) => !onScreen.includes(element));
+  const kept = new Set([...onScreen, ...offScreen].slice(0, MAX_NODES));
+  const chosen = new Set<Element>([...structure, ...kept]);
+  const ordered = [...interactive, ...structure].filter((element) => chosen.has(element));
+  ordered.sort((first, second) => (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1);
+
+  const lines: string[] = [];
+  for (const element of ordered) {
+    const level = depthOf(element, chosen);
+    if (level > maxDepth) continue;
+    const indent = "  ".repeat(level);
+    lines.push(indent + (kept.has(element) ? describe(element, bypassWireguard) : describeStructure(element)));
+    // As opções ficam sob o `<select>` a que pertencem, sem ref: `selectOption` escolhe pelo texto,
+    // e dar um identificador a cada opção seria pagar token por um caminho que não se usa.
+    if (element instanceof HTMLSelectElement && !isSensitive(element)) {
+      for (const option of [...element.options].slice(0, 20)) {
+        lines.push(`${indent}  option "${option.text.trim().replace(/"/g, "'").slice(0, 60)}"${option.selected ? " (selecionada)" : ""}`);
+      }
+      if (element.options.length > 20) lines.push(`${indent}  [mais ${element.options.length - 20} opções — use selectOption com o texto]`);
+    }
+  }
 
   const sections = [
     `url: ${location.href}`,
-    `título: ${document.title}`,
+    `título: ${document.title}${zoom ? ` ${zoom}` : ""}`,
     "",
-    "# Estrutura",
-    ...headings(),
-    "",
-    "# Elementos interativos",
-    ...nodes.map((element) => describe(element, bypassWireguard)),
+    "# Página",
+    ...lines,
   ];
-  if (found.length > nodes.length) sections.push(`[${found.length - nodes.length} elementos não couberam neste retrato — use find com o texto do que você procura em vez de rolar a página]`);
+  if (interactive.length > kept.size) sections.push(`[${interactive.length - kept.size} elementos não couberam neste retrato — use find com o texto do que você procura em vez de rolar a página]`);
   if (mode === "text") { sections.push("", "# Texto da página", readableText()); }
   sweep();
 
@@ -258,6 +368,7 @@ export function captureSnapshot(options: SnapshotOptions = {}) {
     nextOffset: offset + slice.length,
     url: location.href,
     title: document.title,
-    elementCount: nodes.length,
+    elementCount: kept.size,
+    missingRoot: false,
   };
 }

@@ -54,6 +54,9 @@ function fakePage(): (message: { type: string; action?: BrowserAction }, frameId
     // O alvo que o caminho DOM não move: é ele que provoca a escalada para o modo preciso.
     if (action.type === "click" && action.selector === "#inerte") return { ok: true, summary: "Cliquei em button “Inerte” — sem efeito perceptível." };
     if (action.type === "click") return { ok: true, summary: "Cliquei em button “Enviar” — a página reagiu." };
+    // Menu feito em CSS puro: `:hover` e estado do navegador, nao evento, e nao acende com
+    // evento sintetico. E o caso que so o ponteiro de verdade resolve.
+    if (action.type === "hover") return { ok: true, summary: "Passei o mouse sobre button “Minha conta” — nada mudou na página." };
     // Campo que ignora evento sintético: o caminho DOM sai sem efeito e a escalada tem de entrar.
     if (action.type === "type" && action.selector === "#travado") return { ok: true, summary: "Tentei digitar em textbox “Travado” e o campo continua com “” — sem efeito perceptível." };
     if (action.type === "type") return { ok: true, summary: "Digitei em textbox “Buscar” (valor agora: “notebook”)." };
@@ -368,6 +371,14 @@ await run("aba da sessao e aceita por numero", [
   [delta("Lendo a aba 7."), toolCall("c1", "browser_action", { action: "extractPage", tabId: 7 }), DONE],
   [delta("Pronto."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+
+// 18d. Hover que nao acendeu o menu escala para o ponteiro de verdade.
+cdpLog.length = 0;
+await run("modo preciso move o ponteiro de verdade", [
+  [delta("Vou passar o mouse."), toolCall("c1", "browser_action", { action: "hover", selector: "#menu-conta" }), DONE],
+  [delta("Agora abriu."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto", preciseMode: true } });
+console.log("CDP:", cdpLog.join(" → ") || "(nao escalou)");
 
 // 18. O registro de refs, exercitado direto — é lógica pura e não precisa do loop inteiro.
 // O que importa aqui é a **estabilidade**: o mesmo elemento, relido, tem de receber o mesmo ref.

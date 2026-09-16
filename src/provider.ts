@@ -46,6 +46,7 @@ const browserActionTool = (settings: AppSettings) => ({
         timeoutMs: { type: "number", description: "Para waitFor: quanto esperar no máximo. Padrão 8000, teto 30000." },
         extractMode: { type: "string", enum: ["outline", "text"], description: "Para extractPage. outline traz só estrutura e elementos; text inclui o texto da página." },
         offset: { type: "number", description: "Para extractPage: continua a leitura a partir deste ponto quando o resultado veio truncado." },
+        depth: { type: "number", description: "Para extractPage: até que profundidade descer na árvore da página. Menor = visão geral, maior = detalhe. Padrão 12." },
         query: { type: "string", description: "Para find: o texto a procurar na página inteira, mesmo fora da tela. Sem acento e sem caixa importa." },
         limit: { type: "number", description: "Para find: quantos resultados devolver. Padrão 20." },
         role: { type: "string", description: "Para find: restringe ao papel do elemento (button, link, textbox, searchbox, checkbox, combobox, tab, heading). Use quando souber o que a coisa é mas não como ela se chama." },
@@ -251,7 +252,7 @@ const delegateTaskTool = {
   type: "function",
   function: {
     name: "delegate_task",
-    description: "Só disponível quando VOCÊ é o modelo rápido de uma conversa por voz. Manda uma tarefa de várias etapas para rodar em segundo plano com o modelo robusto, sem travar a conversa. Você responde ao usuário na hora (ex.: \"vou verificar isso\") e continua ouvindo; o resultado chega como mensagem nova quando terminar, e é falado em voz alta. Não use para algo que você mesmo resolve em poucas trocas — só quando o trabalho realmente exigiria várias chamadas de ferramenta seguidas.",
+    description: "Manda uma tarefa de várias etapas para rodar em segundo plano, numa aba própria, enquanto você continua conversando. Você responde ao usuário na hora (ex.: \"vou verificar isso\") e o resultado chega como mensagem nova quando terminar — falado em voz alta, se a conversa for por voz. Até duas tarefas rodam ao mesmo tempo; o resto espera em fila. Não use para algo que você resolve em poucas trocas: é para trabalho que exigiria muitas chamadas seguidas e deixaria o usuário esperando calado.",
     parameters: {
       type: "object",
       properties: {
@@ -276,7 +277,7 @@ export function buildTools(settings: AppSettings): ToolDefinition[] {
    * ferramenta ao modelo robusto (que já é quem executaria a tarefa) não teria efeito útil, e
    * deixaria a tarefa "robusta" rodando dentro de si mesma sem ganho nenhum.
    */
-  if (profile?.fastModel && profile.defaultModel === profile.fastModel && isToolEnabled(settings, "delegate_task")) tools.push(delegateTaskTool);
+  if (isToolEnabled(settings, "delegate_task")) tools.push(delegateTaskTool);
   return tools;
 }
 

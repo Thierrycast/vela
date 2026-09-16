@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Mercearia — resultados</title>
+<style>
+  body { font: 15px system-ui; margin: 24px; max-width: 760px; }
+  li { border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin: 8px 0; list-style: none; }
+  .menu { position: relative; display: inline-block; }
+  .menu ul { display: none; position: absolute; background: #fff; border: 1px solid #ccc; padding: 6px; }
+  .menu:hover ul { display: block; }
+  .oculto { display: none; }
+</style>
+</head>
+<body>
+<!--
+  Página de teste para a camada de navegação. Cada bloco existe por um motivo:
+
+  - a lista repete "Adicionar" em itens diferentes, que é o caso em que a lista plana obrigava o
+    modelo a adivinhar pela ordem — aqui o recuo tem de dizer a qual produto cada botão pertence;
+  - o menu só abre no hover, que era um beco sem saída antes da ação existir;
+  - o <select> nativo não abre para evento sintético, e é o que selectOption resolve;
+  - o aviso aparece depois de um tempo, para exercitar a espera por condição em vez de por relógio.
+-->
+<header><h1>Mercearia</h1></header>
+
+<nav aria-label="Principal">
+  <div class="menu">
+    <button id="menu-conta">Minha conta</button>
+    <ul>
+      <li><a href="/pedidos">Meus pedidos</a></li>
+      <li><a href="/sair">Sair</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <form role="search">
+    <label for="busca">Buscar produtos</label>
+    <input id="busca" type="search" name="q" placeholder="o que você procura?">
+    <button type="submit">Buscar</button>
+  </form>
+
+  <h2>Resultados</h2>
+  <ul id="resultados">
+    <li><span>Café moído 500g</span> <span>R$ 24,90</span> <button class="add">Adicionar</button></li>
+    <li><span>Açúcar mascavo 1kg</span> <span>R$ 12,50</span> <button class="add">Adicionar</button></li>
+    <li><span>Filtro de papel nº 103</span> <span>R$ 8,90</span> <button class="add">Adicionar</button></li>
+  </ul>
+
+  <h2>Entrega</h2>
+  <form id="entrega">
+    <label for="uf">Estado</label>
+    <select id="uf" name="uf">
+      <option value="">escolha…</option>
+      <option value="sp">São Paulo</option>
+      <option value="rj">Rio de Janeiro</option>
+      <option value="mg">Minas Gerais</option>
+    </select>
+    <label for="cep">CEP</label>
+    <input id="cep" name="cep" type="text">
+    <button type="submit">Calcular frete</button>
+  </form>
+
+  <p id="aviso" class="oculto">Frete calculado: R$ 19,90</p>
+</main>
+
+<script>
+  document.getElementById("entrega").addEventListener("submit", (event) => {
+    event.preventDefault();
+    setTimeout(() => { document.getElementById("aviso").classList.remove("oculto"); }, 1200);
+  });
+  // Um campo que só aceita valor por evento confiável, para exercitar a escalada.
+  const cep = document.getElementById("cep");
+  cep.addEventListener("input", (event) => { if (!event.isTrusted) cep.value = ""; });
+</script>
+</body>
+</html>

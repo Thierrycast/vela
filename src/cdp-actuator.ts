@@ -50,6 +50,28 @@ export async function preciseClick(tabId: number, point: Point, options: { click
   }, indisponivel);
 }
 
+/**
+ * O ponteiro parado sobre o alvo — o único jeito de abrir um menu feito em CSS puro.
+ *
+ * `:hover` é estado do navegador, não evento: ele não reage a `dispatchEvent(new MouseEvent(...))`,
+ * por mais completa que seja a sequência. Um menu que abre só por CSS é, para o caminho DOM, um
+ * beco sem saída — e continua sendo até o ponteiro se mover de verdade, que é o que o CDP faz.
+ */
+export async function preciseHover(tabId: number, point: Point): Promise<Outcome> {
+  return withSession(tabId, "action", async () => {
+    try {
+      const base = { x: Math.round(point.x), y: Math.round(point.y), type: "mouseMoved", button: "none", buttons: 0 };
+      // Dois movimentos: alguns menus só reagem quando percebem que o ponteiro *chegou*, e um
+      // evento isolado na posição final pode ser lido como ruído.
+      await send(tabId, "Input.dispatchMouseEvent", { ...base, x: Math.round(point.x) - 4, y: Math.round(point.y) - 4 });
+      await send(tabId, "Input.dispatchMouseEvent", base);
+      return { ok: true, detail: "ponteiro movido de verdade até o alvo" };
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : "o comando de movimento falhou" };
+    }
+  }, indisponivel);
+}
+
 /** Texto no elemento em foco. `Input.insertText` não simula teclas, mas passa por `isTrusted`. */
 export async function preciseType(tabId: number, text: string): Promise<Outcome> {
   return withSession(tabId, "action", async () => {

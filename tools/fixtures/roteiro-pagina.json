@@ -1,0 +1,11 @@
+[
+  { "acao": "abrirPagina", "url": "http://127.0.0.1:8799/lista.html", "ms": 2500 },
+  { "acao": "retrato", "url": "/lista.html" },
+  { "acao": "agir", "url": "/lista.html", "acaoDaPagina": { "type": "find", "query": "campo de busca" } },
+  { "acao": "agir", "url": "/lista.html", "acaoDaPagina": { "type": "find", "query": "adicionar" } },
+  { "acao": "agir", "url": "/lista.html", "acaoDaPagina": { "type": "hover", "selector": "#menu-conta" } },
+  { "acao": "agir", "url": "/lista.html", "acaoDaPagina": { "type": "selectOption", "selector": "#uf", "label": "Rio de Janeiro" } },
+  { "acao": "agir", "url": "/lista.html", "acaoDaPagina": { "type": "click", "selector": "#entrega button" } },
+  { "acao": "agir", "url": "/lista.html", "acaoDaPagina": { "type": "waitFor", "text": "Frete calculado", "timeoutMs": 5000 } },
+  { "acao": "agir", "url": "/lista.html", "acaoDaPagina": { "type": "type", "selector": "#cep", "text": "01310-100" } }
+]

@@ -260,7 +260,8 @@ function pressKey(element: Element | null, key: string) {
  */
 export async function performAction(action: BrowserAction, resolved?: Target): Promise<ActionResult> {
   if (action.type === "extractPage") {
-    const snapshot = captureSnapshot({ mode: action.mode, offset: action.offset, bypassWireguard: action.bypassWireguard });
+    const snapshot = captureSnapshot({ mode: action.mode, offset: action.offset, bypassWireguard: action.bypassWireguard, depth: action.depth, rootRef: action.ref });
+    if (snapshot.missingRoot) return failure("element_not_found", "O elemento que você pediu para reler não está mais na página. Leia a página inteira (sem ref) para se situar.");
     const pageTools = await listPageTools();
     const content = snapshot.content + describePageTools(pageTools);
     const extra = pageTools.length ? ` A página oferece ${pageTools.length} ferramenta(s) própria(s).` : "";
@@ -269,12 +270,14 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
 
   if (action.type === "find") {
     if (!action.query?.trim() && !action.selector?.trim() && !action.role?.trim()) return failure("unsupported", "Informe query (o que procurar), selector (CSS) ou role (o papel do elemento).");
-    const result = findElements({ query: action.query, selector: action.selector, limit: action.limit, role: action.role });
+    const result = findElements({ query: action.query, selector: action.selector, limit: action.limit, role: action.role, hint: action.hint });
     if (!result.total) return failure("element_not_found", `Nada casa com ${action.query ? `“${action.query}”` : action.selector} nesta página.`);
     return {
       ok: true,
       summary: `Achei ${result.total} correspondência(s)${result.shown < result.total ? `, mostrando as ${result.shown} melhores` : ""}.`,
       content: result.content,
+      url: location.href,
+      bestSelector: result.bestSelector,
     };
   }
 

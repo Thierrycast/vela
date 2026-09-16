@@ -135,8 +135,8 @@ type BrowserActionKind =
   | { type: "type"; ref?: string; selector?: string; text: string; submit?: boolean; mode?: "replace" | "append" }
   | { type: "keyPress"; key: string; ref?: string }
   | { type: "scroll"; deltaX?: number; deltaY?: number }
-  | { type: "extractPage"; mode?: "outline" | "text"; offset?: number; bypassWireguard?: boolean }
-  | { type: "find"; query?: string; selector?: string; limit?: number; role?: string }
+  | { type: "extractPage"; mode?: "outline" | "text"; offset?: number; bypassWireguard?: boolean; depth?: number; ref?: string }
+  | { type: "find"; query?: string; selector?: string; limit?: number; role?: string; hint?: string }
   | { type: "screenshot" }
   | { type: "pageTool"; name: string; arguments?: unknown }
   /** `world` decide se o script vê só o DOM (isolated, o padrão) ou também o JavaScript da página. */
@@ -171,6 +171,8 @@ export type ActionSuccess = {
   content?: string;
   /** Captura da aba, em data URL, quando a ação foi `screenshot`. */
   image?: string;
+  /** O caminho ate o melhor resultado de um find, guardado para a proxima vez. */
+  bestSelector?: string;
   /** Identifica o documento que respondeu. O background usa para saber se os refs que ele tem
    *  em mãos pertencem a esta página ou a uma que já foi substituída. */
   epoch?: string;

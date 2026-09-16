@@ -8,6 +8,8 @@ import { appendLog, loadSettings } from "./storage";
 import { beginTurn, record as traceRecord, span } from "./trace";
 import { collectBrowserContext, clearAttachments } from "./browser-context";
 import { recordTurn } from "./action-stats";
+import { cancelDelegated } from "./background-task";
+import { noteSource } from "./domain-policy";
 import * as conversation from "./conversation";
 
 const newId = () => crypto.randomUUID();
@@ -23,7 +25,7 @@ let events: AgentEvent[] = [];
 let telemetry: string[] = [];
 
 export const isRunning = () => running;
-export const abort = () => controller?.abort();
+export const abort = () => { controller?.abort(); cancelDelegated(); };
 
 export async function snapshot(): Promise<LoopSnapshot> {
   return { messages: await conversation.all(), events, telemetry, running };
@@ -144,6 +146,8 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
   // A promoção do depurador é decisão do turno, não de cada ação: quem liga a habilidade aceita
   // ver a faixa de aviso durante uma tarefa que insista no caminho confiável.
   configureSticky(settings.capabilities.cdpSession);
+  // O que o usuário escreveu é decisão dele: endereços que ele mencionou passam sem confirmação.
+  noteSource("user", text);
   running = true;
   controller = new AbortController();
   emit({ type: "chat:running", running: true });

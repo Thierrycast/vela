@@ -13,6 +13,9 @@ import { runDelegatedTask } from "./background-task";
 import { CAPABILITY_LABELS, actionCapability, isEnabled, refuse, scriptCapability, toolCapability } from "./capabilities";
 import { BatchItem, batchSize, runBatch } from "./batch-runner";
 import { readConsole, readNetwork, startWatching } from "./page-observability";
+import { looksLikeInjection, wrapUntrusted } from "./untrusted";
+import { noteSource } from "./domain-policy";
+import { record as traceRecord } from "./trace";
 
 type ToolArguments = {
   action?: BrowserAction["type"]; url?: string; newTab?: boolean; ref?: string; selector?: string;
@@ -24,7 +27,7 @@ type ToolArguments = {
   code?: string; replaces?: string; world?: string;
   op?: "list" | "activate" | "close" | "closeOthers"; tabId?: number; tabIds?: number[]; keep?: number;
   field?: string; value?: string; script?: string; task?: string;
-  toRef?: string; toSelector?: string; label?: string; index?: number; direction?: string; items?: unknown; role?: string;
+  toRef?: string; toSelector?: string; label?: string; index?: number; direction?: string; items?: unknown; role?: string; depth?: number;
 };
 
 const SEARCH_BUDGET = 4000;
@@ -42,7 +45,7 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
     case "type": return args.text !== undefined ? { type: "type", ref: args.ref, selector: args.selector, text: args.text, submit: args.submit, mode: args.mode } : null;
     case "keyPress": return args.key ? { type: "keyPress", key: args.key, ref: args.ref } : null;
     case "scroll": return { type: "scroll", deltaX: args.deltaX, deltaY: args.deltaY };
-    case "extractPage": return { type: "extractPage", mode: args.extractMode, offset: args.offset };
+    case "extractPage": return { type: "extractPage", mode: args.extractMode, offset: args.offset, depth: args.depth, ref: args.ref };
     case "find": return { type: "find", query: args.query, selector: args.selector, limit: args.limit, role: args.role };
     case "screenshot": return { type: "screenshot" };
     case "wait": return { type: "wait", milliseconds: args.milliseconds ?? 1000 };
@@ -60,11 +63,25 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
   return kind ? { ...kind, tabId: args.tabId } : null;
 }
 
-function renderActionResult(result: ActionResult): string {
+/** O que veio da página é dado de fora; o que a Vela produziu é resposta da ferramenta. */
+const FROM_PAGE: Array<BrowserAction["type"]> = ["extractPage", "find", "pageTool", "evaluateScript"];
+
+function hostOf(url: string | undefined) {
+  try { return url ? new URL(url).host : "a página"; } catch { return "a página"; }
+}
+
+function renderActionResult(result: ActionResult, action: BrowserAction): string {
   if (!result.ok) return `ERRO [${result.code}] ${result.summary}`;
   const parts = [result.summary];
   if (result.content) {
-    parts.push("", result.content);
+    const daPagina = FROM_PAGE.includes(action.type);
+    if (daPagina) {
+      // Registrar, não bloquear: uma página sobre engenharia de prompt contém todas essas frases,
+      // e um detector que barra trabalho legítimo acaba desligado. Quem julga é quem tem contexto.
+      const suspeita = looksLikeInjection(result.content);
+      if (suspeita) traceRecord("error", "texto da página parece tentar dar ordens", { ok: false, code: "injecao", data: { trecho: suspeita, origem: hostOf(result.url) } });
+    }
+    parts.push("", daPagina ? wrapUntrusted(result.content, hostOf(result.url)) : result.content);
     if (result.truncated) parts.push(`[truncado — continue com offset=${result.nextOffset}]`);
   }
   return parts.join("\n");
@@ -102,7 +119,7 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
       const result = await executeAction(action, settings.agent.autonomy);
       void recordAction(action, result);
       return {
-        content: renderActionResult(result),
+        content: renderActionResult(result, action),
         event: { kind: result.ok ? "result" : "error", text: result.summary, action },
         // A imagem sobe separada: resposta de ferramenta é texto, então a captura entra depois,
         // numa mensagem do usuário.
@@ -144,13 +161,19 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
     if (call.name === "web_search" && args.query) {
       if (!profile) throw new Error("Provider ativo não encontrado.");
       const results = await searchProvider(profile, args.query, args.max_results ?? 5);
-      return { content: summarizeSearch(results), event: { kind: "result", text: `Busca: ${results.length} resultado(s) para “${args.query}”.` } };
+      const resumo = summarizeSearch(results);
+      // Endereço vindo de busca é decisão de fora da página: navegar para ele não pede confirmação.
+      noteSource("search", resumo);
+      return { content: resumo, event: { kind: "result", text: `Busca: ${results.length} resultado(s) para “${args.query}”.` } };
     }
 
     if (call.name === "web_fetch" && args.url) {
       if (!profile) throw new Error("Provider ativo não encontrado.");
       const content = await fetchUrl(profile, args.url, args.max_length ?? 8000);
-      return { content: content || "[a página não devolveu conteúdo legível]", event: { kind: "result", text: `Li ${args.url}` } };
+      // O endereço foi decisão do modelo, mas o que voltou é conteúdo de site: os endereços de
+      // dentro dele são ideia da página, não do usuário.
+      noteSource("page", content);
+      return { content: content ? wrapUntrusted(content, hostOf(args.url)) : "[a página não devolveu conteúdo legível]", event: { kind: "result", text: `Li ${args.url}` } };
     }
 
     if (call.name === "tab_manage" && args.op) {

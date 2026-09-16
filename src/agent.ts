@@ -5,10 +5,13 @@ import { approvalKey, describeAction, isRisky, requestApproval } from "./approva
 import { span } from "./trace";
 import { adoptTab } from "./session";
 import { isSessionTab } from "./tab-manager";
-import { preciseClick, preciseFill, preciseKey } from "./cdp-actuator";
+import { preciseClick, preciseFill, preciseHover, preciseKey } from "./cdp-actuator";
 import { cdpAvailable } from "./cdp-session";
 import { allocateRefs, resolveRoute } from "./ref-registry";
 import { evaluateInMainWorld } from "./script-world";
+import { gateNavigation, noteSource } from "./domain-policy";
+import { HOST_ACCESS_MISSING, hasHostAccess } from "./permissions";
+import { forgetRoute, recallRoute, rememberRoute } from "./route-cache";
 
 // `hover` entra aqui porque passar o mouse nao modifica a pagina — pedir aprovacao para cada
 // passagem de mouse em modo Assistir tornaria o modo inutilizavel em qualquer site com menu.
@@ -124,7 +127,11 @@ async function readAllFrames(tabId: number, tabUrl: string | undefined, action: 
   // A aba encabeça o bloco em vez de aparecer dentro de cada ref: o modelo precisa saber onde
   // está agindo uma vez, não cento e cinquenta vezes.
   const header = `## aba ${tabId} — ${safeHost(tabUrl ?? "")}`;
-  return { ok: true, summary: `Página lida em ${total} frame(s).`, content: [header, ...parts].join("\n") };
+  const content = [header, ...parts].join("\n");
+  // Todo endereço que aparece numa página lida fica marcado como ideia **da página** — ver
+  // `domain-policy.ts`. É essa marca que distingue "o usuário pediu" de "o site mandou".
+  noteSource("page", content);
+  return { ok: true, summary: `Página lida em ${total} frame(s).`, content, url: tabUrl };
 }
 
 function safeHost(url: string) {
@@ -205,11 +212,14 @@ async function shrink(dataUrl: string): Promise<string> {
  *   original inalterado.
  */
 const NO_EFFECT = "sem efeito perceptível";
+/** O hover do caminho DOM nao acende `:hover`; e esta frase que pede o ponteiro de verdade. */
+const HOVER_NADA = "nada mudou na página";
 const KEY_IGNORED = "tecla despachada";
 
 function wantsEscalation(action: BrowserAction, result: ActionResult): boolean {
   if (!result.ok) return false;
   if (action.type === "click" || action.type === "type") return result.summary.includes(NO_EFFECT);
+  if (action.type === "hover") return result.summary.includes(HOVER_NADA);
   if (action.type === "keyPress") return result.summary.includes(KEY_IGNORED);
   return false;
 }
@@ -266,6 +276,14 @@ async function escalate(tabId: number, action: BrowserAction, result: ActionResu
         : { ...result, summary: `${result.summary} Repeti pelo modo preciso (evento confiável) e o campo continua ${value === null ? "ilegível" : `com “${value.slice(0, 60)}”`} — este campo não aceita ser preenchido por fora. Peça ao usuário (request_user) ou procure outro caminho.` };
     }
     dispatched = await preciseClick(tabId, point);
+  } else if (action.type === "hover") {
+    const point = await chrome.tabs.sendMessage(tabId, { type: "agent:locate", action }, { frameId: 0 })
+      .catch(() => null) as { x: number; y: number } | null;
+    if (!point) {
+      attempt.end({ ok: false, data: { motivo: "o alvo não pôde ser localizado na tela" } });
+      return result;
+    }
+    dispatched = await preciseHover(tabId, point);
   } else if (action.type === "keyPress") {
     dispatched = await preciseKey(tabId, action.key);
   } else {
@@ -335,6 +353,10 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
     localAction = { ...localAction, toRef: destino.ref } as BrowserAction;
   }
 
+  // Sem acesso aos sites, nada disto funciona — e a recusa precisa dizer que o conserto está numa
+  // tela de configurações, não em outro caminho dentro da página.
+  if (!(await hasHostAccess())) return failure("denied", HOST_ACCESS_MISSING);
+
   // Recusas baratas vêm antes da aprovação: não faz sentido consultar o usuário
   // sobre uma ação que já vai falhar por causa da página.
   if (action.type !== "navigate") {
@@ -360,6 +382,13 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
 
   if (action.type === "navigate") {
     if (denied) return failure("denied", "Modo Observar: navegação bloqueada. Descreva o passo ao usuário ou peça para trocar a autonomia.");
+    /*
+     * O endereço veio da própria página? Então quem teve a ideia foi ela, e não o usuário. Ver
+     * `domain-policy.ts` — é a única defesa real contra uma página instruir o agente a levar a
+     * sessão logada da pessoa para outro lugar.
+     */
+    const gate = await gateNavigation(action.url, tab.url, (await loadSettings()).capabilities.domainGate);
+    if (!gate.allowed) return failure("denied", gate.reason);
     let targetId = tab.id;
     if (action.newTab) {
       const created = await chrome.tabs.create({ url: action.url, active: false, openerTabId: tab.id });
@@ -439,10 +468,24 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
 
   if (CURSOR_ACTIONS.includes(action.type)) await beginTrace(tab.id);
 
+  /*
+   * A busca começa pelo caminho que já funcionou neste site, quando existe um.
+   *
+   * O atalho não decide nada: ele entra como candidato na varredura normal (ver `findElements`).
+   * O que ele economiza é a chance de a pontuação escolher outro elemento parecido — que é o erro
+   * caro, porque leva a agir no lugar errado em vez de simplesmente não achar.
+   */
+  const usaCache = (await loadSettings()).capabilities.routeCache;
+  let comCache = localAction;
+  if (usaCache && action.type === "find" && action.query && tab.url) {
+    const lembrado = await recallRoute(tab.url, action.query);
+    if (lembrado) comCache = { ...localAction, hint: lembrado } as BrowserAction;
+  }
+
   const urlBefore = tab.url;
   const raw = await sendToTab(tab.id, {
     type: "agent:action",
-    action: localAction,
+    action: comCache,
     actionId: crypto.randomUUID(),
     ghost: denied,
     trace: await traceConfig(),
@@ -456,6 +499,18 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
   const result: ActionResult = raw.content
     ? { ...raw, content: allocateRefs(raw.content, { tabId: tab.id, frameId, epoch: raw.epoch ?? "" }) }
     : raw;
+  // Todo endereço que aparece numa página lida fica marcado como ideia **da página**.
+  if (result.ok && result.content) noteSource("page", result.content);
+
+  /*
+   * O atalho é atualizado pelo desfecho, não pela intenção: a busca que achou grava o caminho, e
+   * a que não achou apaga o que estava guardado. Um atalho que mente uma vez custa mais do que
+   * nunca ter existido, porque será tentado com confiança na próxima.
+   */
+  if (usaCache && action.type === "find" && action.query && tab.url) {
+    if (result.ok && result.bestSelector) void rememberRoute(tab.url, action.query, result.bestSelector);
+    else if (!result.ok) void forgetRoute(tab.url, action.query);
+  }
 
   // Coordenada de viewport só faz sentido numa aba que está renderizando: em segundo plano o
   // layout pode estar desatualizado, e o clique confiável cairia no lugar errado.

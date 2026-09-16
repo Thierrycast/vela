@@ -32,8 +32,18 @@ function start() {
       return false;
     }
 
+    /*
+     * Toda ação responde, inclusive quando quebra.
+     *
+     * Este listener devolve `true` para prometer uma resposta assíncrona; se a promessa rejeitar,
+     * o canal fecha sem resposta e quem pediu recebe "the message channel closed before a response
+     * was received" — uma mensagem que não diz nada sobre o que de fato falhou, e que o modelo lê
+     * como "a página não respondeu". O erro real vale muito mais que o silêncio.
+     */
     if (message.type === "agent:action" && message.action) {
-      void runTracedAction(message.action, message.actionId ?? crypto.randomUUID(), message.trace ?? { cursor: true, border: true, highlight: true }, message.ghost ?? false).then(sendResponse);
+      void runTracedAction(message.action, message.actionId ?? crypto.randomUUID(), message.trace ?? { cursor: true, border: true, highlight: true }, message.ghost ?? false)
+        .catch((error: unknown) => ({ ok: false, code: "unsupported", summary: `A ação ${message.action?.type} quebrou dentro da página: ${error instanceof Error ? error.message : String(error)}` }))
+        .then(sendResponse);
       return true;
     }
 

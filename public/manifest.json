@@ -34,13 +34,15 @@
     "scripting",
     "tabs",
     "webNavigation",
-    "notifications",
-    "tabGroups",
     "offscreen",
     "alarms",
     "debugger"
   ],
-  "host_permissions": [
+  "optional_permissions": [
+    "notifications",
+    "tabGroups"
+  ],
+  "optional_host_permissions": [
     "<all_urls>"
   ],
   "content_security_policy": {
