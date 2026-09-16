@@ -21,16 +21,20 @@ Toda vez que rodar `npm run build`, clique em **Atualizar** no card da extensão
 
 ## Primeiro uso — na ordem
 
-1. **Opções → Providers** — cole a chave de API do OmniRoute e clique em **Modelos** para
+1. **Opções → Permissões → Conceder acesso aos sites.** O acesso não vem junto com a instalação: o
+   Chrome pergunta na hora, você concede com um clique, e a extensão reinicia para a permissão
+   valer. Sem isso ela não lê nem age em página nenhuma — e diz isso com todas as letras quando
+   você pedir algo.
+2. **Opções → Providers** — cole a chave de API do OmniRoute e clique em **Modelos** para
    carregar a lista. Escolha um modelo com suporte a *tools*; sem isso a Vela só conversa.
-2. **Opções → Providers → Diagnóstico** — clique em **Sondar endpoints**. Isso descobre o que o
+3. **Opções → Providers → Diagnóstico** — clique em **Sondar endpoints**. Isso descobre o que o
    seu gateway realmente expõe e liga as capacidades correspondentes:
    - `web/fetch` disponível → a tool `web_fetch` passa a ser oferecida ao modelo;
    - `audio/transcriptions` disponível → os botões de voz saem do estado desabilitado.
 
    O código dos status importa: **404/405 = a rota não existe**; **401/403 = existe, é
    credencial**; **400/422 = existe, é o formato do corpo**.
-3. **Voz (opcional)** — a permissão de microfone precisa ser concedida **a partir da página de
+4. **Voz (opcional)** — a permissão de microfone precisa ser concedida **a partir da página de
    opções**, porque um documento offscreen não consegue exibir o prompt do Chrome.
 
 ## Testar se está funcionando
@@ -43,6 +47,9 @@ Toda vez que rodar `npm run build`, clique em **Atualizar** no card da extensão
 | Em **Assistir**, peça um clique | Aparece um cartão pedindo aprovação antes de agir |
 | Selecione um texto em qualquer página | Aparece a marca da Vela; o menu oferece Perguntar/Explicar/Resumir/Usar como contexto |
 | Feche e reabra o painel no meio de uma tarefa | O histórico e o estado de execução continuam |
+| Peça *"busque X neste site"* numa página com campo de busca | Deve agrupar abrir/clicar/digitar/Enter num lote só, não em quatro rodadas |
+| Leia a página, clique em algo, e peça para clicar em outro elemento da mesma leitura | Deve funcionar sem reler: os refs continuam válidos |
+| Numa lista longa, role até reciclar as linhas e use um ref antigo | Deve recusar com `ref_changed` e dizer o que aquele item era |
 
 ## Testar com a extensão carregada automaticamente
 
@@ -70,6 +77,22 @@ e usada; headless só quando a medição é automatizada e não há nada para ol
 Ao encerrar, matar **só o processo daquela porta** (`netstat -ano` → `taskkill /PID`), nunca
 `taskkill /IM chrome.exe`, que derruba o navegador pessoal junto.
 
+## Testar a leitura de página contra uma página controlada
+
+```bash
+npm run build
+node tools/drive.mjs --fixtures --roteiro=tools/fixtures/roteiro-pagina.json
+```
+
+Sobe um servidor local com `tools/fixtures/`, carrega a extensão num Chrome limpo e conversa com o
+content script **sem passar pelo modelo** — o que sai é o retrato como a página o produz, não o
+texto já compactado da conversa. É assim que se confere a árvore (cada botão dentro do seu item), o
+`find` por papel, a espera por condição e o campo que só aceita evento confiável.
+
+A cópia carregada no teste traz o acesso aos sites como permissão fixa: o diálogo do Chrome que
+pede essa autorização no uso real não pode ser respondido por um roteiro automático. O código
+exercitado é o mesmo.
+
 ## Trocar de modelo
 
 O nome do modelo na barra de envio abre a lista do próprio gateway, com busca — sem sair da
@@ -78,6 +101,35 @@ dia; a busca existe porque uma lista de mil e quatrocentos modelos não se naveg
 vale para o provider ativo e é a mesma preferência que aparece em Configurações → Providers.
 
 ## O que a Vela sabe fazer sozinha
+
+**Agrupar o que já é previsível.** Abrir a página, clicar no campo de busca, digitar e apertar
+Enter não são quatro conversas com o modelo: são um lote. `browser_batch` executa a sequência numa
+ida só e para no primeiro erro, dizendo o que rodou e o que não chegou a rodar. É o que mais
+encurta tarefas longas — o custo de uma tarefa quase nunca está no clique, está na rodada que
+precede cada clique. Em **Assistir**, você aprova o plano inteiro num cartão só.
+
+**Esperar pelo que deve acontecer.** `waitFor` espera um texto aparecer, um elemento existir, um
+"carregando" sumir (`gone`) ou a rede parar — e volta no instante em que acontece, dizendo por quê.
+Antes ela chutava milissegundos e errava dos dois lados.
+
+**Trabalhar numa aba sem tirar você da sua.** Toda ação aceita `tabId`, e os refs sabem de que aba
+vieram. Numa lista de dez itens, ela abre dez abas e age em cada uma sem trazer nenhuma para a
+frente. Só as abas do grupo "Vela" são endereçáveis assim; as suas continuam suas.
+
+**Passar o mouse, arrastar, escolher numa lista, voltar.** `hover` abre menu que só aparece no
+ponteiro (e, se o menu for de CSS puro, escala para o ponteiro de verdade pelo depurador — evento
+sintético não acende `:hover`); `drag` reordena e move; `selectOption` escolhe pelo texto que
+aparece na tela; `history` volta e avança.
+
+**Ler o que a página diz de si mesma.** Com as habilidades ligadas, `read_console_messages` mostra
+os erros que o site escreve para si (onde costuma estar o motivo de uma ação não funcionar) e
+`read_network_requests` mostra as requisições — que às vezes revelam o endereço com os dados
+prontos e poupam uma dezena de cliques. Os dois começam a gravar quando são chamados: chame,
+repita a ação, leia de novo. Cabeçalho nenhum é guardado, e token no endereço é apagado.
+
+**Delegar o que vai demorar.** `delegate_task` manda uma tarefa longa para rodar por trás, em aba
+própria, enquanto a conversa continua. Duas ao mesmo tempo; o resto espera em fila. Na voz, o
+resultado chega falado.
 
 **Olhar a tela.** `screenshot` captura a janela visível e manda a imagem para o modelo — é o
 único caminho para o que existe só em pixel: legenda dentro de miniatura de vídeo, gráfico,
@@ -346,15 +398,18 @@ lógica aparecem antes de você carregar a extensão.
 
 - A Vela não age em `chrome://`, na Chrome Web Store nem em PDFs. Nessas páginas ela avisa o
   modelo com um erro explícito em vez de fingir sucesso.
-- Sites que exigem evento de entrada confiável (upload, canvas, alguns formulários) podem não
-  responder ao caminho DOM. A escalada para CDP está prevista e ainda não construída — ver
-  ARCHITECTURE.md.
+- Sites que exigem evento de entrada confiável (upload, canvas, alguns formulários) não respondem
+  ao caminho DOM. Com o **Modo preciso** ligado, clique, tecla, digitação e ponteiro são repetidos
+  pelo depurador do Chrome; com ele desligado, a ação volta como "sem efeito perceptível" — que é
+  informação, não sucesso fingido.
 - Em modo **Assistir** com o painel fechado e sem Live Voice ativo, não há onde pedir aprovação:
   a ação é recusada e o modelo é informado disso.
 - A captura de tela mostra **só a parte visível** da janela: o que está abaixo da dobra exige
   rolar e capturar de novo. E ela é uma foto — o que dá para clicar continua vindo do retrato.
-- **Não existe fila de pedidos comuns.** Um turno por vez: falar por cima interrompe o turno atual
-  e o substitui. A exceção é `delegate_task`: durante o Live Voice, uma tarefa de várias etapas
-  pode ser mandada para rodar em segundo plano enquanto a conversa continua — mas é uma tarefa por
-  vez, não uma fila de várias. Fora dessa situação específica, se a Vela disser que "colocou na
-  fila", é invenção dela.
+- **Um turno de conversa por vez**: falar por cima interrompe o turno atual e o substitui. O que
+  tem fila é `delegate_task` — duas tarefas de fundo ao mesmo tempo e as demais esperando, em
+  qualquer conversa, não só na voz.
+- **O que a página faz sem tocar no DOM continua invisível** sem as habilidades de console e rede
+  ligadas, e mesmo ligadas elas só gravam a partir do momento em que são chamadas.
+- **`world: "main"` não roda em site com política de segurança estrita.** A resposta diz isso em
+  vez de devolver um erro opaco, mas o caminho não existe naquele site.

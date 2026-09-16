@@ -65,16 +65,22 @@ ocupadas, aí sim o processo sai avisando.
 
 | Ferramenta | O que faz |
 |---|---|
-| `vela_read_page` | Lê a aba ativa e devolve os elementos interativos com refs `[ref_N_M]` |
-| `vela_act` | Clica, digita, navega, rola, espera ou chama uma ferramenta da própria página |
+| `vela_read_page` | Lê a aba ativa e devolve a árvore de elementos interativos com refs `[e412]` |
+| `vela_act` | Clica, digita, navega, passa o mouse, arrasta, escolhe numa lista, volta no histórico, procura, espera por uma condição, captura a tela ou chama uma ferramenta da própria página |
 | `vela_search` | Busca na web pelo provider da Vela, sem abrir aba |
 | `vela_fetch` | Lê o conteúdo de uma URL, sem abrir aba |
 | `vela_tabs` | Lista as abas que a Vela enxerga |
 | `vela_ask` | Delega o objetivo inteiro: a Vela executa no navegador e devolve a resposta |
 
-Os refs vêm do último `vela_read_page` e **expiram quando a página muda** — depois de um clique
-que navegou ou reescreveu a tela, releia antes de agir. É o mesmo protocolo que a Vela usa
-internamente.
+Os refs vêm de `vela_read_page` ou de `find` e **pertencem ao elemento, não à leitura**: continuam
+valendo depois de um clique que reescreveu a tela, e uma releitura devolve o mesmo número para o
+mesmo elemento. Eles deixam de valer quando aquela aba navega — aí a resposta diz de onde para onde
+ela foi. Se o elemento virou outra coisa (listas que reaproveitam linhas conforme se rola), o erro é
+`ref_changed` e a saída é `find` pelo texto, não reler a página inteira. É o mesmo protocolo que a
+Vela usa internamente.
+
+**O acesso aos sites é concedido pelo usuário**, não pela instalação: se ninguém tiver clicado em
+"Conceder acesso aos sites" em Configurações → Permissões, toda ação volta recusada explicando isso.
 
 ## Segurança
 
