@@ -10,7 +10,7 @@ import { readSetting, writeSetting } from "./settings-tool";
 import { getMemory, setMemory } from "./storage";
 import { Emit } from "./messages";
 import { runDelegatedTask } from "./background-task";
-import { CAPABILITY_LABELS, actionCapability, isEnabled, refuse, scriptCapability, toolCapability } from "./capabilities";
+import { CAPABILITY_LABELS, actionCapability, isEnabled, refuse, toolCapability } from "./capabilities";
 import { BatchItem, batchSize, runBatch } from "./batch-runner";
 import { readConsole, readNetwork, startWatching } from "./page-observability";
 import { looksLikeInjection, wrapUntrusted } from "./untrusted";
@@ -55,7 +55,7 @@ function toBrowserAction(args: ToolArguments): BrowserAction | null {
     case "selectOption": return { type: "selectOption", ref: args.ref, selector: args.selector, label: args.label, value: args.value, index: args.index };
     case "history": return { type: "history", direction: args.direction === "forward" ? "forward" : "back" };
     case "pageTool": return args.toolName ? { type: "pageTool", name: args.toolName, arguments: args.toolArguments } : null;
-    case "evaluateScript": return args.script ? { type: "evaluateScript", script: args.script, world: args.world === "main" ? "main" : "isolated" } : null;
+    case "evaluateScript": return args.script ? { type: "evaluateScript", script: args.script } : null;
     default: return null;
   }
   })();
@@ -111,7 +111,7 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
     if (call.name === "browser_action") {
       const action = toBrowserAction(args);
       if (!action) return { content: `ERRO [unsupported] Argumentos insuficientes para ${args.action ?? "browser_action"}.`, event: { kind: "error", text: `Chamada inválida de ${args.action ?? "browser_action"}.` } };
-      const actionGate = action.type === "evaluateScript" ? scriptCapability(action.world) : actionCapability(action.type);
+      const actionGate = actionCapability(action.type);
       if (actionGate && !isEnabled(settings, actionGate)) {
         return { content: refuse(actionGate), event: { kind: "error", text: `${CAPABILITY_LABELS[actionGate]}: habilidade desligada.` } };
       }

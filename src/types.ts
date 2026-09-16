@@ -44,9 +44,13 @@ export type Capabilities = {
   batch: boolean;
   /** Esperar por texto, elemento ou rede parada em vez de chutar milissegundos. */
   waitFor: boolean;
-  /** evaluateScript no mundo isolado: vê o DOM, não vê o estado da página. */
-  scriptIsolated: boolean;
-  /** evaluateScript no mundo da página: vê variável, framework e o que estiver em memória. */
+  /**
+   * Injetar JavaScript na página.
+   *
+   * Só existe um mundo possível, e é o da própria página — medido no Chrome: montar função em
+   * tempo de execução dentro do mundo isolado da extensão é barrado pelo CSP de MV3, tanto pelo
+   * content script quanto por `scripting.executeScript`. Ver `script-world.ts`.
+   */
   scriptMain: boolean;
   hover: boolean;
   drag: boolean;
@@ -139,8 +143,7 @@ type BrowserActionKind =
   | { type: "find"; query?: string; selector?: string; limit?: number; role?: string; hint?: string }
   | { type: "screenshot" }
   | { type: "pageTool"; name: string; arguments?: unknown }
-  /** `world` decide se o script vê só o DOM (isolated, o padrão) ou também o JavaScript da página. */
-  | { type: "evaluateScript"; script: string; world?: "isolated" | "main" }
+  | { type: "evaluateScript"; script: string }
   /** Menus que só abrem quando o ponteiro passa por cima — clicar neles não faz nada. */
   | { type: "hover"; ref?: string; selector?: string }
   /** Arrastar um elemento até outro: reordenar lista, soltar arquivo, mover cartão de quadro. */
@@ -237,7 +240,6 @@ export const defaultSettings: AppSettings = {
   capabilities: {
     batch: true,
     waitFor: true,
-    scriptIsolated: true,
     scriptMain: false,
     hover: true,
     drag: true,

@@ -15,8 +15,7 @@ import { AppSettings, BrowserAction, Capabilities } from "./types";
 export const CAPABILITY_LABELS: Record<keyof Capabilities, string> = {
   batch: "Ações em lote",
   waitFor: "Espera inteligente",
-  scriptIsolated: "Injetar script (mundo isolado)",
-  scriptMain: "Injetar script (mundo da página)",
+  scriptMain: "Injetar script na página",
   hover: "Passar o mouse por cima",
   drag: "Arrastar e soltar",
   history: "Voltar e avançar",
@@ -30,18 +29,12 @@ export const CAPABILITY_LABELS: Record<keyof Capabilities, string> = {
 };
 
 const ACTION_CAPABILITY: Partial<Record<BrowserAction["type"], keyof Capabilities>> = {
-  evaluateScript: "scriptIsolated",
+  evaluateScript: "scriptMain",
   waitFor: "waitFor",
   hover: "hover",
   drag: "drag",
   history: "history",
 };
-
-/** `evaluateScript` tem dois interruptores, um por mundo: ver o DOM e ver o JavaScript do site
- *  são poderes diferentes, e quem concede um não concede o outro por tabela. */
-export function scriptCapability(world: string | undefined): keyof Capabilities {
-  return world === "main" ? "scriptMain" : "scriptIsolated";
-}
 
 const TOOL_CAPABILITY: Record<string, keyof Capabilities> = {
   delegate_task: "delegate",

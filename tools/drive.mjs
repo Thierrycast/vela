@@ -259,6 +259,35 @@ for (const [indice, passo] of roteiro.entries()) {
       })()`);
       console.log(`${rotulo} →
 ${saida}`);
+    } else if (passo.acao === "mundoPagina") {
+      /*
+       * Roda o script no mundo da pagina pelo mesmo caminho que `script-world.ts` usa. Existe
+       * para provar duas coisas que so a pagina real responde: se `new Function` sobrevive ao CSP
+       * do site, e se o que esta so na memoria do site (nao no DOM) fica mesmo visivel.
+       */
+      const alvo = passo.url ? (String(passo.url).startsWith("http") ? passo.url : enderecoFixture(passo.url)) : null;
+      const saida = await evaluate(workerSession, `(async () => {
+        const abas = await chrome.tabs.query({});
+        const aba = ${JSON.stringify(alvo)} ? abas.find((item) => (item.url ?? "").startsWith(${JSON.stringify(alvo)})) : abas.find((item) => item.active);
+        if (!aba) return "nenhuma aba casa";
+        const [resultado] = await chrome.scripting.executeScript({
+          target: { tabId: aba.id },
+          world: ${JSON.stringify(passo.mundo ?? "MAIN")},
+          args: [${JSON.stringify(passo.script ?? "return 1")}],
+          func: (fonte) => {
+            try {
+              const run = new Function("return (async () => { " + fonte + " })();");
+              return Promise.resolve(run())
+                .then((valor) => ({ ok: true, texto: typeof valor === "object" ? JSON.stringify(valor) : String(valor) }))
+                .catch((erro) => ({ ok: false, texto: String(erro && erro.message || erro) }));
+            } catch (erro) {
+              return { ok: false, texto: String(erro && erro.message || erro) };
+            }
+          },
+        });
+        return JSON.stringify(resultado?.result);
+      })()`);
+      console.log(`${rotulo} → ${saida}`);
     } else {
       console.log(`${rotulo} → passo desconhecido, ignorado`);
     }

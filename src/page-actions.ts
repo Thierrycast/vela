@@ -6,37 +6,6 @@ import { callPageTool, describePageTools, listPageTools } from "./page-tools";
 
 function failure(code: Extract<ActionResult, { ok: false }>["code"], summary: string): ActionResult { return { ok: false, code, summary }; }
 
-/**
- * O que `evaluateScript` devolve precisa ser lido, e `JSON.stringify` sozinho falha justamente no
- * caso mais comum de uso — inspecionar o DOM: `Element`/`Node` não têm propriedade enumerável
- * nenhuma e viram "{}", igual `Map`/`Set`. Um objeto com referência circular derrubava o script
- * inteiro com erro, mesmo tendo rodado certo.
- */
-function serializeEvalResult(result: unknown): string {
-  if (result === undefined) return "Script executado sem retorno explícito.";
-  if (result === null) return "null";
-  if (typeof result === "bigint") return `${result.toString()}n`;
-  if (typeof result === "function") return result.toString().slice(0, 300);
-  if (result instanceof Node) {
-    if (result instanceof Element) {
-      const attrs = result.getAttributeNames().map((name) => `${name}="${(result.getAttribute(name) ?? "").slice(0, 80)}"`).join(" ");
-      const text = (result.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
-      return `<${result.tagName.toLowerCase()}${attrs ? ` ${attrs}` : ""}>${text ? ` texto="${text}"` : ""}`;
-    }
-    return (result.textContent ?? "").slice(0, 300);
-  }
-  if (result instanceof NodeList || result instanceof HTMLCollection || Array.isArray(result)) {
-    const list = Array.from(result as ArrayLike<unknown>);
-    return `[${list.length} item(ns)] ${list.slice(0, 30).map(serializeEvalResult).join(" | ").slice(0, 1500)}`;
-  }
-  if (result instanceof Map) return serializeEvalResult(Object.fromEntries(result));
-  if (result instanceof Set) return serializeEvalResult(Array.from(result));
-  if (typeof result === "object") {
-    try { return JSON.stringify(result); } catch { return String(result); }
-  }
-  return String(result);
-}
-
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const MAX_WAIT = 30_000;
@@ -288,15 +257,17 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
       : failure("unsupported", result.text);
   }
 
-  if (action.type === "evaluateScript") {
-    try {
-      const run = new Function(`return (async () => { ${action.script} })();`);
-      const result = await run();
-      return { ok: true, summary: "Script injetado e executado.", content: serializeEvalResult(result) };
-    } catch (e) {
-      return failure("unsupported", `Erro no script: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+  /*
+   * O script nao roda aqui, e nao e escolha de estilo.
+   *
+   * Montar funcao em tempo de execucao dentro do mundo isolado e barrado pelo CSP de MV3 — medido
+   * no Chrome, tanto por `new Function` no content script quanto por `scripting.executeScript` com
+   * `world: "ISOLATED"`: "'unsafe-eval' is not an allowed source of script". Durante um bom tempo
+   * a acao existiu, foi anunciada ao modelo, e **sempre** devolveu esse erro. O unico lugar onde
+   * codigo montado na hora executa e o mundo da propria pagina, e quem injeta la e o background
+   * (`script-world.ts`).
+   */
+  if (action.type === "evaluateScript") return failure("unsupported", "A execucao de script e tratada fora da pagina.");
 
   if (action.type === "waitFor") return waitForCondition(action);
 

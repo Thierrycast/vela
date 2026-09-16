@@ -433,7 +433,7 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
    * script e passa pelo background, que é quem tem `chrome.scripting`. O gate de aprovação já
    * aconteceu acima, junto com o das outras ações que modificam a página.
    */
-  if (action.type === "evaluateScript" && action.world === "main") {
+  if (action.type === "evaluateScript") {
     const outcome = await evaluateInMainWorld(tab.id, frameId, action.script);
     return outcome.ok
       ? { ok: true, summary: "Script executado no mundo da página.", content: outcome.text }

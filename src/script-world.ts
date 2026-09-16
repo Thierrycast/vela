@@ -1,14 +1,16 @@
 /**
- * Rodar o script do modelo **no mundo da página**, e não ao lado dele.
+ * Rodar o script do modelo **no mundo da página** — que é o único lugar onde ele roda.
  *
- * O `evaluateScript` de sempre roda no mundo isolado: enxerga o DOM, que é compartilhado, e não
- * enxerga nada do JavaScript do site — nem uma variável global que a página definiu, nem o estado
- * interno de um framework, nem o objeto que guarda o carrinho. Para a maioria dos casos isso
- * basta e é o modo certo, porque nada do que o modelo escrever pode interferir no site.
+ * Não é uma escolha entre dois mundos: é o único que funciona. Medido no Chrome, contra uma página
+ * de teste controlada: montar função em tempo de execução dentro do mundo isolado da extensão é
+ * barrado pelo CSP de MV3 — tanto por `new Function` no content script quanto por
+ * `scripting.executeScript` com `world: "ISOLATED"`. Os dois devolvem *"'unsafe-eval' is not an
+ * allowed source of script"*. E extensão publicada não pode relaxar esse CSP.
  *
- * Há um resto que só existe no mundo da página, e é onde o degrau final da escada costumava
- * morrer: componente que só reage a um método interno, dado que nunca chega ao DOM, estado que a
- * página guarda em memória. Este módulo alcança esse resto.
+ * A consequência é que a ação existiu por um bom tempo anunciada ao modelo e **sempre** falhou com
+ * esse erro: o degrau final da escada era um degrau pintado no chão. No mundo da página o mesmo
+ * código roda, e de quebra alcança o que o mundo isolado nunca alcançaria — variável global,
+ * estado de framework, o objeto que guarda o carrinho.
  *
  * Duas consequências que justificam o interruptor próprio e o pedido de aprovação:
  *
@@ -74,7 +76,7 @@ export async function evaluateInMainWorld(tabId: number, frameId: number, source
     const outcome = result?.result as Outcome | undefined;
     if (!outcome) return { ok: false, text: "O script rodou no mundo da página mas não devolveu nada legível." };
     if (!outcome.ok && outcome.text.startsWith("__CSP__")) {
-      return { ok: false, text: `Este site proíbe executar código montado na hora (Content Security Policy), então nenhum script seu vai rodar no mundo da página aqui. Não reescreva o script: use world "isolated" para mexer no DOM, ou resolva pela interface. Detalhe do navegador: ${outcome.text.slice(7, 200)}` };
+      return { ok: false, text: `Este site proíbe executar código montado na hora (Content Security Policy), e não há outro caminho: o mundo isolado da extensão proíbe o mesmo, por regra do próprio Chrome. Não reescreva o script — resolva pela interface (click, type, find) ou peça ajuda ao usuário. Detalhe do navegador: ${outcome.text.slice(7, 200)}` };
     }
     return outcome;
   } catch (error) {

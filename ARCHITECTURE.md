@@ -76,6 +76,26 @@ segurança, não de usabilidade.
 recuperação de cada um é diferente. Navegação deixa lápide (anel de três por aba, cinco minutos),
 então um ref pós-navegação diz "a aba 7 saiu de X para Y" em vez de "não existe".
 
+### O script só roda no mundo da página — o isolado nunca rodou
+
+Achado da bateria de testes contra página real, e o mais surpreendente da branch: `evaluateScript`
+estava anunciado ao modelo desde que foi ligado e **sempre** devolvia erro.
+
+Montar função em tempo de execução dentro do mundo isolado é barrado pelo CSP de MV3. Medido nos
+dois caminhos possíveis — `new Function` dentro do content script e `scripting.executeScript` com
+`world: "ISOLATED"` — e os dois devolvem a mesma recusa: *"Evaluating a string as JavaScript
+violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed
+source of script"*. Não é contornável: extensão publicada não pode relaxar esse CSP.
+
+No mundo da página o mesmo código roda (confirmado na mesma bateria, lendo `window.__carrinho` de
+uma fixture), e alcança justamente o que o mundo isolado nunca alcançaria. Então deixou de haver
+escolha de mundo: há um caminho, e é esse.
+
+Duas consequências. A habilidade passa a nascer **desligada**, porque agora que funciona ela é a
+mais ampla da lista — o código roda com a autoridade do site, numa aba logada. E um site com CSP
+estrito continua recusando; nesse caso a resposta diz que o caminho não existe ali, em vez de
+deixar o modelo reescrever o script dez vezes contra uma parede.
+
 ### O retrato é uma árvore, não uma lista
 
 A lista plana dizia o que existe e escondia a única coisa que o modelo não consegue deduzir: a qual

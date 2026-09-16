@@ -73,7 +73,7 @@ export function describeAction(action: BrowserAction, targetLabel: string) {
     case "selectOption": return `Escolher “${action.label ?? action.value ?? `opção ${action.index}`}” em ${targetLabel || "uma lista"}`;
     case "history": return action.direction === "back" ? "Voltar para a página anterior" : "Avançar para a próxima página";
     case "pageTool": return `Usar a ferramenta “${action.name}” da própria página`;
-    case "evaluateScript": return action.world === "main" ? `Rodar JavaScript no mundo da página (acesso ao código do site): ${action.script.slice(0, 120)}` : `Injetar script JavaScript na página: ${action.script.slice(0, 120)}`;
+    case "evaluateScript": return `Rodar JavaScript dentro da página, com o mesmo acesso que o código do site tem: ${action.script.slice(0, 120)}`;
     default: return `Executar ${action.type}`;
   }
 }

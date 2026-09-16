@@ -70,6 +70,12 @@
     event.preventDefault();
     setTimeout(() => { document.getElementById("aviso").classList.remove("oculto"); }, 1200);
   });
+  /*
+   * Estado que existe só na memória da página, e não no DOM: é o caso que o mundo isolado não
+   * alcança e que `world: "main"` existe para resolver. Nenhuma leitura de DOM descobre isto.
+   */
+  window.__carrinho = { itens: 3, total: 46.30, cupom: "PRIMEIRACOMPRA" };
+
   // Um campo que só aceita valor por evento confiável, para exercitar a escalada.
   const cep = document.getElementById("cep");
   cep.addEventListener("input", (event) => { if (!event.isTrusted) cep.value = ""; });
