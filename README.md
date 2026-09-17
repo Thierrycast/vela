@@ -170,6 +170,7 @@ relatar um problema de segurança, ver [SECURITY.md](SECURITY.md).
 | Documento | O que tem |
 |---|---|
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | o desenho e **por que** cada decisão foi tomada — inclusive as que deram errado antes |
+| [docs/USO.md](docs/USO.md) | o guia de uso: o que ela faz, trocar de modelo, scripts, ponte MCP, backup |
 | [docs/VOZ.md](docs/VOZ.md) | pipeline de voz, visuais, shader do usuário |
 | [docs/TRILHA.md](docs/TRILHA.md) | trilha de execução, rastreio completo e o relatório de revisão |
 | [docs/TESTES.md](docs/TESTES.md) | harness, Chrome real dirigido por roteiro, medição de desempenho |
