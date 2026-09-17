@@ -665,3 +665,36 @@ console.log("\n=== voz: a resposta é falada enquanto é escrita ===");
   comCodigo.pedaco("m3", trecho);
   console.log(`  bloco de código aberto não vira fala: ${comCodigo.jaFalou("m3") === false ? "sim" : "NAO"}`);
 }
+
+// O ciclo de vida das conversas com uma chave por conversa: criar, apagar e passar do teto têm de
+// mexer no storage — e não deixar chave órfã ocupando espaço para sempre. As contagens são
+// relativas porque o módulo de conversas guarda cache entre os cenários deste mesmo processo.
+console.log("\n=== armazenamento: ciclo de vida das conversas ===");
+{
+  const loja: Record<string, unknown> = {
+    "vela:settings": { ...defaultSettings, providers: [{ ...defaultSettings.providers[0], apiKey: "k", defaultModel: "m" }] },
+  };
+  installChrome(loja, fakePage());
+  const conversa = await import("../src/conversation");
+  const chaves = () => Object.keys(loja).filter((item) => item.startsWith("vela:conversa:"));
+
+  await conversa.reset();
+  await conversa.append({ id: "u1", role: "user", content: "primeira", createdAt: Date.now(), status: "complete" });
+  await conversa.flush();
+  const depoisDeCriar = chaves().length;
+  console.log(`  conversa nova ganha chave própria: ${depoisDeCriar > 0 ? "sim" : "NAO"}`);
+
+  const lista = await conversa.list();
+  const apagada = await conversa.remove(lista[0].id);
+  await conversa.flush();
+  console.log(`  apagar tira a chave do storage: ${apagada.existia && chaves().length === depoisDeCriar - 1 ? "sim" : "NAO"}`);
+
+  for (let numero = 0; numero < 55; numero += 1) {
+    await conversa.reset();
+    await conversa.append({ id: `m${numero}`, role: "user", content: `conversa ${numero}`, createdAt: Date.now() + numero, status: "complete" });
+  }
+  await conversa.flush();
+  const indice = (loja["vela:conversa-indice"] as unknown[]) ?? [];
+  console.log(`  passar do teto poda o índice: ${indice.length === 50 ? "sim" : "NAO"} (${indice.length})`);
+  console.log(`  e não deixa chave órfã: ${chaves().length === indice.length ? "sim" : "NAO"} (${chaves().length} chaves)`);
+}
