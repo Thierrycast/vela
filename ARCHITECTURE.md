@@ -440,6 +440,12 @@ Três campos resolvem: `round`, `callId`, `actionId`. Quem entra numa rodada anu
 `beginCall`) e quem grava herda o contexto corrente. A alternativa — exigir que cada ponto de
 instrumentação repetisse os três — seria garantir que metade esquecesse.
 
+O evento que vem de outra superfície precisa chegar **inteiro**. Painel, offscreen e conteúdo não
+escrevem no IndexedDB da trilha — mandam para o background por `trace:push` —, e esse repasse
+carregava só `kind`, `label`, `data`, `ok` e `ms`. Tudo o que costura ficava para trás, junto do
+`blobId`: como a conversa falada é gravada inteira no offscreen, o áudio chegava sem o id que o
+liga ao evento, e o relatório citaria arquivos que não tinha como apontar.
+
 ### `trace-stage.ts`: um jeito só de instrumentar
 
 Cada ponto do código decidia sozinho o que gravar: um media com `span`, outro anota com `record`,
