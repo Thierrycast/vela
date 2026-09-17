@@ -32,6 +32,17 @@ domínio, narração da voz, gravação por conversa.
 | Leia a página, clique em algo, e peça para clicar em outro elemento da mesma leitura | Deve funcionar sem reler: os refs continuam válidos |
 | Numa lista longa, role até reciclar as linhas e use um ref antigo | Deve recusar com `ref_changed` e dizer o que aquele item era |
 
+### A primeira vez de quem instala
+
+```bash
+node tools/drive.mjs --roteiro=tools/fixtures/roteiro-primeira-vez.json
+```
+
+Perfil limpo, sem provider, sem servidor de voz, sem permissão concedida — exatamente o que a
+pessoa vê no primeiro minuto. Confere que a tela inicial oferece o único passo que existe (abrir as
+configurações), que ela não sugere ações que ainda vão falhar, e que os botões de voz estão
+desabilitados em vez de quebrados.
+
 ## Testar a leitura de página contra uma página controlada
 
 ```bash

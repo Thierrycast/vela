@@ -1,0 +1,7 @@
+[
+  { "acao": "esperar", "ms": 1500 },
+  { "acao": "conferir", "nome": "primeira tela oferece abrir as configurações", "js": "!!document.querySelector('.suggestions .primeira-vez')" },
+  { "acao": "conferir", "nome": "não mostra sugestões que exigem provider", "js": "document.querySelectorAll('.suggestions button').length === 1" },
+  { "acao": "conferir", "nome": "botão de voz desabilitado sem servidor de voz", "js": "!!document.querySelector('.voice-button')?.disabled" },
+  { "acao": "conferir", "nome": "campo de mensagem disponível", "js": "!!document.querySelector('.composer textarea')" }
+]
