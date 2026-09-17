@@ -1,7 +1,25 @@
 {
   "name": "vela",
+  "version": "0.2.0",
   "private": true,
-  "version": "0.1.0",
+  "description": "Agente de navegador para Chrome: lê a página como texto, navega, clica, digita e conversa por voz — no seu navegador, com o seu provedor de IA.",
+  "license": "MIT",
+  "author": "Thierry Castro",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Thierrycast/vela.git"
+  },
+  "keywords": [
+    "chrome-extension",
+    "browser-agent",
+    "mv3",
+    "llm",
+    "voice",
+    "automation"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

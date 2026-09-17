@@ -7,7 +7,7 @@
 > - 🔴 Live Voice em loop / "Parei em 8 etapas" — **✅ resolvido**: o teto de rodadas configurável
 >   que interrompia a tarefa virou uma trava de segurança de 100 sem discurso algum, e uma bug real
 >   e separada foi achada e corrigida (o modelo rápido da voz nunca escalava para o robusto, então
->   rodava tarefas de várias etapas sozinho). Ver ARCHITECTURE.md, "O teto de rodadas parou de
+>   rodava tarefas de várias etapas sozinho). Ver ARQUITETURA.md, "O teto de rodadas parou de
 >   interromper a tarefa" e "O modelo rápido da voz nunca escalava para o robusto".
 > - 🟡 Sistema de captura de contexto (HTML vs. screenshot vs. OCR) — **não investigado** nesta
 >   revisão; continua como sugestão em aberto.
@@ -16,15 +16,15 @@
 >   `waitScheduled`/`onended` em `offscreen.ts` já tratam o fim real da reprodução via relógio do
 >   AudioContext, então pode já estar resolvido de fábrica — precisa reteste.
 > - 🟡 Paralelismo/fila de pedidos — **parcialmente endereçado**: `delegate_task` (ver
->   ARCHITECTURE.md) deixa o modelo rápido delegar uma tarefa de várias etapas para rodar em segundo
+>   ARQUITETURA.md) deixa o modelo rápido delegar uma tarefa de várias etapas para rodar em segundo
 >   plano com o robusto, sem travar a conversa. Não é uma fila geral de pedidos, só esse caso
 >   específico.
 > - 🐞 Botão de modelo do chat não abre nada — **✅ resolvido**: bug de `z-index`/stacking context
->   (o rodapé do composer perdia a disputa contra o palco de voz em foco). Ver ARCHITECTURE.md, "O
+>   (o rodapé do composer perdia a disputa contra o palco de voz em foco). Ver ARQUITETURA.md, "O
 >   menu de modelos ficava preso atrás do palco de voz".
 > - 🐞 Composer quebra abaixo de ~400px — **já estava resolvido antes desta sessão** (conferido no
 >   CSS atual: `.composer-bar` tem `flex-wrap` e `.model-picker` tem `flex:1 1 0`, como
->   ARCHITECTURE.md já documentava em "`flex-wrap` quebra antes de encolher"). O relatório
+>   ARQUITETURA.md já documentava em "`flex-wrap` quebra antes de encolher"). O relatório
 >   provavelmente rodou contra uma versão anterior a esse conserto.
 
 Teste de fumaça forçado feito por um agente Claude Code, via CDP no Chrome pessoal do usuário (perfil `Default`, extensão já instalada em modo desenvolvedor a partir de `dist/`). Cobriu: chat de texto (injeção de conteúdo, resize, double-submit, paste gigante), painel de Configurações inteiro, e uma sessão real de Live Voice conduzida pelo próprio usuário. Achados abaixo, dos mais graves aos cosméticos.

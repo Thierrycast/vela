@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vela",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agente de navegador que entende a página, navega e age por você.",
   "minimum_chrome_version": "116",
   "action": {
@@ -66,5 +66,6 @@
       },
       "description": "Abrir a Vela"
     }
-  }
+  },
+  "homepage_url": "https://github.com/Thierrycast/vela"
 }
