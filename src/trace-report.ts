@@ -1,4 +1,4 @@
-import { TraceEvent } from "./trace";
+import { SEM_TURNO, TraceEvent } from "./trace";
 
 /**
  * A trilha virada narrativa.
@@ -25,6 +25,23 @@ function bloco(texto: string, linguagem = "") {
 }
 
 const texto = (valor: unknown) => typeof valor === "string" ? valor : JSON.stringify(valor, null, 2);
+
+/**
+ * O uso de tokens em uma linha lida por gente.
+ *
+ * O gateway devolve o objeto cru, e despejá-lo no relatório dava três linhas de JSON no meio da
+ * narrativa para dizer um número que interessa em uma. Campos que o gateway não mandar simplesmente
+ * não aparecem — inventar zero seria afirmar algo que ninguém mediu.
+ */
+function contarTokens(tokens: Record<string, unknown>): string {
+  const numero = (campo: string) => typeof tokens[campo] === "number" ? tokens[campo] as number : undefined;
+  const partes = [
+    numero("prompt_tokens") !== undefined ? `${numero("prompt_tokens")} de entrada` : "",
+    numero("completion_tokens") !== undefined ? `${numero("completion_tokens")} de saída` : "",
+    numero("total_tokens") !== undefined ? `${numero("total_tokens")} no total` : "",
+  ].filter(Boolean);
+  return partes.length ? `tokens: ${partes.join(" · ")}` : `tokens: ${texto(tokens)}`;
+}
 
 type Turno = { id: string; eventos: TraceEvent[] };
 
@@ -152,7 +169,7 @@ function descreverRodada(numero: number, eventos: TraceEvent[], completo: boolea
       for (const chamada of dados.chamadas) linhas.push(`- \`${chamada.nome}\` ${bloco(chamada.argumentos, "json")}`);
       linhas.push("");
     }
-    if (dados.tokens) linhas.push(`_tokens: ${texto(dados.tokens)}_`, "");
+    if (dados.tokens) linhas.push(`_${contarTokens(dados.tokens)}_`, "");
   }
 
   // Cada chamada com o que ela de fato devolveu, e as ações que ela disparou por dentro.
@@ -221,9 +238,28 @@ export function relatorioDoTurno(eventos: TraceEvent[], options: ReportOptions =
   return partes.join("\n");
 }
 
+/**
+ * O que a extensão gravou sem estar dentro de um turno.
+ *
+ * O painel abre, o orb monta, a ponte responde — tudo isso acontece fora de qualquer pedido, e a
+ * trilha carimba esses eventos com o turno de reserva. Tratá-los como turno produzia um "Turno
+ * sem-turn" com pedido vazio, zero rodadas e duração "não fechou": um relatório que parece quebrado
+ * logo no fim, justamente onde quem lê procura o desfecho.
+ */
+function avulsos(eventos: TraceEvent[]): string {
+  const ordenados = [...eventos].sort((primeiro, segundo) => primeiro.at - segundo.at);
+  const linhas = ["# Fora de qualquer turno", "", `${ordenados.length} evento(s) que não pertencem a um pedido — abertura de painel, ponte, voz ociosa.`, ""];
+  for (const evento of ordenados) {
+    linhas.push(`- \`${hora(evento.at)}\` **${evento.kind}** ${evento.label}${evento.ms !== undefined ? ` (${duracao(evento.ms)})` : ""}${evento.ok === false ? ` — falhou: ${evento.code ?? ""}` : ""}`);
+  }
+  return linhas.join("\n") + "\n";
+}
+
 /** Vários turnos num arquivo só, do mais recente para o mais antigo. */
 export function relatorioCompleto(eventos: TraceEvent[], options: ReportOptions = {}): string {
-  const turnos = agruparPorTurno(eventos).reverse();
+  const todos = agruparPorTurno(eventos).reverse();
+  const turnos = todos.filter((turno) => turno.id !== SEM_TURNO);
+  const soltos = todos.find((turno) => turno.id === SEM_TURNO);
   const cabecalho = [
     "# Relatório de execução da Vela",
     "",
@@ -236,5 +272,7 @@ export function relatorioCompleto(eventos: TraceEvent[], options: ReportOptions 
     "---",
     "",
   ].join("\n");
-  return cabecalho + turnos.map((turno) => relatorioDoTurno(turno.eventos, options)).join("\n\n---\n\n");
+  const corpo = turnos.map((turno) => relatorioDoTurno(turno.eventos, options));
+  if (soltos) corpo.push(avulsos(soltos.eventos));
+  return cabecalho + corpo.join("\n\n---\n\n");
 }

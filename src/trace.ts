@@ -150,7 +150,10 @@ function open(): Promise<IDBDatabase> {
 type Listener = (event: TraceEvent) => void;
 const listeners = new Set<Listener>();
 let context = "background";
-let currentTurn = "sem-turno";
+/** O carimbo de quem grava fora de um pedido: o relatório separa esses eventos dos turnos. */
+export const SEM_TURNO = "sem-turno";
+
+let currentTurn: string = SEM_TURNO;
 let enabled = true;
 let pending: TraceEvent[] = [];
 let flushTimer = 0;

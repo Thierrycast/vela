@@ -63,7 +63,9 @@ const FIXTURE_PORT = 8799;
 let fixtureServer = null;
 if (flags.fixtures) {
   fixtureServer = createServer((pedido, resposta) => {
-    const nome = (pedido.url ?? "/").split("?")[0].replace(/^\/+/, "") || "index.html";
+    const caminho = (pedido.url ?? "/").split("?")[0];
+    if (caminho === "/api/v1/chat/completions") { responderModeloFalso(pedido, resposta); return; }
+    const nome = caminho.replace(/^\/+/, "") || "index.html";
     // Ler antes de responder: escrever o cabecalho e so depois falhar deixa a resposta pela metade
     // e derruba o processo inteiro com ERR_HTTP_HEADERS_SENT.
     let corpo;
@@ -75,6 +77,41 @@ if (flags.fixtures) {
   await new Promise((pronto) => fixtureServer.listen(FIXTURE_PORT, "127.0.0.1", pronto));
   console.log(`fixtures em http://127.0.0.1:${FIXTURE_PORT}/`);
 }
+
+/**
+ * Um modelo falso servido pelo mesmo servidor das fixtures.
+ *
+ * Existe porque exercitar o rastreio completo de ponta a ponta exige uma rodada de verdade — com
+ * prompt, chamada de ferramenta, resultado e resposta final —, e depender da chave de API do
+ * usuario para isso transformaria a verificacao num favor que so ele pode fazer. Aqui o roteiro
+ * roda no Chrome real, com a extensao real, contra um modelo que responde sempre a mesma coisa:
+ * primeiro le a pagina, depois conclui. O que se verifica nao e a inteligencia da resposta, e sim
+ * que a trilha registrou o caminho inteiro.
+ */
+function responderModeloFalso(pedido, resposta) {
+  let corpo = "";
+  pedido.on("data", (parte) => { corpo += parte; });
+  pedido.on("end", () => {
+    let mensagens = [];
+    try { mensagens = JSON.parse(corpo).messages ?? []; } catch { mensagens = []; }
+    const jaLeu = mensagens.some((mensagem) => mensagem.role === "tool");
+    resposta.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+    const manda = (objeto) => resposta.write(`data: ${JSON.stringify(objeto)}\n\n`);
+    const molde = (delta, finish = null) => ({ id: "falso-1", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: finish }] });
+    if (!jaLeu) {
+      manda(molde({ tool_calls: [{ index: 0, id: "chamada-1", type: "function", function: { name: "browser_action", arguments: "" } }] }));
+      manda(molde({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify({ action: "extractPage" }) } }] }));
+      manda(molde({}, "tool_calls"));
+    } else {
+      for (const pedaco of ["Li a pagina: ", "e uma lista de compras ", "com tres produtos."]) manda(molde({ content: pedaco }));
+      manda(molde({}, "stop"));
+    }
+    manda({ id: "falso-1", object: "chat.completion.chunk", choices: [], usage: { prompt_tokens: 1234, completion_tokens: 56, total_tokens: 1290 } });
+    resposta.write("data: [DONE]\n\n");
+    resposta.end();
+  });
+}
+
 const enderecoFixture = (caminho) => `http://127.0.0.1:${FIXTURE_PORT}${caminho.startsWith("/") ? caminho : `/${caminho}`}`;
 
 // --- CDP mínimo ---------------------------------------------------------------------
@@ -337,7 +374,9 @@ ${saida}`);
 await sleep(1200);
 const trilha = await evaluate(workerSession, `(async () => {
   const banco = await new Promise((done) => {
-    const pedido = indexedDB.open("vela-trace", 1);
+    // Sem numero de versao de proposito: pedir a 1 quando o banco ja esta na 2 nao abre nada, e a
+    // colheita voltava vazia dizendo "0 evento(s)" como se o turno nao tivesse deixado rastro.
+    const pedido = indexedDB.open("vela-trace");
     pedido.onsuccess = () => done(pedido.result);
     pedido.onerror = () => done(null);
   });

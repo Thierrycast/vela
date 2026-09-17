@@ -228,8 +228,7 @@ type Origem = "texto" | "voz" | "lens" | "ponte" | "atalho";
 async function runTurn(text: string, useFastModel = false, origem: Origem = "texto") {
   ensureKeepAlive();
   void ensureSession(text).then(publishSession);
-  traceRecord("user.input", `entrada por ${origem}`, { from: "background", data: { origem, caracteres: text.length, modeloRapido: useFastModel } });
-  return agentLoop.submit(text, notifySurfaces, { useFastModel });
+  return agentLoop.submit(text, notifySurfaces, { useFastModel, origem });
 }
 
 /** Entrada da ponte MCP: um agente de fora descreve o objetivo e a Vela executa no navegador
@@ -516,9 +515,27 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
   // Áudio some junto: metade de um registro é pior que nenhum, porque o relatório continua
   // citando arquivos que não existem mais.
   if (message.type === "trace:clear") { void Promise.all([clearTrace(), clearBlobs()]); return false; }
+  /*
+   * O evento de outra superfície chega inteiro, ou não chega.
+   *
+   * Aqui só passavam kind, label, data, ok e ms. Tudo o que costura — a rodada, a chamada, a ação —
+   * e o `blobId` que liga um evento ao áudio ficavam para trás, então a conversa falada, que é toda
+   * gravada no offscreen, virava uma lista de eventos soltos com o relatório citando arquivos que
+   * ele não tinha como apontar. O `code` seguia o mesmo caminho: o motivo de um descarte sumia.
+   */
   if (message.type === "trace:push" && message.entry) {
-    const entry = message.entry as { kind: string; label: string; from?: string; data?: Record<string, unknown>; ok?: boolean; ms?: number };
-    traceRecord(entry.kind as Parameters<typeof traceRecord>[0], entry.label, { from: entry.from ?? "desconhecido", data: entry.data, ok: entry.ok, ms: entry.ms });
+    const entry = message.entry as { kind: string; label: string; from?: string; data?: Record<string, unknown>; ok?: boolean; ms?: number; code?: string; round?: number; callId?: string; actionId?: string; blobId?: string };
+    traceRecord(entry.kind as Parameters<typeof traceRecord>[0], entry.label, {
+      from: entry.from ?? "desconhecido",
+      data: entry.data,
+      ok: entry.ok,
+      ms: entry.ms,
+      code: entry.code,
+      round: entry.round,
+      callId: entry.callId,
+      actionId: entry.actionId,
+      blobId: entry.blobId,
+    });
     return false;
   }
   if (message.type === "script:run" && message.scriptId && message.tabId !== undefined) {

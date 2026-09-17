@@ -93,6 +93,18 @@ A cópia carregada no teste traz o acesso aos sites como permissão fixa: o diá
 pede essa autorização no uso real não pode ser respondido por um roteiro automático. O código
 exercitado é o mesmo.
 
+### Um turno inteiro sem gastar chave de API
+
+```bash
+node tools/drive.mjs --fixtures --roteiro=tools/fixtures/roteiro-rastreio.json --saida=trilha.jsonl
+```
+
+O mesmo servidor de fixtures serve também um **modelo falso** em `/api/v1/chat/completions`: ele lê
+a página na primeira rodada e conclui na segunda, sempre igual. O que se verifica não é a
+inteligência da resposta — é que a trilha registrou o caminho inteiro (prompt enviado, resposta
+crua, chamada de ferramenta, resultado, tokens) com o rastreio completo ligado. Sem isso, checar o
+rastreio dependeria da chave de API de quem está revisando.
+
 ## Trocar de modelo
 
 O nome do modelo na barra de envio abre a lista do próprio gateway, com busca — sem sair da

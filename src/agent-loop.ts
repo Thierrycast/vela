@@ -119,7 +119,7 @@ async function compactSnapshots() {
  *  que — se a recusa era mesmo correta (senha, captcha) — chega à mesma conclusão. */
 const DECLINE_PATTERN = /\b(não consigo|não posso|não tenho como|não é poss[íi]vel|não tenho acesso|não sei como fazer|infelizmente não)\b/i;
 
-export async function submit(text: string, emit: Emit, options: { useFastModel?: boolean } = {}): Promise<boolean> {
+export async function submit(text: string, emit: Emit, options: { useFastModel?: boolean; origem?: string } = {}): Promise<boolean> {
   if (running) return false;
   const settings = await loadSettings();
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
@@ -160,6 +160,10 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
     data: {
       texto: text,
       length: text.length,
+      // A origem nasce fora do turno (quem chamou sabe se veio da voz, da lente ou da ponte) e
+      // precisa entrar aqui dentro: gravada antes, ela ficava carimbada como "sem turno" e o
+      // relatório dizia "entrou por texto" em toda conversa falada.
+      origem: options.origem ?? "texto",
       model: profile?.defaultModel,
       autonomia: settings.agent.autonomy,
       modoPreciso: settings.agent.preciseMode,

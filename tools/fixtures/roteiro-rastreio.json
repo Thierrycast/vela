@@ -1,0 +1,24 @@
+[
+  {
+    "acao": "definirSettings",
+    "patch": {
+      "activeProviderId": "falso",
+      "providers": [{
+        "id": "falso",
+        "name": "Modelo falso (fixtures)",
+        "baseUrl": "http://127.0.0.1:8799",
+        "protocol": "openai-compatible",
+        "apiKey": "teste",
+        "defaultModel": "falso-1",
+        "fastModel": "falso-1",
+        "enabled": true,
+        "capabilities": { "streaming": true, "tools": true, "vision": false, "audio": false, "webFetch": false }
+      }],
+      "agent": { "autonomy": "auto", "maxRounds": 4, "fullTrace": true }
+    }
+  },
+  { "acao": "abrirPagina", "url": "http://127.0.0.1:8799/lista.html", "ms": 2500 },
+  { "acao": "digitar", "texto": "leia esta página e me diga o que tem nela" },
+  { "acao": "esperarParar", "ate": 60000 },
+  { "acao": "conferir", "nome": "a Vela respondeu", "js": "document.querySelectorAll('.message.assistant').length > 0" }
+]
