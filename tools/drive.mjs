@@ -29,7 +29,7 @@
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -182,8 +182,9 @@ const browser = await connect((await version()).webSocketDebuggerUrl);
  * O pacote de revisao da voz sai como download; sem isto, cada teste deixaria um zip na maquina
  * da pessoa, e o roteiro nao teria como dizer se o arquivo chegou a existir.
  */
-const pastaDownloads = join(profile, "downloads");
-mkdirSync(pastaDownloads, { recursive: true });
+// Fora do perfil: dentro dele o Chrome grava arquivos próprios (um downloads.htm), que apareciam
+// no resumo como se a extensão tivesse baixado algo.
+const pastaDownloads = mkdtempSync(join(tmpdir(), "vela-drive-baixados-"));
 await browser.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: pastaDownloads, eventsEnabled: false }).catch(() => undefined);
 
 /*

@@ -92,14 +92,37 @@ function pathOf(element: Element): string {
   return parts.join("/");
 }
 
+/*
+ * Campo editável: o que a pessoa (ou a Vela) escreve nele não é identidade.
+ *
+ * Um contenteditable sem rótulo tem como nome acessível o próprio texto, e React reflete o valor
+ * digitado no atributo `value`. Os dois entravam na assinatura — então digitar mudava a identidade
+ * do campo, o veredito virava "reciclado", e a ação seguinte no mesmo ref (o Enter, ou continuar
+ * escrevendo numa caixa de mensagem) era recusada com `ref_changed`, inclusive no cartão de
+ * aprovação. Para esses elementos, identidade é rótulo e posição, nunca conteúdo.
+ */
+function isEditable(element: Element) {
+  if (element instanceof HTMLTextAreaElement) return true;
+  if (element instanceof HTMLInputElement) return !["button", "submit", "reset", "checkbox", "radio", "image", "file", "hidden"].includes(element.type);
+  return element instanceof HTMLElement && element.isContentEditable;
+}
+
 function attributeFingerprint(element: Element): number {
-  const parts = ["id", "name", "data-testid", "data-test", "href", "type", "value"]
-    .map((attribute) => `${attribute}=${element.getAttribute(attribute) ?? ""}`);
+  const attributes = ["id", "name", "data-testid", "data-test", "href", "type"];
+  if (!isEditable(element)) attributes.push("value");
+  const parts = attributes.map((attribute) => `${attribute}=${element.getAttribute(attribute) ?? ""}`);
   return hash(parts.join("|"));
 }
 
-export function signatureOf(element: Element): Signature {
+function identityName(element: Element) {
   const name = accessibleName(element);
+  if (!isEditable(element)) return name;
+  const conteudo = (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element.value : element.textContent ?? "").replace(/\s+/g, " ").trim();
+  return conteudo && name === conteudo ? "" : name;
+}
+
+export function signatureOf(element: Element): Signature {
+  const name = identityName(element);
   return {
     tag: element.tagName.toLowerCase(),
     role: roleOf(element),

@@ -6,7 +6,7 @@
  * errada é o tipo de erro que não tem desfazer. Por isso `close` recusa qualquer id fora do
  * grupo em vez de "só ignorar" — recusa silenciosa ensina o modelo a tentar de novo.
  */
-import { getSession, forgetTab } from "./session";
+import { SEM_GRUPO, getSession, forgetTab } from "./session";
 
 export type TabCommand =
   | { op: "list" }
@@ -19,6 +19,11 @@ export type TabResult = { ok: true; summary: string; content?: string } | { ok: 
 async function sessionTabs() {
   const session = await getSession();
   if (!session) return null;
+  // Sem grupo, a sessão é a lista que ela mesma registrou — filtrada pelas abas que ainda existem.
+  if (session.groupId === SEM_GRUPO) {
+    const abertas = await chrome.tabs.query({});
+    return abertas.filter((tab) => tab.id !== undefined && session.tabIds.includes(tab.id));
+  }
   const tabs = await chrome.tabs.query({ groupId: session.groupId });
   return tabs;
 }

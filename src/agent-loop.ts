@@ -8,7 +8,7 @@ import { appendLog, loadSettings } from "./storage";
 import { beginCall, beginRound, beginTurn, configureTrace, record as traceRecord, recordFull, span } from "./trace";
 import { collectBrowserContext, clearAttachments } from "./browser-context";
 import { recordTurn } from "./action-stats";
-import { cancelDelegated } from "./background-task";
+import { cancelDelegated, configureDelegation } from "./background-task";
 import { noteSource, resetDomainMemory } from "./domain-policy";
 import * as conversation from "./conversation";
 
@@ -25,14 +25,29 @@ let events: AgentEvent[] = [];
 let telemetry: string[] = [];
 
 export const isRunning = () => running;
-export const abort = () => { controller?.abort(); cancelDelegated(); };
+
+/*
+ * Parar o turno e parar tudo são pedidos diferentes.
+ *
+ * `abort` interrompe só o turno em curso — é o que acontece quando a pessoa fala por cima numa
+ * conversa de voz, e as tarefas de fundo existem justamente para continuar enquanto ela fala.
+ * `abortAll` é o botão de parar: a pessoa quer a Vela quieta, inclusive no que ela não está vendo.
+ */
+export const abort = () => { controller?.abort(); };
+export const abortAll = () => { abort(); cancelDelegated(); };
+
+// Resultado de tarefa de fundo só entra na conversa quando nenhum turno está no meio de uma troca
+// de ferramenta — ver background-task.ts.
+configureDelegation({ conversaOcupada: () => running });
 
 export async function snapshot(): Promise<LoopSnapshot> {
   return { messages: await conversation.all(), events, telemetry, running };
 }
 
 export async function reset() {
-  abort();
+  // Conversa nova encerra também o que estava em segundo plano: o resultado pertence à conversa
+  // anterior e cairia, sem contexto nenhum, na que acabou de começar.
+  abortAll();
   events = []; telemetry = [];
   /*
    * Conversa nova, decisões novas: o que o usuário autorizou visitar na conversa anterior não
@@ -231,7 +246,9 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
           await conversation.patch(assistant.id, { content: event.message, status: "error" });
           emit({ type: "chat:patch", id: assistant.id, patch: { content: event.message, status: "error" } });
           void appendLog({ level: "error", event: "chat.provider_error", detail: event.message });
-          void chrome.notifications.create({ type: "basic", iconUrl: "icons/icon-128.png", title: "Vela", message: event.message });
+          // Notificação é permissão opcional: sem ela, `chrome.notifications` nem existe, e o erro do
+          // provedor virava um TypeError que escondia a mensagem original.
+          void chrome.notifications?.create({ type: "basic", iconUrl: "icons/icon-128.png", title: "Vela", message: event.message }).catch(() => undefined);
         }
       }
 

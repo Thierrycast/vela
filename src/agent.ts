@@ -7,7 +7,7 @@ import { adoptTab } from "./session";
 import { isSessionTab } from "./tab-manager";
 import { preciseClick, preciseFill, preciseHover, preciseKey } from "./cdp-actuator";
 import { cdpAvailable } from "./cdp-session";
-import { allocateRefs, resolveRoute } from "./ref-registry";
+import { allocateRefs, refsReady, resolveRoute } from "./ref-registry";
 import { evaluateInMainWorld } from "./script-world";
 import { gateNavigation, noteSource } from "./domain-policy";
 import { HOST_ACCESS_MISSING, hasHostAccess } from "./permissions";
@@ -108,11 +108,11 @@ function routeRef(ref: string | undefined, fallbackTabId: number): Routed {
 }
 
 /** Checkout, login e captcha vivem em iframes de outra origem: sem ler todos, o agente é cego. */
-async function readAllFrames(tabId: number, tabUrl: string | undefined, action: Extract<BrowserAction, { type: "extractPage" }>): Promise<ActionResult> {
+async function readAllFrames(tabId: number, tabUrl: string | undefined, action: Extract<BrowserAction, { type: "extractPage" }>, soFrame?: number): Promise<ActionResult> {
   let frames: Array<{ frameId: number; url: string }> = [];
   try { frames = (await chrome.webNavigation.getAllFrames({ tabId })) ?? []; } catch { /* sem permissão nesta aba */ }
-  const usable = frames.filter((frame) => !isRestrictedUrl(frame.url)).slice(0, 10);
-  if (!usable.length) usable.push({ frameId: 0, url: "" });
+  const usable = frames.filter((frame) => !isRestrictedUrl(frame.url) && (soFrame === undefined || frame.frameId === soFrame)).slice(0, 10);
+  if (!usable.length) usable.push({ frameId: soFrame ?? 0, url: "" });
 
   const parts: string[] = [];
   let total = 0;
@@ -341,6 +341,8 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
    * lido na aba A e usado depois que o usuário trocou para a aba B era aplicado em B, onde o
    * número por acaso apontava para outro elemento.
    */
+  // O registro pode ter acabado de voltar do storage: o worker dorme entre uma rodada e outra.
+  await refsReady();
   const refInAction = "ref" in action ? action.ref : undefined;
   const routed = refInAction ? routeRef(refInAction, active?.id ?? -1) : await routeTab(action, active?.id);
   if (!routed.ok) return routed.failure;
@@ -442,7 +444,16 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
     return { ok: true, summary: `${action.direction === "back" ? "Voltei" : "Avancei"} para ${depois?.url ?? "a página anterior"}${depois?.url === urlAntes ? " (a URL não mudou)" : ""}. Chame extractPage para ler.`, navigatedTo: depois?.url };
   }
 
-  if (action.type === "extractPage") return readAllFrames(tab.id, tab.url, action);
+  /*
+   * Com `ref`, a leitura é de um elemento só: vai ao frame onde ele mora e com o ref já traduzido
+   * para o número local. Antes ia o `e412` original para todos os frames, nenhum deles reconhecia
+   * aquele formato, e reler uma subárvore terminava sempre em "não consegui ler nenhum frame".
+   */
+  if (action.type === "extractPage") {
+    return routed.ref !== undefined
+      ? readAllFrames(tab.id, tab.url, localAction as Extract<BrowserAction, { type: "extractPage" }>, frameId)
+      : readAllFrames(tab.id, tab.url, action);
+  }
 
   /*
    * O mundo da página é território do site, não da extensão — por isso a injeção sai do content
@@ -450,6 +461,10 @@ async function runAction(action: BrowserAction, autonomy: Autonomy): Promise<Act
    * aconteceu acima, junto com o das outras ações que modificam a página.
    */
   if (action.type === "evaluateScript") {
+    // O modo Observar é leitura. Antes, o script ia ao content script marcado como `ghost` e o
+    // próprio caminho o barrava; ao passar a rodar pelo background, essa trava ficou para trás e um
+    // script qualquer rodava no mundo da página numa sessão que prometia não mexer em nada.
+    if (denied) return failure("denied", "Modo Observar: execução de script bloqueada. Descreva o que o script faria ou peça para trocar a autonomia.");
     const outcome = await evaluateInMainWorld(tab.id, frameId, action.script);
     return outcome.ok
       ? { ok: true, summary: "Script executado no mundo da página.", content: outcome.text }

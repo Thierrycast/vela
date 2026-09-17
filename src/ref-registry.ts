@@ -45,6 +45,63 @@ const docKey = (context: FrameContext) => `${context.tabId}:${context.frameId}:$
  *  extensão, então eles **vão** chegar aqui — e merecem uma mensagem própria, não "ref inválido". */
 const LEGACY_REF = /^(f\d+\.)?ref_\d+_\d+$/;
 
+/*
+ * O registro sobrevive ao service worker dormir.
+ *
+ * O MV3 derruba o worker depois de uns trinta segundos parado, e tudo aqui era memória. A conversa e
+ * o prompt continuavam dizendo que os refs valem, mas a próxima leitura voltava a distribuir `e1`,
+ * `e2`… — e um `e5` antigo do histórico passava a apontar para outro elemento. A conferência de
+ * assinatura não pegava, porque comparava com a assinatura do elemento **novo**: o clique caía no
+ * lugar errado e voltava como sucesso.
+ *
+ * Duas garantias, com custos diferentes. O **contador** é gravado a cada leitura que o avança: é ele
+ * que impede um número de ser reaproveitado, e é pequeno. As **rotas** são gravadas logo depois, em
+ * lote — se o worker morrer nesse intervalo, um ref antigo vira "não existe" (recuperável), nunca
+ * "outro elemento".
+ */
+const STORAGE_KEY = "vela:refs";
+const COUNTER_KEY = "vela:refs-counter";
+const sessionStore = () => (typeof chrome !== "undefined" ? chrome.storage?.session : undefined);
+let hydration: Promise<void> | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function hydrate() {
+  const store = sessionStore();
+  if (!store) return;
+  try {
+    const saved = await store.get([STORAGE_KEY, COUNTER_KEY]);
+    const snapshot = saved[STORAGE_KEY] as { routes?: Array<[number, Route]>; reverse?: Array<[string, Array<[number, number]>]>; graves?: Array<[number, Grave]>; lastUrl?: Array<[string, string]> } | undefined;
+    counter = Math.max(counter, Number(saved[COUNTER_KEY]) || 0);
+    for (const [id, route] of snapshot?.routes ?? []) if (!routes.has(id)) routes.set(id, route);
+    for (const [key, entries] of snapshot?.reverse ?? []) if (!reverse.has(key)) reverse.set(key, new Map(entries));
+    for (const [id, grave] of snapshot?.graves ?? []) if (!graves.has(id)) graves.set(id, grave);
+    for (const [key, url] of snapshot?.lastUrl ?? []) if (!lastUrl.has(key)) lastUrl.set(key, url);
+  } catch { /* sem sessão para restaurar */ }
+}
+
+/** Espera o registro voltar do storage. Quem traduz ou distribui refs chama antes. */
+export function refsReady(): Promise<void> {
+  hydration ??= hydrate();
+  return hydration;
+}
+
+function persist(counterChanged: boolean) {
+  const store = sessionStore();
+  if (!store) return;
+  if (counterChanged) void store.set({ [COUNTER_KEY]: counter }).catch(() => undefined);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    void store.set({
+      [STORAGE_KEY]: {
+        routes: [...routes],
+        reverse: [...reverse].map(([key, known]) => [key, [...known]]),
+        graves: [...graves],
+        lastUrl: [...lastUrl],
+      },
+    }).catch(() => undefined);
+  }, 300);
+}
+
 function trim() {
   if (routes.size > MAX_ROUTES) {
     for (const id of [...routes.keys()].slice(0, routes.size - MAX_ROUTES)) routes.delete(id);
@@ -68,6 +125,7 @@ export function allocateRefs(content: string, context: FrameContext): string {
   let known = reverse.get(key);
   if (!known) { known = new Map(); reverse.set(key, known); }
 
+  const antes = counter;
   const result = content.replace(/\[#(\d+)\]/g, (_full, raw: string) => {
     const localId = Number(raw);
     const existing = known!.get(localId);
@@ -78,6 +136,7 @@ export function allocateRefs(content: string, context: FrameContext): string {
     return `[e${counter}]`;
   });
   trim();
+  persist(counter !== antes);
   return result;
 }
 
@@ -100,7 +159,10 @@ export function resolveRoute(ref: string): Lookup {
  * "não existe nenhum e412" não diz como se recuperar, enquanto "a aba 847 navegou de X para Y"
  * diz exatamente o que reler. É a pior mensagem do sistema virando a melhor pelo custo de um mapa.
  */
-export function evictFrame(tabId: number, frameId: number, to: string) {
+export async function evictFrame(tabId: number, frameId: number, to: string) {
+  // Esperar a restauração não é detalhe: uma navegação que acorda o worker chegaria antes das rotas
+  // voltarem do storage, e a restauração traria de volta justamente as rotas do documento que saiu.
+  await refsReady();
   /*
    * A URL de onde se saiu não dá para perguntar ao Chrome depois do fato: quando `onCommitted`
    * dispara, `tabs.get` já devolve o destino. Ela é lembrada aqui, no commit anterior — é o que
@@ -118,9 +180,11 @@ export function evictFrame(tabId: number, frameId: number, to: string) {
     reverse.delete(key);
   }
   trim();
+  persist(false);
 }
 
-export function evictTab(tabId: number) {
+export async function evictTab(tabId: number) {
+  await refsReady();
   for (const [key, known] of reverse) {
     if (!key.startsWith(`${tabId}:`)) continue;
     for (const publicId of known.values()) routes.delete(publicId);
@@ -128,4 +192,5 @@ export function evictTab(tabId: number) {
   }
   for (const [id, grave] of graves) if (grave.tabId === tabId) graves.delete(id);
   for (const key of lastUrl.keys()) if (key.startsWith(`${tabId}:`)) lastUrl.delete(key);
+  persist(false);
 }

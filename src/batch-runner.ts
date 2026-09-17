@@ -33,6 +33,21 @@ export type RunOne = (call: ToolCall, settings: AppSettings) => Promise<{ conten
 
 const isError = (content: string) => content.startsWith("ERRO [");
 
+function chavePlano(plano: string) {
+  let resultado = 2166136261;
+  for (let index = 0; index < plano.length; index += 1) {
+    resultado ^= plano.charCodeAt(index);
+    resultado = Math.imul(resultado, 16777619);
+  }
+  return (resultado >>> 0).toString(36);
+}
+
+/** O script vai no cartão (até um limite): aprovar código sem vê-lo não é aprovar. */
+function scriptDe(item: BatchItem) {
+  const script = typeof item.input.script === "string" ? item.input.script : "";
+  return script ? `\n   código: ${script.slice(0, 600)}${script.length > 600 ? "…" : ""}` : "";
+}
+
 /** Uma linha por item, do jeito que o modelo precisa ler: o que era, e o que deu. */
 function describeItem(item: BatchItem) {
   const action = typeof item.input.action === "string" ? item.input.action : item.input.op;
@@ -65,9 +80,16 @@ export async function runBatch(items: BatchItem[], settings: AppSettings, emit: 
    * anulariam o ganho: ela aprovaria no automático, que é pior do que não perguntar. O cartão
    * mostra o plano inteiro — e é por isso que ele pode valer por todos os passos.
    */
-  const plano = items.map((item, index) => `${index + 1}. ${describeItem(item)}`).join("\n");
+  const plano = items.map((item, index) => `${index + 1}. ${describeItem(item)}${scriptDe(item)}`).join("\n");
   if (settings.agent.autonomy === "assist") {
-    const decision = await requestApproval("batch", `Executar ${items.length} ações em sequência`, plano);
+    /*
+     * A chave é o plano, não a palavra "lote".
+     *
+     * Com uma chave fixa, "sempre nesta tarefa" num lote de três cliques aprovava de antemão todo
+     * lote seguinte — inclusive um com navegação e script, rodando como Auto sem ninguém ver o
+     * plano. Aprovar para a sessão vale para repetir **este** plano, que é o que a pessoa leu.
+     */
+    const decision = await requestApproval(`batch:${chavePlano(plano)}`, `Executar ${items.length} ações em sequência`, plano);
     if (decision === "unattended") return { content: "ERRO [denied] Não houve como pedir sua aprovação para o lote. Execute uma ação por vez ou peça ao usuário para abrir o painel.", event: { kind: "error", text: "Lote sem superfície de aprovação." } };
     if (decision === "deny") return { content: "ERRO [denied] O usuário não aprovou este lote. Explique o que pretendia fazer e pergunte como seguir.", event: { kind: "error", text: "Lote recusado pelo usuário." } };
   }

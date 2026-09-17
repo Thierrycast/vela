@@ -33,7 +33,9 @@ export async function hasHostAccess(): Promise<boolean> {
  */
 export async function requestHostAccess(): Promise<boolean> {
   try {
-    const granted = await chrome.permissions.request(ALL_URLS);
+    // Agrupar abas e notificar vão no mesmo pedido: são opcionais no manifest e nada mais os pedia,
+    // então numa instalação nova a Vela nunca os teria. Um diálogo só, no mesmo clique.
+    const granted = await chrome.permissions.request({ ...ALL_URLS, permissions: ["tabGroups", "notifications"] });
     if (granted) setTimeout(() => chrome.runtime.reload(), 400);
     return granted;
   } catch { return false; }

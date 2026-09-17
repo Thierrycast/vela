@@ -49,13 +49,23 @@ export function registrableDomain(url: string): string {
   }
 }
 
-const URL_PATTERN = /https?:\/\/[^\s"'<>)\]]+/gi;
+/*
+ * Endereço com ou sem esquema.
+ *
+ * Só `https?://` era reconhecido, e o retrato escreve os links como `href="host/caminho"` — sem
+ * esquema, para economizar tokens. Nenhum link lido numa página era anotado como ideia da página:
+ * o destino caía em "desconhecido" e passava sem confirmação, que é exatamente o ataque que o gate
+ * existe para barrar. O mesmo valia para "abre github.com" digitado pela pessoa, que não contava
+ * como pedido dela. O TLD exige letras para não confundir versão ("v1.2") com domínio.
+ */
+const URL_PATTERN = /(?:https?:\/\/)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?::\d{2,5})?(?:\/[^\s"'<>)\]]*)?/gi;
 
 /** Guarda os domínios que apareceram em cada fonte. É a memória que o gate consulta depois. */
 export function noteSource(source: Exclude<Provenance, "unknown">, text: string) {
   const target = source === "user" ? fromUser : source === "search" ? fromSearch : fromPage;
   for (const match of text.matchAll(URL_PATTERN)) {
-    const domain = registrableDomain(match[0]);
+    const endereco = /^https?:\/\//i.test(match[0]) ? match[0] : `https://${match[0]}`;
+    const domain = registrableDomain(endereco);
     if (domain) target.add(domain);
   }
 }

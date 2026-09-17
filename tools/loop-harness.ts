@@ -438,8 +438,8 @@ console.log("\n=== registro de refs ===");
 
   // Depois da navegação o ref não vira "desconhecido": vira "aquela aba saiu de X para Y", que é
   // a diferença entre o modelo adivinhar o que houve e saber exatamente o que reler.
-  evictFrame(7, 0, "https://exemplo.com/lista");
-  evictFrame(7, 0, "https://exemplo.com/detalhe");
+  await evictFrame(7, 0, "https://exemplo.com/lista");
+  await evictFrame(7, 0, "https://exemplo.com/detalhe");
   console.log("depois de navegar:", JSON.stringify(resolveRoute(ref)));
 }
 
@@ -527,4 +527,18 @@ console.log("\n=== a fala volta para o turno que ela abriu ===");
   console.log(`  transcrição dentro do turno: ${turno.includes("abre o carrinho") && turno.includes("**transcrição**") ? "sim" : "NAO"}`);
   console.log(`  fala de outro enunciado ficou de fora: ${!turno.includes("obrigado") && fora.includes("transcrição") ? "sim" : "NAO"}`);
   console.log(`  evento de painel ficou de fora: ${fora.includes("orb montado") ? "sim" : "NAO"}`);
+}
+
+// O retrato escreve links sem esquema (href="host/caminho"). Se o gate so reconhecesse https://,
+// nenhum link lido numa pagina contaria como ideia da pagina — e a navegacao sugerida por ela
+// passaria sem confirmacao.
+console.log("\n=== gate de dominio reconhece link sem esquema ===");
+{
+  const { classify, noteSource, resetDomainMemory } = await import("../src/domain-policy");
+  resetDomainMemory();
+  noteSource("user", "abre github.com e procura a vela");
+  noteSource("page", '[e3]<link name="Oferta" href="golpe-exemplo.com.br/promo" /> versão v1.2');
+  console.log(`  link do retrato conta como da página: ${classify("https://golpe-exemplo.com.br/login") === "page" ? "sim" : "NAO"}`);
+  console.log(`  domínio digitado sem https conta como do usuário: ${classify("https://github.com/x") === "user" ? "sim" : "NAO"}`);
+  console.log(`  número de versão não vira domínio: ${classify("https://v1.2") === "unknown" ? "sim" : "NAO"}`);
 }

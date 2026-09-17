@@ -22,6 +22,49 @@ O gargalo nunca foi capacidade: era **número de rodadas**. A Vela fazia quase t
 idas ao modelo onde deveriam bastar duas. As decisões abaixo atacam isso, e as três últimas pagam
 a conta de segurança que o ganho de alcance criou.
 
+### O que a revisão da branch inteira pegou
+
+Uma revisão de `main...navegacao-agentica` achou onze defeitos que nenhum teste tinha exercitado. Os
+que mudam decisão de desenho ficam registrados aqui.
+
+**O registro de refs mora no `storage.session`.** Era memória, e o service worker do MV3 morre depois
+de uns trinta segundos parado. A próxima leitura voltava a distribuir `e1`, `e2`… enquanto o histórico
+ainda tinha refs com esses números — e a conferência de assinatura não pegava, porque comparava com o
+elemento **novo**. O contador é gravado a cada leitura que o avança (é ele que impede reaproveitar um
+número); as rotas, logo depois, em lote. Morrer no intervalo transforma um ref antigo em "não existe",
+que é recuperável — nunca em "outro elemento". `evictFrame` espera a restauração, senão uma navegação
+que acorda o worker traria de volta as rotas do documento que acabou de sair.
+
+**A sessão existe sem grupo de abas.** `tabGroups` virou permissão opcional e nada a pedia. Sem ela, a
+sessão não nascia, nenhuma aba era "da Vela", e endereçar aba por número, `tab_manage` e as tarefas de
+fundo paravam juntos por causa de um detalhe visual. Agora a sessão sem grupo é a lista de abas que
+ela registrou, e o grupo voltou a ser o que é: enfeite. O pedido de acesso aos sites leva
+`tabGroups` e `notifications` no mesmo diálogo, e cada uma tem botão próprio em Permissões para quem
+instalou antes.
+
+**Parar o turno e parar tudo são pedidos diferentes.** O botão de parar cancela as tarefas de fundo;
+falar por cima numa conversa de voz interrompe só o turno — as tarefas de fundo existem justamente
+para continuar enquanto a pessoa fala. O cancelamento virou geração em vez de booleano: o booleano
+era zerado pela tarefa seguinte e "descancelava" as que já tinham recebido ordem de parar.
+
+**A tarefa de fundo tem histórico próprio.** Ela escrevia na conversa em paralelo com o loop principal,
+e uma mensagem sua podia cair entre o `assistant{tool_calls}` e a resposta `tool` — ordem que a API
+exige, e o provedor recusava a conversa dali em diante. O andamento aparece como status, e só o
+resultado entra na conversa, quando nenhum turno está no meio de uma troca de ferramenta. E ela não
+delega de novo: sem esse corte, cada tarefa podia abrir outra, sem limite.
+
+**Aprovar um lote para a sessão vale para aquele plano.** A chave era a palavra "batch", e "sempre
+nesta tarefa" num lote de três cliques aprovava de antemão qualquer lote seguinte — com navegação e
+script, rodando como Auto. O cartão agora mostra o código de `evaluateScript`.
+
+**Menores, com o mesmo padrão de falha silenciosa:** `evaluateScript` rodava em modo Observar desde
+que saiu do content script; reler um elemento por `ref` mandava o ref público a todos os frames e
+nunca funcionava; campo com máscara (telefone, CPF, moeda) contava como "sem efeito" e escalava para o
+modo preciso; digitar num contenteditable sem rótulo mudava a própria identidade e o Enter seguinte
+era recusado com `ref_changed`; console e rede aceitavam `tabId` de aba do usuário; e o gate de
+domínio só reconhecia `https://`, enquanto o retrato escreve links como `href="host/caminho"` — nenhum
+link lido numa página contava como ideia da página.
+
 ### O ref pertence ao elemento, não à leitura
 
 Cada `extractPage` criava um universo novo: os refs eram `ref_<leitura>_<posição>`, e a leitura

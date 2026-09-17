@@ -368,7 +368,7 @@ async function stopVoice() {
 
 async function applySidecarMessage(message: SidecarOutbound) {
   if (message.type === "chat:submit") return runTurn(message.text);
-  if (message.type === "chat:abort") { cancelPendingApprovals(); agentLoop.abort(); return; }
+  if (message.type === "chat:abort") { cancelPendingApprovals(); agentLoop.abortAll(); return; }
   if (message.type === "chat:new") {
     cancelPendingApprovals();
     clearSessionApprovals();
@@ -382,7 +382,8 @@ async function applySidecarMessage(message: SidecarOutbound) {
   if (message.type === "chat:open") {
     if (!(await conversation.open(message.id))) return;
     cancelPendingApprovals();
-    agentLoop.abort();
+    // Trocar de conversa leva junto o que rodava em segundo plano: o resultado cairia na outra.
+    agentLoop.abortAll();
     broadcast({ type: "chat:snapshot", ...(await agentLoop.snapshot()) });
     return;
   }
@@ -391,7 +392,7 @@ async function applySidecarMessage(message: SidecarOutbound) {
     if (!existia) return;
     // Apagar a conversa aberta deixaria a tela mostrando mensagens que já não existem: o laço
     // precisa recarregar da conversa que passou a ser a ativa antes de republicar o retrato.
-    if (eraAtiva) { cancelPendingApprovals(); agentLoop.abort(); broadcast({ type: "chat:snapshot", ...(await agentLoop.snapshot()) }); await publishSession(); }
+    if (eraAtiva) { cancelPendingApprovals(); agentLoop.abortAll(); broadcast({ type: "chat:snapshot", ...(await agentLoop.snapshot()) }); await publishSession(); }
     broadcast({ type: "chat:history", items: await conversation.list() });
     broadcast({ type: "chat:event", event: { kind: "status", text: "Conversa apagada." } });
     return;
@@ -501,7 +502,7 @@ async function runLensAction(payload: { intent: LensIntent; text: string; url: s
 chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
   void getSession().then((session) => { if (session?.tabIds.includes(details.sourceTabId)) void adoptTab(details.tabId).then(publishSession); });
 });
-chrome.tabs.onRemoved.addListener((tabId) => { evictTab(tabId); void forgetTab(tabId).then(publishSession); });
+chrome.tabs.onRemoved.addListener((tabId) => { void evictTab(tabId); void forgetTab(tabId).then(publishSession); });
 
 /*
  * Documento trocado: os refs daquele frame morrem junto com ele.
@@ -511,7 +512,7 @@ chrome.tabs.onRemoved.addListener((tabId) => { evictTab(tabId); void forgetTab(t
  * válidos. Invalidar ali seria jogar fora o ganho inteiro: era exatamente o que o modelo antigo
  * fazia a cada clique que mexesse no DOM.
  */
-chrome.webNavigation.onCommitted.addListener((details) => evictFrame(details.tabId, details.frameId, details.url));
+chrome.webNavigation.onCommitted.addListener((details) => { void evictFrame(details.tabId, details.frameId, details.url); });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.groupId === undefined) return;
   void getSession().then((session) => { if (session && changeInfo.groupId === session.groupId) void adoptTab(tabId).then(publishSession); });
@@ -521,7 +522,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
   if (message.type === "lens:action" && message.text) {
     void runLensAction({ intent: (message.intent ?? "context") as LensIntent, text: message.text, url: message.url ?? "", title: message.title ?? "" });
   }
-  if (message.type === "agent:pause") { cancelPendingApprovals(); agentLoop.abort(); }
+  if (message.type === "agent:pause") { cancelPendingApprovals(); agentLoop.abortAll(); }
   if (message.type === "bridge:status") { sendResponse(bridgeStatus()); return true; }
   /*
    * O documento offscreen só enxerga `chrome.runtime` — `chrome.storage` não existe lá.

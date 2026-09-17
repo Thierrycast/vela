@@ -272,10 +272,9 @@ export function buildTools(settings: AppSettings): ToolDefinition[] {
   if (isToolEnabled(settings, "read_console_messages")) tools.push(readConsoleTool);
   if (isToolEnabled(settings, "read_network_requests")) tools.push(readNetworkTool);
   /*
-   * `delegate_task` só faz sentido quando o modelo rodando AGORA é o rápido — reconhecível porque
-   * `defaultModel` foi trocado pelo `fastModel` para esta chamada (ver agent-loop.ts). Expor a
-   * ferramenta ao modelo robusto (que já é quem executaria a tarefa) não teria efeito útil, e
-   * deixaria a tarefa "robusta" rodando dentro de si mesma sem ganho nenhum.
+   * `delegate_task` é oferecida em qualquer conversa com a habilidade ligada — esperar calado é
+   * ruim com ou sem voz. A exceção é dentro de uma tarefa de fundo: ela desliga `delegate` nas
+   * próprias configurações (ver background-task.ts), então não delega de novo.
    */
   if (isToolEnabled(settings, "delegate_task")) tools.push(delegateTaskTool);
   return tools;

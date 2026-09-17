@@ -210,10 +210,28 @@ async function typeInto(element: Element, text: string, mode: "replace" | "appen
 
 /** O campo ficou mesmo com o que foi pedido? É esta conta que decide se vale escalar para o
  *  caminho confiável — sem ela, "digitei" era afirmação de intenção, não de resultado. */
-function typeLanded(outcome: TypeOutcome, text: string, mode: "replace" | "append") {
+/*
+ * "Não pegou" é o campo não ter mudado — não é o valor ser diferente do texto.
+ *
+ * Exigir igualdade marcava como falha todo campo que formata o que recebe: telefone com máscara,
+ * CPF, moeda, `maxlength`. O texto entrava, o campo o reescrevia do jeito dele, e a ação voltava
+ * "sem efeito perceptível" — sem Enter, escalando para o modo preciso e dizendo ao modelo que o
+ * campo não aceitava preenchimento, quando aceitava. O que denuncia evento ignorado é o valor
+ * continuar o de antes (ou vazio); o que sobra é reformatação, e é dito como tal.
+ */
+function typeLanded(outcome: TypeOutcome, text: string, mode: "replace" | "append", before: string) {
   if (outcome.kind === "select") return true;
   if (!text) return true;
-  return mode === "replace" ? outcome.value.trim() === text.trim() : outcome.value.includes(text);
+  const exact = mode === "replace" ? outcome.value.trim() === text.trim() : outcome.value.includes(text);
+  if (exact) return true;
+  if (!outcome.value.trim()) return false;
+  return outcome.value !== before;
+}
+
+function valueOf(element: Element) {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element.value;
+  if (element instanceof HTMLElement && element.isContentEditable) return element.textContent ?? "";
+  return "";
 }
 
 function pressKey(element: Element | null, key: string) {
@@ -420,6 +438,7 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
 
   if (action.type === "type") {
     const mode = action.mode ?? "replace";
+    const before = valueOf(element);
     const outcome = await typeInto(element, action.text, mode);
     if (outcome === null) return failure("element_not_interactable", `${describeTarget(element)} não aceita digitação.`);
     /*
@@ -428,12 +447,13 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
      * "sem efeito perceptível" usa o mesmo vocabulário do clique, que é o que a escalada para o
      * caminho confiável já sabe reconhecer.
      */
-    if (!typeLanded(outcome, action.text, mode)) {
+    if (!typeLanded(outcome, action.text, mode, before)) {
       return { ok: true, summary: `Tentei digitar em ${describeTarget(element)} e o campo continua com “${outcome.value.slice(0, 60)}” — sem efeito perceptível.` };
     }
     let detail = "";
     if (action.submit) { await wait(80); detail = ` ${pressKey(element, "Enter")}`; await wait(300); }
-    return { ok: true, summary: `Digitei em ${describeTarget(element)}${note ?? ""} (valor agora: “${outcome.value.slice(0, 60)}”).${detail}` };
+    const reformatado = outcome.kind !== "select" && mode === "replace" && outcome.value.trim() !== action.text.trim() ? " — o campo reformatou o que recebeu" : "";
+    return { ok: true, summary: `Digitei em ${describeTarget(element)}${note ?? ""} (valor agora: “${outcome.value.slice(0, 60)}”${reformatado}).${detail}` };
   }
 
   return failure("unsupported", "Ação não executável na página.");

@@ -5,7 +5,9 @@ import { recordAction, recordBatch } from "./action-stats";
 import { findScriptByName, listScripts, saveScript } from "./script-store";
 import { parseMetadata } from "./user-script";
 import { requestTakeover } from "./approvals";
-import { manageTabs } from "./tab-manager";
+import { isSessionTab, manageTabs } from "./tab-manager";
+import { HOST_ACCESS_MISSING, hasHostAccess } from "./permissions";
+import { isRestrictedUrl } from "./navigation";
 import { readSetting, writeSetting } from "./settings-tool";
 import { getMemory, setMemory } from "./storage";
 import { Emit } from "./messages";
@@ -132,6 +134,19 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
       const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
       const tabId = args.tabId ?? active?.id;
       if (tabId === undefined) return { content: "ERRO [no_tab] Nenhuma aba para observar.", event: { kind: "error", text: "Sem aba para observar." } };
+      /*
+       * Mesmas regras de `browser_action` — e com mais motivo: aqui o depurador é anexado e a
+       * lista de endereços que a aba pede é lida. Sem esta checagem, qualquer `tabId` servia, e o
+       * modelo podia observar a rede de uma aba do usuário (o banco aberto ao lado) que a Vela
+       * nunca teria permissão de tocar por `browser_action`.
+       */
+      if (!(await hasHostAccess())) return { content: `ERRO [denied] ${HOST_ACCESS_MISSING}`, event: { kind: "error", text: "Sem acesso aos sites." } };
+      if (tabId !== active?.id) {
+        if (!settings.capabilities.tabAddressing) return { content: "ERRO [denied] Agir numa aba pelo número está desligado nas configurações da Vela (Configurações → Habilidades). Traga a aba para a frente com tab_manage e observe a aba ativa.", event: { kind: "error", text: "Endereçar aba está desligado." } };
+        if (!(await isSessionTab(tabId))) return { content: `ERRO [denied] A aba ${tabId} não é da sessão da Vela — ela é do usuário, e você não a observa por número. Use tab_manage com op "list" para ver quais abas são suas.`, event: { kind: "error", text: `A aba ${tabId} é do usuário.` } };
+      }
+      const alvo = tabId === active?.id ? active : await chrome.tabs.get(tabId).catch(() => null);
+      if (!alvo || isRestrictedUrl(alvo.url)) return { content: "ERRO [unsupported] Esta aba não pode ser observada (página interna do navegador ou aba fechada).", event: { kind: "error", text: "Aba não observável." } };
 
       const started = await startWatching(tabId, kind);
       if (!started.ok) return { content: `ERRO [unsupported] ${started.motivo}`, event: { kind: "error", text: `Não consegui observar a aba ${tabId}.` } };
@@ -286,9 +301,12 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
       if (settings.agent.autonomy === "observe") return { content: "ERRO [denied] Modo Observar: não é possível delegar tarefas.", event: { kind: "error", text: "Modo Observar bloqueou a delegação." } };
       // Roda por conta própria, sem bloquear este turno — o modelo rápido responde e a conversa
       // continua; o robusto trabalha por trás e o resultado chega como mensagem nova quando pronto.
-      void runDelegatedTask(args.task, emit);
-      const text = `Delegado em segundo plano: ${args.task.slice(0, 80)}`;
-      return { content: "Tarefa delegada para execução em segundo plano com o modelo robusto. Responda ao usuário agora dizendo que vai cuidar disso, e continue a conversa normalmente — o resultado chega como uma mensagem nova quando terminar. Não espere por ele nem repita o pedido.", event: { kind: "result", text } };
+      // O aviso de fila vai na resposta da ferramenta, não como mensagem na conversa: aqui ainda
+      // estamos entre o pedido de ferramenta e a resposta dele, e nada pode entrar nesse meio.
+      const situacao = runDelegatedTask(args.task, emit);
+      const text = situacao === "na_fila" ? `Na fila do segundo plano: ${args.task.slice(0, 80)}` : `Delegado em segundo plano: ${args.task.slice(0, 80)}`;
+      const quando = situacao === "na_fila" ? "Já há tarefas rodando, então esta entrou na fila e começa assim que uma terminar — diga isso ao usuário." : "Ela já começou.";
+      return { content: `Tarefa delegada para execução em segundo plano com o modelo robusto. ${quando} Responda ao usuário agora dizendo que vai cuidar disso, e continue a conversa normalmente — o resultado chega como uma mensagem nova quando terminar. Não espere por ele nem repita o pedido.`, event: { kind: "result", text } };
     }
 
     const unknown = `ERRO [unsupported] Ferramenta ou argumentos inválidos: ${call.name}.`;
