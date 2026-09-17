@@ -136,7 +136,7 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
     <h2 className="subsection">Servidor de voz</h2>
     <div className="settings-group">
       <Row label="Endereço" description="Sem barra no fim. As rotas seguem o padrão da OpenAI: /v1/audio/speech e /v1/audio/transcriptions.">
-        <input className="mono" value={voice.baseUrl} placeholder="http://SEU-SERVIDOR-DE-VOZ:8010" onChange={(event) => patch({ baseUrl: event.target.value })} />
+        <input className="mono" value={voice.baseUrl} placeholder="http://localhost:8010" onChange={(event) => patch({ baseUrl: event.target.value })} />
       </Row>
       <Row label="Chave" description="Deixe vazio quando o servidor não pede autenticação, como no acesso pela Tailscale.">
         <input className="mono" type="password" value={voice.apiKey} placeholder="opcional" onChange={(event) => patch({ apiKey: event.target.value })} />
@@ -167,7 +167,7 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
     <h2 className="subsection">Transcrição incremental</h2>
     <div className="settings-group">
       <Row label="WebSocket" description="Mostra o texto aparecendo enquanto você fala, no modo de voz ao vivo. Áudio em PCM 16-bit, 16 kHz, mono. Em branco, desliga — a transcrição final continua igual.">
-        <input className="mono" value={voice.streamingUrl} placeholder="ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream" onChange={(event) => patch({ streamingUrl: event.target.value })} />
+        <input className="mono" value={voice.streamingUrl} placeholder="ws://localhost:8010/stt/stream" onChange={(event) => patch({ streamingUrl: event.target.value })} />
       </Row>
     </div>
     <p className="maintenance-notice ok">O caminho incremental existe para dar retorno visual imediato, não precisão: o motor é o Vosk, que devolve minúsculas e sem pontuação. O texto que fica é sempre o do modelo de transcrição acima, ao fim do enunciado.</p>

@@ -228,8 +228,8 @@ export const defaultSettings: AppSettings = {
   activeProviderId: "omniroute",
   providers: [{
     id: "omniroute",
-    name: "OmniRoute",
-    baseUrl: "https://SEU-GATEWAY/",
+    name: "Meu gateway",
+    baseUrl: "",
     protocol: "omnirouter",
     apiKey: "",
     defaultModel: "",
@@ -266,7 +266,7 @@ export const defaultSettings: AppSettings = {
   context: { currentPage: true, selection: true, sessionTabs: true, outsideTabs: false },
   bridge: { enabled: false, port: 8792, token: "", scriptPath: "" },
   voice: {
-    baseUrl: "http://SEU-SERVIDOR-DE-VOZ:8010",
+    baseUrl: "",
     apiKey: "",
     transcriptionModel: "groq/whisper-large-v3-turbo",
     speechModel: "tts-1",
@@ -274,7 +274,7 @@ export const defaultSettings: AppSettings = {
     streamSpeech: true,
     speechRate: 1.15,
     showPulse: false,
-    streamingUrl: "ws://SEU-SERVIDOR-DE-VOZ:8010/stt/stream",
+    streamingUrl: "",
     visual: "liquid-blob",
     customShader: "",
   },

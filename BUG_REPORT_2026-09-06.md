@@ -131,7 +131,7 @@ O botão `auto/best-coding` na barra de composição do chat (`title="OmniRoute 
 - Dropdown de Autonomia (Observar/Assistir/Auto) — funciona e sincroniza corretamente entre o chat e Configurações → Agente.
 - Teste de conexão do provider (OmniRoute, em Configurações → Providers) — funciona, reporta os 1459 modelos corretamente.
 - Chips de ação rápida "Ler a página atual" / "Pesquisar na web" — preenchem o campo como esperado.
-- Fluxo de voz ponta a ponta (transcrição): áudio → `POST SEU-SERVIDOR-DE-VOZ:8010/v1/audio/transcriptions` (Whisper local, no argos) → `200 OK` → texto transcrito segue pro `chat/completions` normalmente. A transcrição em si funciona bem.
+- Fluxo de voz ponta a ponta (transcrição): áudio → `POST http://SEU-SERVIDOR-DE-VOZ:8010/v1/audio/transcriptions` (Whisper local, no servidor de voz) → `200 OK` → texto transcrito segue pro `chat/completions` normalmente. A transcrição em si funciona bem.
 
 ## ⛔ Não testado (limitação da automação, não do app)
 
