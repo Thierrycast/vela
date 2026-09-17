@@ -25,7 +25,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   storage: "Guardar conversas e configurações neste perfil.",
 };
 
-const sections = ["Geral", "Aparência", "Agente", "Habilidades", "Navegador", "Contexto", "Voz", "Providers", "Scripts", "Ponte MCP", "Permissões", "Atalhos", "Avançado"] as const;
+const sections = ["Geral", "Aparência", "Agente", "Habilidades", "Navegador", "Contexto", "Voz", "Providers", "Scripts", "Ponte MCP", "Permissões", "Atalhos", "Avançado", "Sobre"] as const;
 type Section = typeof sections[number];
 
 /**
@@ -73,6 +73,7 @@ function Options() {
   const [loadingModels, setLoadingModels] = useState<string | null>(null);
   const [conversationCount, setConversationCount] = useState(0);
   const [permissions, setPermissions] = useState<string[] | null>(null);
+  const versao = typeof chrome !== "undefined" ? chrome.runtime?.getManifest?.()?.version ?? "—" : "—";
   const [hostAccess, setHostAccess] = useState<boolean | null>(null);
   const [shortcut, setShortcut] = useState<string>("");
   const [probe, setProbe] = useState<Record<string, { rotulo: string; ok: boolean }> | null>(null);
@@ -164,6 +165,26 @@ function Options() {
     if (section === "Scripts") return <ScriptsPanel />;
     if (section === "Ponte MCP") return <BridgePanel settings={settings} update={update} />;
     if (section === "Avançado") return <AdvancedPanel settings={settings} update={update} />;
+    /*
+     * Versão instalada, licença e para onde ir com um problema.
+     *
+     * Quem abre as configurações depois de a Vela fazer algo estranho precisa de duas coisas: saber
+     * qual versão está rodando (a resposta muda de uma para outra) e onde relatar. Sem isto, as duas
+     * ficavam fora da extensão — no repositório, que nem todo mundo tem aberto.
+     */
+    if (section === "Sobre") return <><h1>Sobre</h1>
+      <p className="section-intro">A Vela roda inteira no seu navegador: não há servidor nosso no caminho. O que sai daqui vai para o provedor de IA e para o servidor de voz que você configurou.</p>
+      <div className="settings-group">
+        <Row label="Versão" description="A mesma que aparece em chrome://extensions."><code>{versao}</code></Row>
+        <Row label="Licença" description="Código aberto, uso livre inclusive comercial."><span>MIT</span></Row>
+        <Row label="Código e documentação" description="Arquitetura, guias e o histórico das decisões.">
+          <button className="secondary-button" onClick={() => void chrome.tabs?.create({ url: "https://github.com/Thierrycast/vela" })}>Abrir no GitHub</button>
+        </Row>
+        <Row label="Relatar um problema" description="Se puder, ligue o rastreio completo em Avançado, reproduza e anexe o pacote — ele já vai com os segredos redigidos.">
+          <button className="secondary-button" onClick={() => void chrome.tabs?.create({ url: "https://github.com/Thierrycast/vela/issues/new/choose" })}>Abrir uma issue</button>
+        </Row>
+      </div>
+    </>;
     return <><h1>{section}</h1><p className="section-intro">Esta área está preparada para a próxima etapa da Vela.</p><div className="settings-group"><Row label="Estado"><span className="status-badge pending">Em preparação</span></Row></div></>;
   })();
   return <main className="vela-options"><header className="options-topbar"><div className="settings-brand"><span className="vela-mini-mark"><VelaMark size={17} /></span><div><strong>{settings.brand.appName}</strong><small>Preferências</small></div></div><span className={`saved-indicator ${saved ? "visible" : ""}`}><Check size={14} /> Salvo</span></header><div className="settings-layout"><nav className="settings-nav" aria-label="Seções de configurações">{sections.map((item) => <button className={section === item ? "active" : ""} onClick={() => setSection(item)} key={item}><span>{item === "Aparência" ? <Palette size={15} /> : item === "Providers" ? <Wifi size={15} /> : item === "Scripts" ? <FileCode2 size={15} /> : item === "Ponte MCP" ? <Plug size={15} /> : item === "Permissões" ? <Shield size={15} /> : item === "Habilidades" ? <Zap size={15} /> : item === "Avançado" ? <SlidersHorizontal size={15} /> : <ChevronRight size={15} />}</span>{item}</button>)}</nav><section className="settings-main">{content}</section></div></main>;

@@ -219,4 +219,4 @@ span.vela-orb-canvas>canvas{display:block;width:100%;height:100%}
 .reading-word{border-radius:6px;background:color-mix(in srgb,var(--reading) 22%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--reading) 34%,transparent),0 0 12px color-mix(in srgb,var(--reading) 14%,transparent);opacity:0;transition:opacity 180ms ease}
 .reading-word[data-visivel=sim]{opacity:1}
 .reading-word[data-pronta=sim]{transition:transform 150ms cubic-bezier(.2,.8,.2,1),width 150ms cubic-bezier(.2,.8,.2,1),height 150ms cubic-bezier(.2,.8,.2,1),opacity 180ms ease}
-@media(prefers-reduced-motion:reduce){.reading-word,.reading-word[data-pronta=sim]{transition:none}}
+@media(prefers-reduced-motion:reduce){.reading-word,.reading-word[data-pronta=sim]{transition:none}}.suggestions .primeira-vez{background:var(--signal);border-color:var(--signal);color:#062220;font-weight:600;justify-content:center}.suggestions .primeira-vez:hover{background:var(--signal);color:#062220;filter:brightness(1.06)}

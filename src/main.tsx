@@ -312,10 +312,17 @@ function App() {
         ? <div className="welcome">
             <div className="welcome-mark"><VelaOrb state={agentState} size={64} visual={settings.voice.visual} /></div>
             <h1>Como posso ajudar?</h1>
-            <p>{configured ? "Converse, pesquise e deixe o agente cuidar do navegador." : "Configure um provider nas opções para começar."}</p>
+            {/*
+              * Quem acabou de instalar não tem o que pedir: sem provider, qualquer sugestão clicada
+              * termina num erro. A primeira tela então oferece o único passo que existe — abrir as
+              * configurações —, em vez de mandar procurar onde fica.
+              */}
+            <p>{configured ? "Converse, pesquise e deixe o agente cuidar do navegador." : "Falta escolher um provedor de IA e conceder o acesso aos sites. São dois cliques."}</p>
             <div className="suggestions">
-              <button onClick={() => setInput("Leia esta página e me diga o que dá para fazer aqui")}><FileText size={ICON.inline} /> Ler a página atual</button>
-              <button onClick={() => setInput("Pesquise por ")}><Search size={ICON.inline} /> Pesquisar na web</button>
+              {configured ? <>
+                <button onClick={() => setInput("Leia esta página e me diga o que dá para fazer aqui")}><FileText size={ICON.inline} /> Ler a página atual</button>
+                <button onClick={() => setInput("Pesquise por ")}><Search size={ICON.inline} /> Pesquisar na web</button>
+              </> : <button className="primeira-vez" onClick={openOptions}><Settings2 size={ICON.inline} /> Abrir as configurações</button>}
             </div>
           </div>
         : <div className="message-list">{bubbles.map((message) => <article className={`message ${message.role}`} key={message.id} data-message-id={message.id}>
