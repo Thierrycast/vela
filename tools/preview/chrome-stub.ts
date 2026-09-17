@@ -18,17 +18,25 @@ if (Number.isFinite(larguraPedida) && larguraPedida >= 260 && larguraPedida <= 6
   document.documentElement.style.setProperty("--largura-do-painel", `${larguraPedida}px`);
 }
 
+/*
+ * `?estado=novo` é quem acabou de instalar: sem provider, sem modelo, sem nada configurado.
+ *
+ * É o estado mais difícil de ver durante o desenvolvimento (a máquina de quem desenvolve está
+ * sempre configurada) e o primeiro que qualquer pessoa encontra.
+ */
+const recemInstalada = scenario === "novo";
+
 const settings = {
   ...defaultSettings,
   brand: { ...defaultSettings.brand, appName: "Vela" },
-  providers: [{ ...defaultSettings.providers[0], apiKey: "chave-de-exemplo", defaultModel: "auto/best-coding" }],
+  providers: [{ ...defaultSettings.providers[0], apiKey: recemInstalada ? "" : "chave-de-exemplo", defaultModel: recemInstalada ? "" : "auto/best-coding" }],
   bridge: { enabled: true, port: 8792, token: "3f9c1ad24b7e40aab2e6c8d51f07be93", scriptPath: "C:\\Users\\voce\\projetos\\browser-ai\\bridge\\vela-bridge.mjs" },
 };
 
 const message = (role: ChatMessage["role"], content: string): ChatMessage =>
   ({ id: crypto.randomUUID(), role, content, createdAt: Date.now(), status: "complete" });
 
-const conversation: ChatMessage[] = scenario === "vazio" ? [] : [
+const conversation: ChatMessage[] = scenario === "vazio" || recemInstalada ? [] : [
   message("user", "pesquise notebooks bons para desenvolvimento e abra o primeiro resultado"),
   message("assistant", "Encontrei três opções bem avaliadas. Abri a primeira: um notebook com 32 GB de RAM e tela de 14 polegadas, por R$ 8.400. Quer que eu compare com as outras duas antes de você decidir?"),
   message("user", "compara sim"),
@@ -63,12 +71,12 @@ const conversation: ChatMessage[] = scenario === "vazio" ? [] : [
   ].join("\n")),
 ];
 
-const events: AgentEvent[] = scenario === "vazio" ? [] : [
+const events: AgentEvent[] = scenario === "vazio" || recemInstalada ? [] : [
   { kind: "result", text: "Busca: 5 resultado(s) para “notebook desenvolvimento”." },
   { kind: "result", text: "Abri https://loja.exemplo.com/notebook-pro. Chame extractPage para ler a página." },
   { kind: "result", text: "Página lida em 2 frame(s)." },
   { kind: "result", text: "Cliquei em button “Ver especificações” — a página reagiu." },
-  { kind: "error", text: "O snapshot mudou. Chame extractPage de novo antes de agir." },
+  { kind: "error", text: "Esse elemento agora é outro: quando você o leu era “Pedido #1043”. Chame find com esse texto." },
   { kind: "error", text: "Configure o servidor de voz em Configurações → Voz." },
 ];
 
@@ -77,8 +85,8 @@ const SAMPLE_ATTACHMENT = "Trecho selecionado em “Loja Exemplo” (https://loj
 
 const panelMessages: unknown[] = [
   { type: "chat:snapshot", messages: conversation, events, telemetry: ["omniroute · 842 ms"], running: scenario === "executando" },
-  { type: "chat:session", title: scenario === "vazio" ? "" : "pesquise notebooks bons para de", tabCount: 3 },
-  { type: "chat:attachments", items: scenario === "vazio" ? [] : [SAMPLE_ATTACHMENT] },
+  { type: "chat:session", title: scenario === "vazio" || recemInstalada ? "" : "pesquise notebooks bons para de", tabCount: recemInstalada ? 0 : 3 },
+  { type: "chat:attachments", items: scenario === "vazio" || recemInstalada ? [] : [SAMPLE_ATTACHMENT] },
   // Histórico com títulos longos: é onde o menu de conversas quebrava.
   { type: "chat:history", items: [
     { id: "h1", title: "Leia esta página e me diga o que dá para fazer aqui", updatedAt: Date.now() },

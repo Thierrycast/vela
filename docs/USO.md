@@ -2,6 +2,10 @@
 
 O que a Vela faz no dia a dia, e onde cada coisa fica.
 
+<p align="center">
+  <img src="imagens/opcoes.png" alt="A página de configurações da Vela, com as seções à esquerda" width="760">
+</p>
+
 ## O que a Vela sabe fazer sozinha
 
 **Ler do mais leve ao mais pesado.** Primeiro `find` (quando ela sabe o que procura), depois o

@@ -16,6 +16,10 @@ Vela: abre a busca, digita, espera o resultado carregar, lê a lista e responde 
       ao modelo, não em oito.
 ```
 
+<p align="center">
+  <img src="docs/imagens/painel.png" alt="O painel da Vela ao lado da página, com a resposta e a atividade do agente" width="370">
+</p>
+
 ---
 
 ## Sumário
@@ -99,6 +103,10 @@ A cada `npm run build`, clique em **Atualizar** no card da extensão.
    `/v1/audio/transcriptions`. O microfone precisa ser liberado **a partir da página de opções** —
    o runtime de áudio roda num documento offscreen, que não consegue exibir o prompt do Chrome.
 
+<p align="center">
+  <img src="docs/imagens/painel-primeira-vez.png" alt="Primeira abertura do painel, oferecendo abrir as configurações" width="330">
+</p>
+
 ---
 
 ## Como ela decide
@@ -133,6 +141,10 @@ procurar 49 ms, clicar numa página que reage 132 ms.
 
 Cada habilidade mais poderosa tem interruptor próprio em Opções → Habilidades, e as arriscadas
 nascem desligadas: executar script na página, sessão de depurador, leitura de console e de rede.
+
+<p align="center">
+  <img src="docs/imagens/painel-aprovacao.png" alt="Cartão de aprovação antes de clicar em Finalizar compra, com as opções Recusar, Sempre nesta tarefa e Aprovar" width="370">
+</p>
 
 ---
 

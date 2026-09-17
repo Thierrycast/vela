@@ -104,6 +104,16 @@ Dez leituras, dez buscas e dez cliques numa página de ~8 mil elementos, com o t
 lado. É assim que se compara uma mudança com o estado anterior (`git stash push src`, build, rodar,
 `git stash pop`) em vez de confiar na impressão de que ficou melhor.
 
+## Capturas da interface
+
+```bash
+node tools/capturar-telas.mjs
+```
+
+Sobe o preview, abre um Chrome limpo e grava `docs/imagens/*.png` nas larguras reais (painel de
+420 px, opções em tela cheia). É como as imagens do README são geradas — refazer depois de mexer na
+interface é um comando, não um trabalho de recorte.
+
 ## Testar com a extensão carregada automaticamente
 
 `--load-extension` é ignorado silenciosamente no Chrome 137+, e `--disable-features=
