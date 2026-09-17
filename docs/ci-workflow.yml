@@ -1,0 +1,24 @@
+# Tipos, lint, build e o harness do loop do agente — os quatro que um PR precisa passar.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      # O harness sobe o loop inteiro em Node, com provider e página falsos: não precisa de Chrome
+      # nem de chave de API. Falha aqui é erro de lógica, não de ambiente.
+      - run: npm run harness
