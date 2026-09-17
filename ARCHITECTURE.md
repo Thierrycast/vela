@@ -407,23 +407,110 @@ conteúdo da página como dado, nunca como instrução (a defesa contra prompt i
 bypass para preencher uma senha desligava a defesa contra prompt injection junto, sem relação
 nenhuma entre as duas. Separadas: só a primeira depende da configuração.
 
-### Modo de gravação de depuração da voz
+### A trilha passou a responder "por quê", não só "o quê"
 
-Existe porque "ela disse que não conseguia e depois fez, e ficou repetindo estranho" só aparece
-revisando a sequência real de um turno de voz — texto do usuário, rascunho, transcrição final,
-chamadas de ferramenta, o que a Vela respondeu — não um log de erro isolado. Um botão no palco de
-voz grava, por enunciado: o áudio do microfone (WAV, o mesmo que já ia para o Whisper — só passou
-a ser retido em vez de descartado) com a transcrição que virou, e a fala da Vela (texto sempre;
-áudio também, via `MediaRecorder` pendurado no `mixer` do `AudioContext` de síntese, nos dois
-caminhos de streaming). Ao parar, tudo vira um `.zip` (implementação própria, método STORE, sem
-biblioteca — `zip-writer.ts`) com `manifest.json` cronológico, baixado direto do documento
-offscreen.
+Ela media bem e explicava mal. Dizia que a rodada demorou 2,4 s, que a ação saiu sem efeito e que
+a tarefa gastou oito rodadas — e nenhuma dessas informações responde a pergunta que se faz numa
+revisão de verdade: **por que ela decidiu isso?** A resposta está no que o modelo leu, e o prompt
+não era gravado em lugar nenhum. Reconstruir depois é impossível: o system prompt muda com as
+configurações, o bloco de estado é efêmero por desenho, e o histórico foi compactado no caminho.
 
-Uma corrida que isso quase reintroduziu: `voice:stop` respondia antes de `stop()` terminar, e
-`background.ts` fecha o documento offscreen assim que a mensagem "resolve" — sem esperar, encerrar
-a voz com a gravação ligada perdia tudo, porque o zip ainda estava sendo montado quando o
-documento morreu. `stop()` virou assíncrona e o listener só chama `sendResponse` depois dela
-terminar, gravação incluída.
+Daí dois níveis, porque são duas perguntas com custos diferentes:
+
+| | **normal** (padrão) | **completo** |
+|---|---|---|
+| corte de texto | 2 000 caracteres | 400 000 |
+| prompt enviado ao modelo | não | mensagem por mensagem, com as ferramentas oferecidas |
+| resposta crua do modelo | só o que virou texto | inteira, inclusive a que virou chamada e some da conversa |
+| leitura de página | primeiros caracteres | conteúdo integral |
+| áudio da conversa falada | não | guardado |
+
+O que **não** afrouxa no completo: a redação de segredos. Chave, cookie, token e senha continuam
+saindo em qualquer nível — uma trilha que vaza credencial deixa de poder ser exportada, e exportar
+é o ponto inteiro dela.
+
+### A costura, sem a qual o relatório adivinha
+
+Os eventos tinham ordem cronológica e nada mais. Dava para presumir que aquela ação pertencia
+àquela chamada porque veio depois — e presumir é exatamente o que não serve aqui: um lote dispara
+cinco ações dentro de uma chamada só, uma tarefa de fundo escreve intercalada com o turno
+principal, e a ordem deixa de significar parentesco.
+
+Três campos resolvem: `round`, `callId`, `actionId`. Quem entra numa rodada anuncia (`beginRound`,
+`beginCall`) e quem grava herda o contexto corrente. A alternativa — exigir que cada ponto de
+instrumentação repetisse os três — seria garantir que metade esquecesse.
+
+### `trace-stage.ts`: um jeito só de instrumentar
+
+Cada ponto do código decidia sozinho o que gravar: um media com `span`, outro anota com `record`,
+um terceiro esquece de fechar o span quando dá erro, e cada um inventa o nome do campo — `texto`,
+`text`, `conteudo`, `resultado`. O resultado é uma trilha que só quem escreveu consegue ler, e um
+relatório obrigado a conhecer caso a caso para montar a narrativa.
+
+`runStage` embrulha qualquer etapa assíncrona com o mesmo contrato: quem, quando, o quê, com que
+entrada, com que saída, e o que deu errado. Uma etapa **nunca fica sem fecho** — nem quando lança,
+que é justamente quando mais interessa saber onde parou; o `catch` grava `code: "excecao"` e
+relança, sem mudar o fluxo de quem chamou. `entrada` e `saida` só existem no rastreio completo:
+no normal sobra a medição, que é barata e continua respondendo "o que está lento".
+
+O vocabulário de etapas é fechado (`audio.capture`, `stt.partial`, `stt.result`, `tts.request`,
+`tts.audio`, `tts.play`, `model.prompt`, `model.response`), para o relatório montar a narrativa sem
+conhecer quem gravou o quê.
+
+### A conversa falada deixou de começar no texto
+
+Numa conversa por voz o texto é o meio, não a ponta. Entre o que a pessoa disse e o que a Vela leu
+há um modelo de transcrição; entre o que ela respondeu e o que se ouviu há outro de síntese.
+Qualquer um dos dois pode ser o culpado, e a trilha começava já com o texto transcrito — como se
+ele fosse o fato.
+
+Agora ficam registrados o trecho de áudio capturado (**com o áudio**), o que o STT devolveu (texto
+limpo e bruto, modelo, duração), os rascunhos do texto ao vivo, o descarte quando acontece **e por
+quê** — descarte silencioso era o pior caso: a pessoa fala, nada acontece, e não havia registro de
+que houve fala —, o texto que foi mandado falar (que não é o da tela: `speakable` tira markdown e o
+servidor normaliza por cima), o áudio sintetizado e quanto ele de fato tocou.
+
+O áudio mora numa store separada do mesmo IndexedDB (`trace-blobs.ts`), podada **por bytes** e não
+por contagem — a store de eventos se corta por quantidade, que não diz nada sobre espaço quando
+cada item pesa megabytes. Fica onde já se está: offscreen e background compartilham a origem da
+extensão, então o trecho capturado no offscreen é lido pelo painel sem trafegar por mensagem, que
+é o que tornaria isso pesado demais para valer a pena.
+
+### O relatório é o que se manda para alguém
+
+JSONL responde qualquer pergunta e não conta nada: para entender um turno seria preciso reconstruir
+a ordem, casar chamada com resultado e somar durações na mão. `trace-report.ts` faz isso uma vez e
+entrega Markdown — que atravessa conversa, issue e documento sem perder estrutura — em seções
+fixas: resumo, o que deu errado, a conversa falada, como foi rodada a rodada, resposta final, e o
+que aconteceu fora das rodadas.
+
+O **pacote** (`trace-package.ts`) junta relatório, eventos e áudios num zip. Um relatório que cita
+"áudio a3f8c1" e um arquivo solto numa pasta são duas coisas que se perdem uma da outra no caminho
+até quem vai revisar. Só entram os áudios **citados pelos eventos exportados**: empacotar a store
+inteira encheria o zip de fala de outra sessão.
+
+### Gravar a voz virou ligar o rastreio, não um segundo modo
+
+O botão do palco de voz gravava por conta própria: áudio do microfone por enunciado, a fala da
+Vela, um `manifest.json` cronológico, tudo num zip paralelo. A trilha, ao lado, sabia todo o resto
+— modelo, prompt, ferramentas, o que a Vela pensou e executou. Quem revisava ficava com metade da
+história em cada arquivo e **nenhuma forma de casar as duas**, porque o zip não carregava turno nem
+carimbo da trilha.
+
+Havia um acoplamento pior, escondido: o `MediaRecorder` pendurado no mixer de síntese só ligava no
+modo antigo. Quem ligasse o rastreio completo em Avançado para ouvir a fala em streaming não
+recebia áudio nenhum — o gate era o modo errado.
+
+Hoje o botão liga o mesmo interruptor de Avançado, o gate do `MediaRecorder` é o nível de detalhe,
+e parar baixa o pacote de revisão. Ao parar, o nível **volta ao que a pessoa tinha escolhido**:
+deixar o rastreio completo ligado sem ela saber custaria disco e guardaria conteúdo de página que
+ela não pediu para guardar. E a leitura da trilha espera a descarga em lote do background antes de
+montar o zip — ler no instante do clique perderia justamente o último enunciado, o que motivou
+parar a gravação.
+
+A corrida que isso já quase custou continua tratada: `voice:stop` só responde depois de `stop()`
+terminar, porque `background.ts` fecha o documento offscreen assim que a mensagem resolve — e o
+pacote ainda estaria sendo montado.
 
 ### Velocidade da fala, ajustada no cliente
 

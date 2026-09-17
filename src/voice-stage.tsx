@@ -94,8 +94,8 @@ export function VoiceStage({ state, visual, focused, transcript, transcriptFinal
             <button
               className={`voice-control ${debugRecording ? "gravando" : ""}`}
               onClick={onToggleDebug}
-              aria-label={debugRecording ? `Parar gravação de depuração e baixar (${debugItems} evento(s))` : "Gravar sessão para depuração"}
-              title={debugRecording ? `Gravando — ${debugItems} evento(s). Clique para parar e baixar.` : "Gravar áudio + trilha desta sessão para revisar depois"}
+              aria-label={debugRecording ? `Parar a gravação e baixar o pacote de revisão (${debugItems} fala(s))` : "Gravar esta sessão para revisar depois"}
+              title={debugRecording ? `Gravando — ${debugItems} fala(s). Clique para parar e baixar o zip com relatório, eventos e áudios.` : "Liga o rastreio completo e, ao parar, baixa o pacote de revisão: relatório, eventos e os áudios da conversa"}
             >
               <Circle size={14} fill={debugRecording ? "currentColor" : "none"} />
             </button>

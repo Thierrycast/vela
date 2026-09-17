@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, Flag, Pause, Play, Trash2 } from "lucide-react";
+import { Download, FileText, Flag, Package, Pause, Play, Trash2, Volume2 } from "lucide-react";
 import { TraceEvent, TraceKind, toJsonl } from "./trace";
+import { relatorioCompleto, relatorioDoTurno } from "./trace-report";
+import { readBlob } from "./trace-blobs";
+import { baixarArquivo, carimbo, montarPacote } from "./trace-package";
 import { useTheme } from "./use-settings";
 import { defaultSettings } from "./types";
 import "./tokens.css";
 import "./debug.css";
 
-const KINDS: TraceKind[] = ["turn", "user.input", "model.request", "model.text", "tool.call", "action", "page.read", "navigation", "voice", "bridge", "ui", "error"];
+const KINDS: TraceKind[] = ["turn", "user.input", "model.prompt", "model.request", "model.response", "model.text", "tool.call", "model.tool", "action", "page.read", "navigation", "voice", "bridge", "ui", "error"];
 
 const COLOR: Partial<Record<TraceKind, string>> = {
-  turn: "roxo", "user.input": "azul", "model.request": "violeta", "tool.call": "ciano",
+  turn: "roxo", "user.input": "azul", "model.request": "violeta", "model.prompt": "violeta",
+  "model.response": "violeta", "tool.call": "ciano", "model.tool": "ciano",
   action: "ambar", "page.read": "verde", navigation: "verde", voice: "azul", bridge: "ciano", error: "vermelho",
 };
+
+const baixar = (nome: string, conteudo: string, tipo: string) => baixarArquivo(nome, conteudo, tipo);
 
 const relative = (at: number, base: number) => {
   const delta = at - base;
@@ -34,6 +40,8 @@ function DebugPanel() {
   const [search, setSearch] = useState("");
   const [onlyFailures, setOnlyFailures] = useState(false);
   const [selected, setSelected] = useState<TraceEvent | null>(null);
+  const [empacotando, setEmpacotando] = useState(false);
+  const [audio, setAudio] = useState<string | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
 
   useTheme(defaultSettings);
@@ -76,14 +84,31 @@ function DebugPanel() {
     return next;
   });
 
-  const exportar = () => {
-    const url = URL.createObjectURL(new Blob([toJsonl(visible)], { type: "application/x-ndjson" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `vela-trace-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const exportar = () => baixar(`vela-trace-${carimbo()}.jsonl`, toJsonl(visible), "application/x-ndjson");
+
+  /*
+   * O relatório é o que se manda para alguém.
+   *
+   * O JSONL responde qualquer pergunta e não conta nada — para entender um turno seria preciso
+   * reconstruir a ordem, casar chamada com resultado e somar durações na mão. Aqui isso já vem
+   * feito, em Markdown, que atravessa conversa, issue e documento sem perder estrutura.
+   *
+   * `completo` só muda o que **cabe** no relatório: se o rastreio completo não estava ligado
+   * quando o turno rodou, o prompt simplesmente não foi gravado e nenhuma opção o traz de volta.
+   */
+  const relatorio = (completo: boolean) => baixar(`vela-relatorio-${carimbo()}.md`, relatorioCompleto(visible, { completo }), "text/markdown");
+
+  /* O pacote sai de `trace-package`, que é o mesmo caminho usado ao encerrar a gravação da voz. */
+  const pacote = async () => {
+    setEmpacotando(true);
+    try {
+      baixarArquivo(`vela-revisao-${carimbo()}.zip`, await montarPacote(visible, { completo: temPrompt }));
+    } finally {
+      setEmpacotando(false);
+    }
   };
+  const relatorioDe = (lista: TraceEvent[], turno: string) =>
+    baixar(`vela-turno-${turno.slice(0, 8)}-${carimbo()}.md`, relatorioDoTurno(lista, { completo: temPrompt }), "text/markdown");
 
   const limpar = () => { void chrome.runtime.sendMessage({ type: "trace:clear" }); setEvents([]); setSelected(null); };
 
@@ -101,6 +126,8 @@ function DebugPanel() {
   };
 
   const failures = events.filter((event) => event.ok === false).length;
+  // Só faz sentido oferecer o relatório completo quando há prompt gravado para entrar nele.
+  const temPrompt = events.some((event) => event.kind === "model.prompt");
 
   return <main className="debug">
     <header className="debug-bar">
@@ -118,6 +145,12 @@ function DebugPanel() {
         <button className={onlyFailures ? "on" : ""} onClick={() => setOnlyFailures(!onlyFailures)}>Só falhas</button>
         <button onClick={marcar} title="Marca o início de um teste na trilha"><Flag size={13} /> Marcar</button>
         <button onClick={exportar}><Download size={13} /> JSONL</button>
+        <button onClick={() => void pacote()} disabled={empacotando} title="Relatório, eventos e áudios num zip só — é o que se manda para alguém revisar">
+          <Package size={13} /> {empacotando ? "Montando…" : "Pacote"}
+        </button>
+        <button onClick={() => relatorio(temPrompt)} title={temPrompt ? "Relatório em Markdown, com o prompt exato que o modelo leu" : "Relatório em Markdown. Ligue o rastreio completo em Avançado para incluir o prompt e o conteúdo integral das leituras."}>
+          <FileText size={13} /> Relatório{temPrompt ? " completo" : ""}
+        </button>
         <button onClick={limpar}><Trash2 size={13} /> Limpar</button>
       </div>
     </header>
@@ -143,12 +176,13 @@ function DebugPanel() {
               <span>{new Date(base).toLocaleTimeString()}</span>
               {total !== undefined && <span className="debug-total">{(total / 1000).toFixed(1)}s no total</span>}
               <span className="debug-count">{list.length} eventos</span>
+              <button className="debug-turn-report" onClick={() => relatorioDe(list, turn)} title="Relatório em Markdown só deste turno">relatório</button>
             </header>
             {list.map((event) => (
               <button
                 key={event.id ?? `${event.at}-${event.label}`}
                 className={`debug-row ${COLOR[event.kind] ?? ""} ${event.ok === false ? "falhou" : ""} ${selected === event ? "aberta" : ""}`}
-                onClick={() => setSelected(selected === event ? null : event)}
+                onClick={() => { setAudio(null); setSelected(selected === event ? null : event); }}
               >
                 <span className="debug-at">{relative(event.at, base)}</span>
                 <span className="debug-kind">{event.kind}</span>
@@ -174,6 +208,13 @@ function DebugPanel() {
           {selected.ok !== undefined && <><dt>desfecho</dt><dd className={selected.ok ? "bom" : "ruim"}>{selected.ok ? "ok" : `falhou${selected.code ? ` · ${selected.code}` : ""}`}</dd></>}
           <dt>turno</dt><dd className="mono">{selected.turn}</dd>
         </dl>
+        {selected.blobId && <div className="debug-audio">
+          <button onClick={() => void readBlob(selected.blobId!).then((item) => { if (item) setAudio(URL.createObjectURL(new Blob([item.bytes], { type: item.mime || "audio/wav" }))); })}>
+            <Volume2 size={13} /> Ouvir o áudio deste evento
+          </button>
+          {/* A transcrição é interpretação; o áudio é o fato. Quando as duas discordam, é aqui que se resolve. */}
+          {audio && <audio controls src={audio} autoPlay />}
+        </div>}
         <pre>{JSON.stringify(selected.data ?? {}, null, 2)}</pre>
       </aside>}
     </div>

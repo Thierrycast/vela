@@ -6,11 +6,24 @@ import { VoiceMetricsAnalyzer } from "./audio-metrics";
 import { encodeWav } from "./wav-encoder";
 import { VoiceRuntimeState } from "./voice-runtime";
 import { SttStream } from "./stt-stream";
-import { spanFrom, traceFrom } from "./trace-client";
-import { buildZip } from "./zip-writer";
+import { clientDetail, fullTraceFrom, setClientDetail, spanFrom, traceFrom } from "./trace-client";
+import { readTrace } from "./trace";
+import { baixarArquivo, carimbo, montarPacote } from "./trace-package";
+import { saveBlob } from "./trace-blobs";
 
 const trace = traceFrom("offscreen");
 const traceSpan = spanFrom("offscreen");
+const traceFull = fullTraceFrom("offscreen");
+
+/**
+ * O áudio guardado junto do evento que o descreve.
+ *
+ * A transcrição é a interpretação do que foi dito; o áudio é o que foi dito. Quando as duas
+ * discordam — e numa conversa falada isso acontece o tempo todo — só o trecho original resolve.
+ * Devolve o id que o evento carrega; sem rastreio completo, devolve nada e não custa nada.
+ */
+const guardarAudio = (label: string, bytes: ArrayBuffer | Uint8Array, mime: string, turn = "voz") =>
+  saveBlob({ turn, mime, label, bytes });
 
 const SAMPLE_RATE = 16_000;
 const MAX_PENDING = 3;
@@ -66,38 +79,37 @@ let sum = 0;
 let windowStarted = 0;
 
 /*
- * Modo de depuração: grava o que a sessão de voz realmente trocou — áudio do usuário por
- * enunciado, com a transcrição que ele virou, e o texto que a Vela falou — para reproduzir e
- * revisar depois. Existe porque "ela disse que não conseguia e depois fez" é um padrão que só
- * aparece olhando a sequência real de turnos, não um log de erro isolado.
+ * Gravar a sessão de voz é ligar o rastreio completo e, ao parar, baixar o pacote de revisão.
  *
- * Fica em memória, nunca em chrome.storage — um áudio de alguns minutos passa longe do limite de
- * 10 MB da extensão — e vira um .zip baixado quando a gravação para.
+ * Antes existiam dois gravadores: este, que juntava áudio do microfone e da fala num zip próprio,
+ * e a trilha, que sabia tudo o mais — modelo, prompt, ferramentas, o que a Vela pensou. Quem
+ * revisava tinha metade da história em cada arquivo e nenhuma forma de casar as duas, porque o zip
+ * não carregava turno nem carimbo da trilha. Hoje o botão do palco liga o mesmo interruptor de
+ * Avançado; o áudio já entra na trilha com o evento que o descreve, e o que sai no fim é um pacote
+ * só, com relatório, eventos e áudios que se referenciam por id.
  */
-function extFromMime(mime: string): string {
-  if (mime.includes("webm")) return "webm";
-  if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
-  if (mime.includes("ogg")) return "ogg";
-  return "wav";
-}
-
-type DebugItem =
-  | { kind: "user"; t: number; wav: Uint8Array; transcript: string; descartado: boolean }
-  | { kind: "vela"; t: number; text: string; audio: Uint8Array | null; mime: string; leitura: boolean };
 let debugRecording = false;
-let debugItems: DebugItem[] = [];
 let debugStartedAt = 0;
+let debugCount = 0;
 
 function reportDebugState() {
-  void send({ type: "voice:debug-state", recording: debugRecording, items: debugItems.length });
+  void send({ type: "voice:debug-state", recording: debugRecording, items: debugCount });
+}
+
+/** Conta o que já daria para revisar — fala ouvida ou dita —, para o botão dizer que está vivo. */
+function contarDebug() {
+  if (!debugRecording) return;
+  debugCount += 1;
+  reportDebugState();
 }
 
 function startDebugRecording() {
   if (!stream) { void send({ type: "voice:error", message: "Ligue o microfone (Live Voice ou ditado) antes de gravar a sessão de depuração." }); return; }
   if (debugRecording) return;
   debugRecording = true;
-  debugItems = [];
+  debugCount = 0;
   debugStartedAt = Date.now();
+  setClientDetail("completo");
   trace("voice", "gravação de depuração iniciada");
   reportDebugState();
 }
@@ -109,43 +121,19 @@ async function blobToBytes(blob: Blob): Promise<Uint8Array> {
 async function stopDebugRecording() {
   if (!debugRecording) return;
   debugRecording = false;
-  const items = debugItems;
-  debugItems = [];
-  trace("voice", "gravação de depuração encerrada", { data: { itens: items.length } });
+  const desde = debugStartedAt;
+  trace("voice", "gravação de depuração encerrada", { data: { itens: debugCount } });
   reportDebugState();
-  if (!items.length) return;
-
-  const manifest: Array<Record<string, unknown>> = [];
-  const files: Array<{ name: string; data: Uint8Array }> = [];
-  let userIndex = 0;
-  let velaIndex = 0;
-  for (const item of items) {
-    const relativeMs = item.t - debugStartedAt;
-    if (item.kind === "user") {
-      userIndex += 1;
-      const name = `mic-${String(userIndex).padStart(3, "0")}.wav`;
-      files.push({ name, data: item.wav });
-      manifest.push({ tipo: "usuario", t_ms: relativeMs, arquivo: name, transcricao: item.transcript, descartado: item.descartado });
-    } else {
-      velaIndex += 1;
-      const entry: Record<string, unknown> = { tipo: "vela", t_ms: relativeMs, texto: item.text, leitura: item.leitura };
-      if (item.audio) {
-        const name = `vela-${String(velaIndex).padStart(3, "0")}.${extFromMime(item.mime)}`;
-        files.push({ name, data: item.audio });
-        entry.arquivo = name;
-      }
-      manifest.push(entry);
-    }
+  try {
+    // A trilha vive no background e é gravada em lotes de 400 ms. Ler no instante do clique
+    // perderia justamente os últimos eventos — os do enunciado que motivou parar a gravação.
+    await new Promise((resolve) => self.setTimeout(resolve, 700));
+    const eventos = (await readTrace({ since: desde, limit: 20_000 })).sort((a, b) => a.at - b.at);
+    if (!eventos.length) return;
+    baixarArquivo(`vela-voz-${carimbo(desde)}.zip`, await montarPacote(eventos, { completo: true }));
+  } catch (erro) {
+    void send({ type: "voice:error", message: erro instanceof Error ? erro.message : "Falha ao montar o pacote da sessão." });
   }
-  files.push({ name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
-
-  const zip = buildZip(files);
-  const url = URL.createObjectURL(zip);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `vela-debug-${new Date(debugStartedAt).toISOString().replace(/[:.]/g, "-")}.zip`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 const send = (message: unknown) => chrome.runtime.sendMessage(message).catch(() => undefined);
@@ -158,6 +146,12 @@ const publish = (next: VoiceRuntimeState) => {
 /** A voz tem servidor próprio: o gateway de texto não expõe transcrição nem síntese. */
 async function voiceTarget() {
   const settings = await loadSettings();
+  /*
+   * O offscreen é outro contexto: o nível de rastreio decidido no background não chega sozinho até
+   * aqui. Sincronizar neste ponto cobre todo o pipeline de voz — captura, transcrição e síntese
+   * passam por `voiceTarget` antes de qualquer coisa —, e evita um protocolo novo só para isto.
+   */
+  setClientDetail(settings.agent.fullTrace ? "completo" : "normal");
   const endpoint: VoiceEndpoint = { baseUrl: settings.voice.baseUrl, apiKey: settings.voice.apiKey };
   if (!endpoint.baseUrl.trim()) throw new Error("Configure o servidor de voz em Configurações → Voz.");
   return { settings, endpoint };
@@ -174,19 +168,36 @@ async function drain() {
   draining = true;
   while (pending.length) {
     const blob = pending.shift()!;
-    const attempt = traceSpan("voice", "transcrição", { bytes: blob.size, fila: pending.length });
+    const attempt = traceSpan("stt.result", "transcrição", { bytes: blob.size, fila: pending.length });
     try {
       const { settings, endpoint } = await voiceTarget();
+      /*
+       * O trecho de fala, como ele chegou ao servidor de transcrição.
+       *
+       * É a única prova do que foi realmente dito: a partir daqui tudo é interpretação. Guardado
+       * antes da transcrição de propósito — se a chamada falhar, o áudio ainda existe para
+       * explicar por quê.
+       */
+      const audioId = await guardarAudio(`fala do usuário (${(blob.size / 1024).toFixed(0)} kB)`, await blobToBytes(blob), blob.type || "audio/wav");
+      traceFull("audio.capture", "trecho de fala capturado", { blobId: audioId, data: { bytes: blob.size, mime: blob.type, modeloAlvo: settings.voice.transcriptionModel } });
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20_000);
       const text = await transcribeAudio(endpoint, blob, settings.voice.transcriptionModel).finally(() => clearTimeout(timer));
       const clean = text.trim();
       const descartado = !clean || HALLUCINATIONS.some((pattern) => pattern.test(clean));
-      attempt.end({ ok: !descartado, code: descartado ? "descartado" : undefined, data: { texto: clean, bytes: blob.size, modelo: settings.voice.transcriptionModel } });
-      if (debugRecording) {
-        debugItems.push({ kind: "user", t: Date.now(), wav: await blobToBytes(blob), transcript: clean, descartado });
-        reportDebugState();
-      }
+      /*
+        * O que o STT devolveu, incluindo o que foi descartado e por quê.
+        *
+        * Descarte silencioso é o pior caso para revisar: a pessoa fala, nada acontece, e não há
+        * registro de que houve fala. Aqui fica o texto bruto, a decisão e o áudio que a originou.
+        */
+      attempt.end({
+        ok: !descartado,
+        code: descartado ? "descartado" : undefined,
+        blobId: audioId,
+        data: { texto: clean, bruto: text, bytes: blob.size, modelo: settings.voice.transcriptionModel, descartado, motivo: descartado ? (clean ? "reconhecido como alucinação do modelo de transcrição" : "transcrição vazia") : undefined },
+      });
+      contarDebug();
       if (!descartado) {
         void send({ type: "voice:transcript", text: clean, final: true, timestamp: Date.now() });
         if (mode === "live") publish("thinking");
@@ -271,9 +282,12 @@ async function start(nextMode: "live" | "dictation") {
         onPartial: (text) => {
           if (text === lastPartial) return;
           lastPartial = text;
+          // O rascunho muda a cada palavra: no nível normal isso seria centenas de eventos por
+          // frase. No completo é justamente o que mostra como a transcrição foi se corrigindo.
+          traceFull("stt.partial", "rascunho da fala", { data: { texto: text } });
           void send({ type: "voice:partial", text });
         },
-        onFinal: (text) => { lastPartial = ""; trace("voice", "trecho fechado no texto ao vivo", { data: { texto: text } }); },
+        onFinal: (text) => { lastPartial = ""; trace("stt.partial", "trecho fechado no texto ao vivo", { ok: true, data: { texto: text, fechado: true } }); },
         onError: (message) => {
           if (!opened) { opened = true; connecting.end({ ok: false, code: "falha", data: { erro: message } }); }
           else trace("voice", "texto ao vivo falhou", { ok: false, data: { erro: message } });
@@ -342,12 +356,14 @@ function openSpeechStage() {
   }, 50);
   const sources: AudioBufferSourceNode[] = [];
 
-  // No modo de depuração, o que sai do mixer é gravado em paralelo ao que toca de verdade — sem
+  // No rastreio completo, o que sai do mixer é gravado em paralelo ao que toca de verdade — sem
   // isso não há como revisar depois o que a Vela realmente falou, só o texto que ela pretendia.
+  // O gate é o nível de detalhe, e não mais um modo próprio: era o que fazia o áudio da fala em
+  // streaming faltar na trilha justamente quando alguém tinha ligado o rastreio para vê-lo.
   let recorder: MediaRecorder | null = null;
   const recordedChunks: Blob[] = [];
   let recordedDone: Promise<{ bytes: Uint8Array; mime: string } | null> = Promise.resolve(null);
-  if (debugRecording) {
+  if (clientDetail() === "completo") {
     try {
       const dest = context.createMediaStreamDestination();
       mixer.connect(dest);
@@ -567,11 +583,21 @@ let streamingStop: (() => void) | null = null;
 
 async function speak(text: string, readingId?: string) {
   let url = "";
-  const attempt = traceSpan("voice", "síntese", { chars: text.length, leitura: !!readingId });
+  const attempt = traceSpan("tts.audio", "síntese", { chars: text.length, leitura: !!readingId });
   try {
     const { settings, endpoint } = await voiceTarget();
     const spoken = speakable(text);
-    if (!spoken) { attempt.end({ ok: false, code: "vazio" }); return; }
+    /*
+     * O que se manda falar não é o que se escreveu.
+     *
+     * `speakable` tira markdown, bloco de código e link; o servidor ainda normaliza por cima. Numa
+     * revisão de "por que ela falou isso", a diferença entre o texto da tela e o texto falado é
+     * exatamente o que costuma explicar — e ela não existia em lugar nenhum antes.
+     */
+    traceFull("tts.request", "texto enviado para falar", {
+      data: { original: text, falado: spoken, voz: settings.voice.speechVoice, modelo: settings.voice.speechModel, taxa: settings.voice.speechRate, leitura: !!readingId, streaming: settings.voice.streamSpeech },
+    });
+    if (!spoken) { attempt.end({ ok: false, code: "vazio", data: { original: text } }); return; }
     output?.pause();
     segmenter?.suspend();
     speaking = true;
@@ -583,8 +609,9 @@ async function speak(text: string, readingId?: string) {
     if (readingId && settings.voice.streamSpeech) {
       try {
         const recorded = await speakReading(endpoint, settings.voice.speechVoice, text, readingId, rate);
-        attempt.end({ ok: true, data: { modo: "leitura", voz: settings.voice.speechVoice, taxa: rate } });
-        if (debugRecording) { debugItems.push({ kind: "vela", t: Date.now(), text, audio: recorded?.bytes ?? null, mime: recorded?.mime ?? "", leitura: true }); reportDebugState(); }
+        const audioId = recorded ? await guardarAudio("resposta falada (leitura)", recorded.bytes, recorded.mime || "audio/wav") : undefined;
+        attempt.end({ ok: true, blobId: audioId, data: { modo: "leitura", voz: settings.voice.speechVoice, taxa: rate, bytes: recorded?.bytes.byteLength, falado: spoken } });
+        contarDebug();
         return;
       } catch (error) {
         trace("voice", "leitura frase a frase caiu para a fala inteira", { ok: false, data: { erro: error instanceof Error ? error.message : String(error) } });
@@ -594,8 +621,9 @@ async function speak(text: string, readingId?: string) {
     if (settings.voice.streamSpeech) {
       try {
         const recorded = await speakStreaming(endpoint, spoken, settings.voice.speechVoice, rate);
-        attempt.end({ ok: true, data: { modo: "streaming", voz: settings.voice.speechVoice, taxa: rate, texto: spoken.slice(0, 300) } });
-        if (debugRecording) { debugItems.push({ kind: "vela", t: Date.now(), text, audio: recorded?.bytes ?? null, mime: recorded?.mime ?? "", leitura: false }); reportDebugState(); }
+        const audioId = recorded ? await guardarAudio("resposta falada (streaming)", recorded.bytes, recorded.mime || "audio/wav") : undefined;
+        attempt.end({ ok: true, blobId: audioId, data: { modo: "streaming", voz: settings.voice.speechVoice, taxa: rate, bytes: recorded?.bytes.byteLength, falado: spoken } });
+        contarDebug();
         return;
       } catch (error) {
         // Servidor sem /tts/stream ou stream interrompido: o arquivo inteiro ainda funciona.
@@ -604,16 +632,21 @@ async function speak(text: string, readingId?: string) {
     }
 
     const blob = await synthesizeSpeech(endpoint, spoken, settings.voice.speechModel, settings.voice.speechVoice);
-    attempt.end({ ok: true, data: { modo: "arquivo", voz: settings.voice.speechVoice, taxa: rate, bytes: blob.size, texto: spoken.slice(0, 300) } });
-    if (debugRecording) { debugItems.push({ kind: "vela", t: Date.now(), text, audio: await blobToBytes(blob), mime: blob.type || "audio/wav", leitura: !!readingId }); reportDebugState(); }
+    const audioId = await guardarAudio("resposta falada (arquivo)", await blobToBytes(blob), blob.type || "audio/wav");
+    attempt.end({ ok: true, blobId: audioId, data: { modo: "arquivo", voz: settings.voice.speechVoice, taxa: rate, bytes: blob.size, falado: spoken } });
+        contarDebug();
     url = URL.createObjectURL(blob);
     output = new Audio(url);
     output.playbackRate = rate;
+    const tocando = traceSpan("tts.play", "reprodução", { bytes: blob.size, taxa: rate });
     await new Promise<void>((resolve, reject) => {
       output!.onended = () => resolve();
       output!.onerror = () => reject(new Error("Falha ao reproduzir a resposta."));
       void output!.play().catch(reject);
     });
+    // Quanto durou de fato na caixa de som: é o número que a pessoa sente como "ela falou por
+    // muito tempo", e ele não se deduz do tamanho do arquivo nem da duração da síntese.
+    tocando.end({ ok: true, blobId: audioId, data: { segundos: output?.duration } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao sintetizar voz.";
     attempt.end({ ok: false, code: "falha", data: { erro: message } });

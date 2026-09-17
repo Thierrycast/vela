@@ -2,6 +2,7 @@ import { AppSettings, BrowserAction, BrowserContext, ChatMessage, ProviderProfil
 import { buildStateBlock, buildSystemPrompt } from "./system-prompt";
 import { getMemory } from "./storage";
 import { isActionEnabled, isToolEnabled } from "./capabilities";
+import { recordFull } from "./trace";
 
 export type ToolCall = { id: string; name: string; arguments: string };
 export type ChatEvent =
@@ -480,18 +481,28 @@ function toWire(settings: AppSettings, messages: ChatMessage[], context: Browser
   ];
 }
 
-type Variant = { sendParallelField: boolean; toolChoice: boolean; tools: boolean };
+/**
+ * A escada de tentativas, agora com a contagem de tokens no primeiro degrau.
+ *
+ * `stream_options: { include_usage: true }` e o que faz o gateway mandar o uso no ultimo pedaco do
+ * stream — sem isso nao ha como saber quanto uma tarefa custou, e "quanto custou" e metade de
+ * qualquer revisao de eficiencia. Nem todo gateway aceita o campo, entao ele entra como degrau:
+ * quem recusa cai para o degrau sem ele, e a conversa segue.
+ */
+type Variant = { usage: boolean; sendParallelField: boolean; toolChoice: boolean; tools: boolean };
 const VARIANTS: Variant[] = [
-  { sendParallelField: true, toolChoice: true, tools: true },
-  { sendParallelField: false, toolChoice: true, tools: true },
-  { sendParallelField: false, toolChoice: false, tools: true },
-  { sendParallelField: false, toolChoice: false, tools: false },
+  { usage: true, sendParallelField: true, toolChoice: true, tools: true },
+  { usage: false, sendParallelField: true, toolChoice: true, tools: true },
+  { usage: false, sendParallelField: false, toolChoice: true, tools: true },
+  { usage: false, sendParallelField: false, toolChoice: false, tools: true },
+  { usage: false, sendParallelField: false, toolChoice: false, tools: false },
 ];
 
 function nextVariant(current: number, errorText: string): number {
-  if (/parallel_tool_calls/i.test(errorText) && current < 1) return 1;
-  if (/tool_choice/i.test(errorText) && current < 2) return 2;
-  if (/tool|function|unsupported|invalid/i.test(errorText) && current < 3) return 3;
+  if (/stream_options|include_usage/i.test(errorText) && current < 1) return 1;
+  if (/parallel_tool_calls/i.test(errorText) && current < 2) return 2;
+  if (/tool_choice/i.test(errorText) && current < 3) return 3;
+  if (/tool|function|unsupported|invalid/i.test(errorText) && current < 4) return 4;
   return -1;
 }
 
@@ -510,9 +521,36 @@ export async function* streamChat(
   const memory = await getMemory();
   const wire = toWire(settings, messages, context, memory);
   const tools = buildTools(settings);
+
+  /*
+   * O prompt exato, como ele sai daqui.
+   *
+   * É o dado que faltava para revisar uma decisão. Toda pergunta séria sobre por que a Vela fez
+   * algo — por que insistiu, por que não viu o botão, por que respondeu sem agir — se responde
+   * lendo o que ela leu, e isso nunca esteve gravado em lugar nenhum. Reconstruir depois é
+   * impossível: o system prompt muda com as configurações, o bloco de estado é efêmero por
+   * desenho, e o histórico foi compactado no caminho.
+   *
+   * Vai inteiro, e só no modo completo: em uso normal seriam dezenas de milhares de caracteres
+   * por rodada, repetidos a cada rodada.
+   */
+  recordFull("model.prompt", `prompt enviado (${wire.length} mensagens)`, {
+    data: {
+      modelo: profile.defaultModel,
+      ferramentas: tools.map((tool) => tool.function.name),
+      caracteres: wire.reduce((soma, item) => soma + (typeof item.content === "string" ? item.content.length : JSON.stringify(item.content).length), 0),
+      mensagens: wire.map((item) => ({
+        papel: item.role,
+        conteudo: typeof item.content === "string" ? item.content : item.content.map((parte) => parte.type === "text" ? parte.text : "[imagem]").join("\n"),
+        ...(item.tool_calls ? { chamadas: item.tool_calls.map((chamada) => ({ nome: chamada.function.name, argumentos: chamada.function.arguments })) } : {}),
+        ...(item.tool_call_id ? { respondendo: item.tool_call_id } : {}),
+      })),
+    },
+  });
   const body = (variant: Variant) => JSON.stringify({
     model: profile.defaultModel,
     stream: true,
+    ...(variant.usage ? { stream_options: { include_usage: true } } : {}),
     ...(variant.tools ? { tools } : {}),
     ...(variant.tools && variant.toolChoice ? { tool_choice: "auto" } : {}),
     ...(variant.tools && variant.sendParallelField ? { parallel_tool_calls: false } : {}),
@@ -547,7 +585,7 @@ export async function* streamChat(
       if (attempt.status !== 400) { cleanup(); yield { type: "error", message: `Provider retornou HTTP ${attempt.status}${detail ? `: ${detail}` : "."}` }; return; }
       const next = nextVariant(variantIndex, detail);
       if (next < 0) { cleanup(); yield { type: "error", message: `Provider recusou a requisição: ${detail || "HTTP 400"}` }; return; }
-      if (next === 3) yield { type: "warning", message: "Este modelo não aceita ferramentas; a Vela vai apenas conversar." };
+      if (next === 4) yield { type: "warning", message: "Este modelo não aceita ferramentas; a Vela vai apenas conversar." };
       variantIndex = next;
     }
   } catch (error) {
@@ -566,7 +604,24 @@ export async function* streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
   const toolCalls = new Map<number, ToolCall>();
+  /*
+   * A resposta inteira, acumulada aqui e gravada no fim.
+   *
+   * O painel mostra o texto final, mas o texto final é o que sobrou: a resposta que virou chamada
+   * de ferramenta desaparece da conversa, e é justamente ela que explica a decisão. Aqui fica o
+   * que o modelo devolveu, inclusive quando não devolveu nada legível.
+   */
+  let respostaCrua = "";
+  let usoDeTokens: Record<string, unknown> | undefined;
   const flush = function* () { for (const call of toolCalls.values()) if (call.name) yield { type: "tool_call", call } as ChatEvent; };
+  const registrarResposta = () => recordFull("model.response", "resposta do modelo", {
+    data: {
+      texto: respostaCrua,
+      chamadas: [...toolCalls.values()].map((call) => ({ id: call.id, nome: call.name, argumentos: call.arguments })),
+      tokens: usoDeTokens,
+      telemetria: telemetry,
+    },
+  });
 
   try {
     while (true) {
@@ -578,11 +633,12 @@ export async function* streamChat(
       for (const line of lines) {
         if (!line.startsWith("data:")) continue;
         const payload = line.slice(5).trim();
-        if (payload === "[DONE]") { yield* flush(); yield { type: "done" }; return; }
+        if (payload === "[DONE]") { registrarResposta(); yield* flush(); yield { type: "done" }; return; }
         try {
-          const json = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }> } }> };
+          const json = JSON.parse(payload) as { usage?: unknown; choices?: Array<{ finish_reason?: string; delta?: { content?: string; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }> } }> };
           const delta = json.choices?.[0]?.delta;
-          if (delta?.content) yield { type: "text", text: delta.content };
+          if (json.usage) usoDeTokens = json.usage as Record<string, unknown>;
+          if (delta?.content) { respostaCrua += delta.content; yield { type: "text", text: delta.content }; }
           for (const item of delta?.tool_calls ?? []) {
             const index = item.index ?? 0;
             const current = toolCalls.get(index) ?? { id: item.id ?? `tool-${index}`, name: "", arguments: "" };
@@ -594,6 +650,7 @@ export async function* streamChat(
         } catch { /* linha SSE que não é JSON */ }
       }
     }
+    registrarResposta();
     yield* flush();
     yield { type: "done" };
   } finally {

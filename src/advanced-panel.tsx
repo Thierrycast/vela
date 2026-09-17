@@ -6,6 +6,7 @@ import { ActionStats, clearActionStats, loadActionStats } from "./action-stats";
 import { clearRouteCache, routeCacheSize } from "./route-cache";
 import { StorageSlice, buildBackup, clearSlice, formatBytes, measureStorage, resetPreferences, restoreBackup } from "./maintenance";
 import { clearTrace, readTrace, toJsonl, traceSize } from "./trace";
+import { blobsSize, clearBlobs } from "./trace-blobs";
 function Row({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
   return <div className="setting-row"><div><strong>{label}</strong>{description && <small>{description}</small>}</div><div className="setting-control">{children}</div></div>;
 }
@@ -21,7 +22,7 @@ function StorageBar({ slices }: { slices: StorageSlice[] }) {
   </div>;
 }
 
-export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>) => void }) {
+export function AdvancedPanel({ settings, update }: { settings: AppSettings; update: (patch: Partial<AppSettings>) => void }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState<ActionStats | null>(null);
   const [slices, setSlices] = useState<StorageSlice[]>([]);
@@ -29,6 +30,7 @@ export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>
   const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   const [trace, setTrace] = useState<{ events: number; bytes: number } | null>(null);
   const [rotas, setRotas] = useState<number | null>(null);
+  const [audios, setAudios] = useState<{ count: number; bytes: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = () => {
@@ -37,6 +39,7 @@ export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>
     void measureStorage().then(setSlices);
     void traceSize().then(setTrace);
     void routeCacheSize().then(setRotas);
+    void blobsSize().then(setAudios);
   };
   useEffect(refresh, []);
 
@@ -110,6 +113,17 @@ export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>
       </>}
     </div>
 
+    <h2 className="subsection">Rastreio completo</h2>
+    <p className="picker-intro">A trilha normal diz o que aconteceu e quanto demorou. O rastreio completo diz <strong>por quê</strong>: guarda o prompt exato que o modelo leu, a resposta inteira que ele deu e o conteúdo integral de cada leitura de página — que é o material de uma revisão de verdade. Chaves e senhas continuam fora, sempre.</p>
+    <div className="settings-group">
+      <Row label="Áudio guardado" description="Trechos de fala e respostas faladas ficam no navegador, ligados aos eventos que os descrevem. Somem junto quando você apaga a trilha.">
+        <span className="status-badge">{audios === null ? "—" : audios.count === 0 ? "nenhum" : `${audios.count} arquivo(s) · ${formatBytes(audios.bytes)}`}</span>
+      </Row>
+      <Row label="Gravar tudo" description="Ligue antes de reproduzir o problema, faça o teste, exporte o relatório e desligue. A trilha fica ordens de grandeza maior, passa a conter o conteúdo das páginas que você visitar e, na voz, o áudio do que foi falado.">
+        <button className={`toggle ${settings.agent.fullTrace ? "on" : ""}`} role="switch" aria-checked={settings.agent.fullTrace} onClick={() => update({ agent: { ...settings.agent, fullTrace: !settings.agent.fullTrace } })}><span /></button>
+      </Row>
+    </div>
+
     <h2 className="subsection">Caminhos lembrados</h2>
     <p className="picker-intro">Por onde a Vela chega a cada coisa nos sites que você usa, para não redescobrir o mesmo caminho a cada conversa. É palpite conferido na hora, nunca resposta pronta, e some sozinho quando erra ou quando envelhece.</p>
     <div className="settings-group">
@@ -136,7 +150,7 @@ export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>
         <button className="secondary-button" onClick={() => void exportarTrilha()}><Download size={14} /> Exportar JSONL</button>
       </Row>
       <Row label="Apagar a trilha">
-        <button className="secondary-button" onClick={() => void clearTrace().then(refresh)}><Trash2 size={14} /> Apagar</button>
+        <button className="secondary-button" onClick={() => void Promise.all([clearTrace(), clearBlobs()]).then(refresh)}><Trash2 size={14} /> Apagar</button>
       </Row>
     </div>
 

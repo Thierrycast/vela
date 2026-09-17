@@ -12,6 +12,7 @@ import { evaluateInMainWorld } from "./script-world";
 import { gateNavigation, noteSource } from "./domain-policy";
 import { HOST_ACCESS_MISSING, hasHostAccess } from "./permissions";
 import { forgetRoute, recallRoute, rememberRoute } from "./route-cache";
+import { recordFull } from "./trace";
 
 // `hover` entra aqui porque passar o mouse nao modifica a pagina — pedir aprovacao para cada
 // passagem de mouse em modo Assistir tornaria o modo inutilizavel em qualquer site com menu.
@@ -308,13 +309,25 @@ async function escalate(tabId: number, action: BrowserAction, result: ActionResu
 }
 
 export async function executeAction(action: BrowserAction, autonomy: Autonomy): Promise<ActionResult> {
+  const actionId = crypto.randomUUID();
   const actionSpan = span("action", action.type, { action });
   const result = await runAction(action, autonomy);
   actionSpan.end({
     ok: result.ok,
     code: result.ok ? undefined : result.code,
+    actionId,
     data: { action, summary: result.summary, noEffect: result.ok && result.summary.includes("sem efeito perceptível") },
   });
+  /*
+   * O que a página devolveu, inteiro e sem recorte.
+   *
+   * O resumo da ação diz "página lida: 40 elementos"; o que o modelo leu foram os quarenta
+   * elementos. Numa revisão de "por que ela não clicou no botão certo", a resposta está na lista,
+   * não no resumo dela. Só no modo completo, porque é o maior payload que a Vela produz.
+   */
+  if (result.ok && result.content) {
+    recordFull("page.read", `conteúdo devolvido por ${action.type}`, { actionId, data: { url: result.url, conteudo: result.content, caracteres: result.content.length } });
+  }
   return result;
 }
 

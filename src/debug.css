@@ -86,6 +86,11 @@
 .debug-turn-id { color: var(--signal); }
 .debug-total { color: var(--text-secondary); }
 .debug-count { margin-left: auto; }
+/* Aparece ao passar o mouse no turno: util o tempo todo, visivel so quando se olha para ele. */
+.debug-turn-report { border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+  border-radius: 6px; padding: 1px 7px; font: inherit; font-size: 11px; cursor: pointer; opacity: 0; transition: opacity var(--motion), color var(--motion); }
+.debug-turn:hover .debug-turn-report, .debug-turn-report:focus-visible { opacity: 1; }
+.debug-turn-report:hover { color: var(--signal); border-color: var(--signal); }
 
 .debug-row {
   display: flex;
@@ -154,3 +159,11 @@
 @media (max-width: 900px) {
   .debug-detail { position: fixed; inset: auto 0 0 0; width: auto; max-height: 55vh; border-left: 0; border-top: 1px solid var(--border); }
 }
+
+/* O audio do evento: aparece so quando ha um, e some ao trocar de evento. */
+.debug-audio { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.debug-audio button { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
+  border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+.debug-audio button:hover { color: var(--signal); border-color: var(--signal); }
+.debug-audio audio { width: 100%; height: 32px; }

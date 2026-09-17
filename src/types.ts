@@ -86,6 +86,16 @@ export type AppSettings = {
     preciseMode: boolean;
     /** Desabilita o bloqueio e pedido de intervenção do usuário para senhas e formulários sensíveis. */
     bypassWireguard: boolean;
+    /**
+     * Rastreio completo: grava o prompt exato, a resposta inteira do modelo e o conteúdo integral
+     * de cada leitura de página, em vez de recortes.
+     *
+     * É o que transforma a trilha de "o que aconteceu" em "por que aconteceu". Nasce desligado
+     * porque a diferença de tamanho é de ordens de grandeza, e porque o que ele guarda inclui o
+     * conteúdo das páginas visitadas — que é exatamente o tipo de coisa que alguém preferiria não
+     * acumular sem ter pedido.
+     */
+    fullTrace: boolean;
   };
   capabilities: Capabilities;
   context: { currentPage: boolean; selection: boolean; sessionTabs: boolean; outsideTabs: boolean };
@@ -236,6 +246,7 @@ export const defaultSettings: AppSettings = {
     maxRounds: 12,
     preciseMode: false,
     bypassWireguard: false,
+    fullTrace: false,
   },
   capabilities: {
     batch: true,

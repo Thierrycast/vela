@@ -442,3 +442,64 @@ console.log("\n=== registro de refs ===");
   evictFrame(7, 0, "https://exemplo.com/detalhe");
   console.log("depois de navegar:", JSON.stringify(resolveRoute(ref)));
 }
+
+// 19. O relatorio: a trilha virada narrativa.
+//
+// O que se confere aqui nao e o texto bonito — e se a costura funciona. Sem round, callId e
+// actionId ligando os eventos, o relatorio teria de adivinhar pela ordem qual acao pertence a qual
+// chamada, e e justamente isso que um lote com cinco acoes desmonta.
+console.log("\n=== relatorio de um turno ===");
+{
+  const { relatorioDoTurno } = await import("../src/trace-report");
+  const agora = Date.now();
+  const evento = (extra: Record<string, unknown>) => ({ at: agora, turn: "t1", from: "background", ...extra }) as never;
+  const eventos = [
+    evento({ kind: "user.input", label: "busque cafe", data: { texto: "busque café moído na loja", model: "modelo-x", autonomia: "auto", habilidades: ["batch", "waitFor"] } }),
+    evento({ kind: "model.prompt", label: "prompt enviado (3 mensagens)", round: 1, data: { mensagens: [{ papel: "system", conteudo: "Você é a Vela…" }, { papel: "user", conteudo: "busque café moído na loja" }], caracteres: 42, ferramentas: ["browser_action", "browser_batch"] } }),
+    evento({ kind: "model.response", label: "resposta do modelo", round: 1, data: { texto: "Vou buscar.", chamadas: [{ id: "c1", nome: "browser_batch", argumentos: '{"items":[]}' }], tokens: { total_tokens: 1234 } } }),
+    evento({ kind: "model.request", label: "rodada 1", round: 1, ms: 2400, data: { firstTokenMs: 380, chars: 11 } }),
+    evento({ kind: "tool.call", label: "browser_batch", round: 1, callId: "c1", ms: 3100, ok: true, data: { name: "browser_batch", arguments: { items: 2 }, result: "1. navegou 2. clicou" } }),
+    evento({ kind: "model.tool", label: "resultado de browser_batch", round: 1, callId: "c1", ok: true, data: { name: "browser_batch", resultado: "1. browser_action/navigate → Abri a loja\n2. browser_action/click → Cliquei em Buscar" } }),
+    evento({ kind: "action", label: "navigate", round: 1, callId: "c1", ms: 900, ok: true, data: { summary: "Abri a loja." } }),
+    evento({ kind: "action", label: "click", round: 1, callId: "c1", ms: 420, ok: true, data: { summary: "Cliquei em button “Buscar” — sem efeito perceptível.", noEffect: true } }),
+    evento({ kind: "model.text", label: "resposta ao usuário", round: 2, ok: true, data: { texto: "Achei três opções de café moído." } }),
+    evento({ kind: "turn", label: "turno completo", ms: 7200, ok: true, data: { rounds: 2, toolCalls: 1 } }),
+  ];
+  const texto = relatorioDoTurno(eventos, { completo: true });
+  const linhas = texto.split("\n");
+  console.log(linhas.slice(0, 14).join("\n"));
+  console.log(`  … (${linhas.length} linhas no total)`);
+  for (const esperado of ["Pedido:", "2 rodada(s)", "1234", "sem efeito", "Como foi, rodada a rodada", "O que o modelo leu", "Resposta final"]) {
+    console.log(`  contém “${esperado}”: ${texto.includes(esperado) ? "sim" : "NAO"}`);
+  }
+}
+
+// 20. O pipeline de voz no relatorio: do microfone a caixa de som.
+//
+// Numa conversa falada o texto e o meio, nao a ponta: entre o que a pessoa disse e o que a Vela
+// leu ha um modelo de transcricao, e entre o que ela respondeu e o que se ouviu ha outro de
+// sintese. O que se confere aqui e se o relatorio conta essa parte — inclusive o descarte
+// silencioso, que antes nao deixava rastro nenhum.
+console.log("\n=== relatorio de uma conversa falada ===");
+{
+  const { relatorioDoTurno } = await import("../src/trace-report");
+  const agora = Date.now();
+  const evento = (extra: Record<string, unknown>) => ({ at: agora, turn: "t2", from: "offscreen", ...extra }) as never;
+  const eventos = [
+    evento({ kind: "audio.capture", label: "trecho de fala capturado", blobId: "aaaabbbb-1111", data: { bytes: 48_000, mime: "audio/wav" } }),
+    evento({ kind: "stt.result", label: "transcrição", ms: 640, ok: true, blobId: "aaaabbbb-1111", data: { texto: "abre o carrinho", bruto: " abre o carrinho ", modelo: "whisper-turbo", descartado: false } }),
+    evento({ kind: "user.input", label: "entrada por voz", from: "background", data: { origem: "voz", texto: "abre o carrinho", model: "modelo-rapido", autonomia: "auto" } }),
+    evento({ kind: "model.text", label: "resposta ao usuário", from: "background", round: 1, ok: true, data: { texto: "Abri o carrinho: são **três** itens." } }),
+    evento({ kind: "tts.request", label: "texto enviado para falar", data: { original: "Abri o carrinho: são **três** itens.", falado: "Abri o carrinho: são três itens.", voz: "piper:pt_BR-cadu-medium", streaming: true } }),
+    evento({ kind: "tts.audio", label: "síntese", ms: 820, ok: true, blobId: "ccccdddd-2222", data: { modo: "streaming", bytes: 96_000, voz: "piper:pt_BR-cadu-medium" } }),
+    evento({ kind: "tts.play", label: "reprodução", ms: 2100, ok: true, blobId: "ccccdddd-2222", data: { segundos: 2.1 } }),
+    evento({ kind: "stt.result", label: "transcrição", ms: 300, ok: false, code: "descartado", blobId: "eeeeffff-3333", data: { texto: "obrigado", modelo: "whisper-turbo", descartado: true, motivo: "reconhecido como alucinação do modelo de transcrição" } }),
+    evento({ kind: "turn", label: "turno completo", from: "background", ms: 5400, ok: true }),
+  ];
+  const texto = relatorioDoTurno(eventos, { completo: true });
+  const secao = texto.slice(texto.indexOf("## A conversa falada"));
+  console.log(secao.split("\n").slice(0, 16).join("\n"));
+  for (const esperado of ["Entrou por:** voz", "whisper-turbo", "escrito:", "falado:", "descartado", "tocou"]) {
+    console.log(`  contém “${esperado}”: ${texto.includes(esperado) ? "sim" : "NAO"}`);
+  }
+}

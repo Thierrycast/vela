@@ -5,7 +5,7 @@ import { runToolCall } from "./tool-runner";
 import { endTraceSessions } from "./agent";
 import { configureSticky, endCdpSessions } from "./cdp-session";
 import { appendLog, loadSettings } from "./storage";
-import { beginTurn, record as traceRecord, span } from "./trace";
+import { beginCall, beginRound, beginTurn, configureTrace, record as traceRecord, recordFull, span } from "./trace";
 import { collectBrowserContext, clearAttachments } from "./browser-context";
 import { recordTurn } from "./action-stats";
 import { cancelDelegated } from "./background-task";
@@ -148,10 +148,30 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
    */
   let roundsUsed = 0;
   let toolCallsMade = 0;
-  traceRecord("user.input", text.slice(0, 200), { data: { length: text.length, model: profile?.defaultModel } });
+  /*
+   * A pergunta inteira, e o estado em que ela foi feita.
+   *
+   * Duzentos caracteres bastam para reconhecer um turno numa lista; não bastam para revisá-lo —
+   * o pedido que produziu um comportamento estranho costuma ser justamente o longo. E sem saber
+   * com que autonomia, que modelo e que habilidades a Vela estava operando, o mesmo texto explica
+   * duas execuções diferentes.
+   */
+  traceRecord("user.input", text.slice(0, 120), {
+    data: {
+      texto: text,
+      length: text.length,
+      model: profile?.defaultModel,
+      autonomia: settings.agent.autonomy,
+      modoPreciso: settings.agent.preciseMode,
+      habilidades: Object.entries(settings.capabilities).filter(([, ligada]) => ligada).map(([nome]) => nome),
+      versao: typeof chrome !== "undefined" ? chrome.runtime?.getManifest?.()?.version : undefined,
+    },
+  });
   // A promoção do depurador é decisão do turno, não de cada ação: quem liga a habilidade aceita
   // ver a faixa de aviso durante uma tarefa que insista no caminho confiável.
   configureSticky(settings.capabilities.cdpSession);
+  // O nível é decidido por turno: ligar o rastreio completo no meio de uma tarefa gravaria metade.
+  configureTrace({ detail: settings.agent.fullTrace ? "completo" : "normal" });
   // O que o usuário escreveu é decisão dele: endereços que ele mencionou passam sem confirmação.
   noteSource("user", text);
   running = true;
@@ -164,6 +184,7 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
   try {
     for (let round = 0; round < maxRounds; round += 1) {
       roundsUsed += 1;
+      beginRound(round + 1);
       const roundSpan = span("model.request", `rodada ${round + 1}`, { round });
       let firstToken = 0;
       let chunks = 0;
@@ -237,7 +258,7 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
         } else {
           // A resposta final inteira entra na trilha: é o lado "saída do modelo" do material de
           // ajuste fino, e sem ela sobram medições sem o que foi de fato dito.
-          traceRecord("model.text", "resposta ao usuário", { ok: true, data: { texto: assistant.content, chars: assistant.content.length, round } });
+          traceRecord("model.text", "resposta ao usuário", { ok: true, round: round + 1, data: { texto: assistant.content, chars: assistant.content.length } });
           await conversation.patch(assistant.id, { status: "complete" });
           emit({ type: "chat:patch", id: assistant.id, patch: { status: "complete" } });
         }
@@ -270,9 +291,19 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
           await addMessage({ id: newId(), role: "tool", tool_call_id: call.id, content: recusa, createdAt: Date.now(), status: "error" }, emit);
           continue;
         }
+        beginCall(call.id);
         const callSpan = span("tool.call", call.name, { arguments: safeParse(call.arguments) });
         const { content, event, image } = await runToolCall(call, settings, emit);
-        callSpan.end({ ok: event.kind !== "error", data: { name: call.name, arguments: safeParse(call.arguments), result: content.slice(0, 600) } });
+        callSpan.end({ ok: event.kind !== "error", callId: call.id, data: { name: call.name, arguments: safeParse(call.arguments), result: content.slice(0, 600) } });
+        /*
+         * O resultado inteiro, separado do resumo.
+         *
+         * Seiscentos caracteres cobrem o "deu certo ou não" e escondem exatamente o que importa
+         * numa revisão: o retrato da página que o modelo leu antes de decidir. O elemento que ele
+         * não viu estava no trecho cortado — e é impossível saber disso lendo o trecho que ficou.
+         */
+        recordFull("model.tool", `resultado de ${call.name}`, { ok: event.kind !== "error", callId: call.id, data: { name: call.name, resultado: content, temImagem: !!image } });
+        beginCall(undefined);
         record(event, emit);
         void appendLog({ level: event.kind === "error" ? "error" : "info", event: event.kind === "error" ? "agent.tool_error" : "agent.tool_completed", detail: `${call.name}: ${content.slice(0, 200)}` });
         await addMessage({ id: newId(), role: "tool", tool_call_id: call.id, content, createdAt: Date.now(), status: event.kind === "error" ? "error" : "complete" }, emit);

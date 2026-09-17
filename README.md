@@ -316,17 +316,43 @@ anexada num relatório.
 
 **Visor em tempo real:** Configurações → Avançado → *Abrir a trilha*, ou `debug.html` na
 extensão. Os eventos aparecem enquanto acontecem, agrupados por turno, com duração ao lado,
-filtro por tipo, busca no payload e exportação em JSONL.
+filtro por tipo, busca no payload e exportação.
 
 O botão **Marcar** insere uma linha na trilha com o que você vai testar agora. Numa sessão de
 depuração a dois é o que separa um caso do outro: sem o marco, o arquivo exportado é uma fita
 longa onde tudo se parece.
 
-A voz é gravada em detalhe, porque é onde mais quebra: microfone aberto ou negado, cada início e
-fim de fala com a duração, a transcrição com o texto e o tempo, a síntese com voz e modo, o sinal
-do microfone resumido a cada dois segundos (pico e média) e quantas amostras de telemetria o orb
-recebeu. "O orb não reage" tem duas causas opostas — sinal que não chega ou renderer que ignora —
-e os dois contadores separam uma da outra.
+### Rastreio completo — quando a pergunta é "por que ela fez isso?"
+
+A trilha normal diz o que aconteceu e quanto demorou. Ela **não** guarda o que o modelo leu — e é
+aí que mora a resposta. Ligue **Configurações → Avançado → Rastreio completo** antes de reproduzir
+o problema, e passam a ser gravados:
+
+- o **prompt exato** que o modelo recebeu, mensagem por mensagem, com as ferramentas oferecidas;
+- a **resposta inteira** dele, inclusive a que virou chamada de ferramenta e some da conversa;
+- o **conteúdo integral** de cada leitura de página, em vez do começo dela;
+- os **tokens** de cada rodada, quando o provider os informa;
+- na voz: o **áudio capturado**, o que o STT entendeu (limpo e bruto, com o modelo e o tempo), o
+  que foi descartado **e por quê**, o texto que foi mandado falar, o áudio sintetizado e quanto
+  ele tocou de fato.
+
+Chave, cookie, token e senha continuam redigidos — isso não muda em nenhum nível.
+
+**Exportar**, no visor da trilha:
+
+| Botão | O que sai |
+|---|---|
+| **Pacote** | zip com `relatorio.md`, `eventos.jsonl` e a pasta `audio/` — é o que se manda para alguém |
+| **Relatório** | só o Markdown, com a narrativa do turno de cima para baixo |
+| **JSONL** | os eventos crus, para análise com ferramenta |
+| **relatório** (no cabeçalho de cada turno) | o Markdown de um turno só |
+
+Clicar num evento com áudio abre um player ali mesmo: a transcrição é interpretação, o áudio é o
+fato. Desligue quando terminar — o modo é caro em disco justamente porque guarda o conteúdo das
+páginas visitadas.
+
+**Na voz**, o botão de gravar do palco faz isso em um clique: liga o rastreio completo, e ao parar
+baixa o pacote já montado com a sessão inteira. O nível volta sozinho ao que estava antes.
 
 **Dirigir a Vela de fora**, como se fosse uma pessoa:
 

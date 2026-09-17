@@ -12,7 +12,8 @@ import * as conversation from "./conversation";
 import { injectIntoActiveTab, syncContentScriptRegistration } from "./injection";
 import { bridgeStatus, configureBridge, onKeepAliveAlarm, syncBridge } from "./bridge";
 import { TraceEvent, clearTrace, configureTrace, onTrace, readTrace, record as traceRecord } from "./trace";
-import { SETTINGS_KEY, loadSettings } from "./storage";
+import { clearBlobs } from "./trace-blobs";
+import { SETTINGS_KEY, loadSettings, saveSettings } from "./storage";
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -214,9 +215,20 @@ async function publishSession() {
   broadcast({ type: "chat:session", title: session?.title ?? "", tabCount: session?.tabIds.length ?? 0 });
 }
 
-async function runTurn(text: string, useFastModel = false) {
+/**
+ * De onde veio o que entrou.
+ *
+ * O mesmo texto pode ter sido digitado, falado, selecionado numa página pelo Lens ou mandado por
+ * outro agente pela ponte. Numa revisão isso muda tudo — uma frase estranha vinda da transcrição é
+ * problema de STT, a mesma frase digitada é problema de intenção — e o turno não guardava essa
+ * diferença em lugar nenhum.
+ */
+type Origem = "texto" | "voz" | "lens" | "ponte" | "atalho";
+
+async function runTurn(text: string, useFastModel = false, origem: Origem = "texto") {
   ensureKeepAlive();
   void ensureSession(text).then(publishSession);
+  traceRecord("user.input", `entrada por ${origem}`, { from: "background", data: { origem, caracteres: text.length, modeloRapido: useFastModel } });
   return agentLoop.submit(text, notifySurfaces, { useFastModel });
 }
 
@@ -224,7 +236,7 @@ async function runTurn(text: string, useFastModel = false) {
  *  logado do usuário, com o mesmo loop, a mesma memória e o mesmo gate de autonomia. */
 async function askAgent(prompt: string): Promise<string> {
   if (agentLoop.isRunning()) return "ERRO [falha] A Vela já está executando outra tarefa. Tente de novo quando ela terminar.";
-  await runTurn(prompt);
+  await runTurn(prompt, false, "ponte");
   const messages = await conversation.all();
   const answer = [...messages].reverse().find((item: ChatMessage) => item.role === "assistant" && item.content.trim());
   return answer?.content ?? "A tarefa terminou sem resposta em texto.";
@@ -275,7 +287,7 @@ async function speakTurn(text: string) {
     while (agentLoop.isRunning() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 60));
   }
   const previous = await lastAnswerId();
-  const accepted = await runTurn(text, voiceMode === "live");
+  const accepted = await runTurn(text, voiceMode === "live", "voz");
   if (!accepted) {
     traceRecord("voice", "fala descartada: o turno anterior não encerrou", { from: "background", ok: false, code: "ocupada", data: { texto: text.slice(0, 200) } });
     return;
@@ -400,10 +412,42 @@ async function applySidecarMessage(message: SidecarOutbound) {
   if (message.type === "voice:stop-live") return stopVoice();
   if (message.type === "voice:debug-start") {
     if (voiceMode === "off") { broadcast({ type: "voice:error", message: "Ligue o Live Voice ou o ditado antes de gravar a sessão de depuração." }); return; }
+    await ligarRastreioCompleto();
     void chrome.runtime.sendMessage({ type: "voice:debug-start" }).catch(() => undefined);
     return;
   }
-  if (message.type === "voice:debug-stop") { void chrome.runtime.sendMessage({ type: "voice:debug-stop" }).catch(() => undefined); return; }
+  if (message.type === "voice:debug-stop") {
+    void chrome.runtime.sendMessage({ type: "voice:debug-stop" }).catch(() => undefined);
+    await devolverRastreio();
+    return;
+  }
+}
+
+/*
+ * Gravar a sessão pelo botão do palco é ligar o mesmo interruptor de Avançado, não um segundo modo.
+ *
+ * Um botão que grava "quase tudo" e um interruptor que grava "tudo" seriam duas verdades sobre a
+ * mesma sessão, e quem revisa nunca saberia qual delas está olhando. Ao parar, o nível volta ao que
+ * a pessoa tinha escolhido — deixar o rastreio completo ligado sem ela saber custaria disco e
+ * guardaria conteúdo de página que ela não pediu para guardar.
+ */
+let rastreioAnterior: boolean | null = null;
+
+async function ligarRastreioCompleto() {
+  const settings = await loadSettings();
+  rastreioAnterior = settings.agent.fullTrace;
+  if (settings.agent.fullTrace) return;
+  await saveSettings({ ...settings, agent: { ...settings.agent, fullTrace: true } });
+  configureTrace({ detail: "completo" });
+}
+
+async function devolverRastreio() {
+  const anterior = rastreioAnterior;
+  rastreioAnterior = null;
+  if (anterior !== false) return;
+  const settings = await loadSettings();
+  await saveSettings({ ...settings, agent: { ...settings.agent, fullTrace: false } });
+  configureTrace({ detail: "normal" });
 }
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -438,7 +482,7 @@ async function runLensAction(payload: { intent: LensIntent; text: string; url: s
   }
   const prompt = lensPrompt(payload);
   if (payload.intent === "ask") { broadcast({ type: "chat:prefill", text: prompt }); return; }
-  await runTurn(prompt);
+  await runTurn(prompt, false, "lens");
 }
 
 // Abas abertas pelo agente entram na sessão; window.open e target=_blank também — mas só quando
@@ -469,7 +513,9 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
   }
   if (message.type === "agent:pause") { cancelPendingApprovals(); agentLoop.abort(); }
   if (message.type === "bridge:status") { sendResponse(bridgeStatus()); return true; }
-  if (message.type === "trace:clear") { void clearTrace(); return false; }
+  // Áudio some junto: metade de um registro é pior que nenhum, porque o relatório continua
+  // citando arquivos que não existem mais.
+  if (message.type === "trace:clear") { void Promise.all([clearTrace(), clearBlobs()]); return false; }
   if (message.type === "trace:push" && message.entry) {
     const entry = message.entry as { kind: string; label: string; from?: string; data?: Record<string, unknown>; ok?: boolean; ms?: number };
     traceRecord(entry.kind as Parameters<typeof traceRecord>[0], entry.label, { from: entry.from ?? "desconhecido", data: entry.data, ok: entry.ok, ms: entry.ms });
