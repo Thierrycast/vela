@@ -29,7 +29,7 @@
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -160,12 +160,31 @@ const chrome = spawn(CHROME, [
   `--remote-debugging-port=${PORT}`,
   `--user-data-dir=${profile}`,
   "--no-first-run", "--no-default-browser-check",
+  /*
+   * `--audio=fala.wav` poe um microfone falso tocando aquele arquivo.
+   *
+   * Existe porque o caminho da voz — captura, VAD, transcricao, sintese, reproducao — so podia ser
+   * testado com alguem falando na frente da maquina, e o que nao da para rodar sozinho acaba nao
+   * sendo rodado. O arquivo precisa ser WAV PCM 16 bits; `%noloop` evita que a mesma frase volte
+   * em ciclo e abra um turno atras do outro.
+   */
+  ...(flags.audio ? ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${resolve(String(flags.audio))}%noloop`] : []),
   // A janela fica visível de propósito: dá para acompanhar o roteiro rodando.
   "--window-position=60,60", "--window-size=1400,960",
   "about:blank",
 ], { detached: true, stdio: "ignore" });
 
 const browser = await connect((await version()).webSocketDebuggerUrl);
+
+/*
+ * Downloads caem numa pasta do perfil temporario, nunca na pasta Downloads de quem roda.
+ *
+ * O pacote de revisao da voz sai como download; sem isto, cada teste deixaria um zip na maquina
+ * da pessoa, e o roteiro nao teria como dizer se o arquivo chegou a existir.
+ */
+const pastaDownloads = join(profile, "downloads");
+mkdirSync(pastaDownloads, { recursive: true });
+await browser.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: pastaDownloads, eventsEnabled: false }).catch(() => undefined);
 
 /*
  * O acesso aos sites e opcional no manifest de verdade: quem instala concede no primeiro uso, por
@@ -258,7 +277,10 @@ for (const [indice, passo] of roteiro.entries()) {
       await evaluate(panelSession, DIGITAR(passo.texto));
       console.log(`${rotulo} → "${passo.texto}"`);
     } else if (passo.acao === "clicar") {
-      await evaluate(panelSession, `(() => { const alvo = document.querySelector(${JSON.stringify(passo.seletor)}); if (!alvo) throw new Error("sem alvo: ${passo.seletor}"); alvo.click(); return "ok"; })()`);
+      // O seletor entra escapado nos dois lugares: um seletor com aspas (um [aria-label="..."],
+      // que e como se acha botao no painel) quebrava a propria expressao e o erro dizia
+      // "missing ) after argument list", que nao lembra em nada o passo que falhou.
+      await evaluate(panelSession, `(() => { const seletor = ${JSON.stringify(passo.seletor)}; const alvo = document.querySelector(seletor); if (!alvo) throw new Error("sem alvo: " + seletor); alvo.click(); return "ok"; })()`, true);
       console.log(`${rotulo} → ${passo.seletor}`);
     } else if (passo.acao === "esperar") {
       await sleep(passo.ms ?? 1000);
@@ -380,17 +402,28 @@ const trilha = await evaluate(workerSession, `(async () => {
     pedido.onsuccess = () => done(pedido.result);
     pedido.onerror = () => done(null);
   });
-  if (!banco) return "[]";
+  if (!banco) return JSON.stringify({ eventos: [], audios: { total: 0, bytes: 0 } });
   const eventos = await new Promise((done) => {
     const pedido = banco.transaction("events", "readonly").objectStore("events").getAll();
     pedido.onsuccess = () => done(pedido.result);
     pedido.onerror = () => done([]);
   });
-  return JSON.stringify(eventos);
+  // O audio guardado tambem e resultado: um relatorio que cita "audio a3f8c1" sem o arquivo por
+  // tras nao serve para conferir o que foi dito, e a falta so aparece se alguem contar.
+  let audios = { total: 0, bytes: 0 };
+  if ([...banco.objectStoreNames].includes("blobs")) {
+    audios = await new Promise((done) => {
+      const pedido = banco.transaction("blobs", "readonly").objectStore("blobs").getAll();
+      pedido.onsuccess = () => done({ total: pedido.result.length, bytes: pedido.result.reduce((soma, item) => soma + (item.bytes?.byteLength ?? 0), 0) });
+      pedido.onerror = () => done({ total: 0, bytes: 0 });
+    });
+  }
+  return JSON.stringify({ eventos, audios });
 })()`);
 
-const eventos = JSON.parse(trilha);
+const { eventos, audios } = JSON.parse(trilha);
 console.log(`\n── trilha: ${eventos.length} evento(s)`);
+if (audios.total) console.log(`  áudio guardado: ${audios.total} trecho(s), ${(audios.bytes / 1024).toFixed(0)} kB`);
 
 const porTipo = {};
 for (const evento of eventos) porTipo[evento.kind] = (porTipo[evento.kind] ?? 0) + 1;
@@ -411,6 +444,12 @@ if (browser.problems.length) console.log(`  exceções no painel: ${browser.prob
 if (flags.saida) {
   writeFileSync(String(flags.saida), eventos.map((evento) => JSON.stringify(evento)).join("\n"));
   console.log(`  trilha gravada em ${flags.saida}`);
+}
+
+const baixados = readdirSync(pastaDownloads).filter((nome) => !nome.endsWith(".crdownload"));
+if (baixados.length) {
+  console.log("  arquivos baixados:");
+  for (const nome of baixados) console.log(`    ${nome} (${(statSync(join(pastaDownloads, nome)).size / 1024).toFixed(0)} kB) em ${pastaDownloads}`);
 }
 
 const reprovados = resultados.filter((item) => !item.passou);

@@ -1,4 +1,5 @@
 import { loadSettings } from "./storage";
+import { AppSettings } from "./types";
 import { VoiceEndpoint, prepareText, streamSpeech, synthesizeSpeech, transcribeAudio } from "./provider";
 import { splitSentences } from "./reading-text";
 import { UtteranceSegmenter } from "./vad";
@@ -68,7 +69,8 @@ let muted = false;
  */
 let speaking = false;
 let speakingUntil = 0;
-const pending: Blob[] = [];
+/** Cada trecho na fila carrega de que enunciado ele veio: a fila pode ter mais de um. */
+const pending: Array<{ wav: Blob; enunciado: string }> = [];
 let draining = false;
 let live: SttStream | null = null;
 let lastPartial = "";
@@ -144,8 +146,22 @@ const publish = (next: VoiceRuntimeState) => {
 };
 
 /** A voz tem servidor próprio: o gateway de texto não expõe transcrição nem síntese. */
+/*
+ * As preferências vêm do background, não do storage.
+ *
+ * Um documento offscreen só enxerga `chrome.runtime`: `chrome.storage` não existe aqui, e
+ * `loadSettings()` devolvia os padrões **em silêncio**. Toda a voz rodava com eles — servidor,
+ * modelo de transcrição, voz, velocidade da fala e o nível de rastreio —, então trocar a voz nas
+ * Configurações não mudava nada e o modo completo nunca gravava áudio. Nada disso dava erro: os
+ * padrões funcionam, só não são os que a pessoa escolheu.
+ */
+async function carregarSettings(): Promise<AppSettings> {
+  const resposta = await chrome.runtime.sendMessage({ type: "settings:get" }).catch(() => null) as AppSettings | null;
+  return resposta ?? await loadSettings();
+}
+
 async function voiceTarget() {
-  const settings = await loadSettings();
+  const settings = await carregarSettings();
   /*
    * O offscreen é outro contexto: o nível de rastreio decidido no background não chega sozinho até
    * aqui. Sincronizar neste ponto cobre todo o pipeline de voz — captura, transcrição e síntese
@@ -167,8 +183,10 @@ async function drain() {
   if (draining) return;
   draining = true;
   while (pending.length) {
-    const blob = pending.shift()!;
-    const attempt = traceSpan("stt.result", "transcrição", { bytes: blob.size, fila: pending.length });
+    const { wav: blob, enunciado: deQualFala } = pending.shift()!;
+    // A medição da transcrição começa depois de o áudio ser guardado: começando antes, ela somava o
+    // tempo de gravar no disco e, no relatório, a transcrição aparecia antes do próprio microfone.
+    let attempt: ReturnType<typeof traceSpan> | null = null;
     try {
       const { settings, endpoint } = await voiceTarget();
       /*
@@ -179,10 +197,18 @@ async function drain() {
        * explicar por quê.
        */
       const audioId = await guardarAudio(`fala do usuário (${(blob.size / 1024).toFixed(0)} kB)`, await blobToBytes(blob), blob.type || "audio/wav");
-      traceFull("audio.capture", "trecho de fala capturado", { blobId: audioId, data: { bytes: blob.size, mime: blob.type, modeloAlvo: settings.voice.transcriptionModel } });
+      traceFull("audio.capture", "trecho de fala capturado", { blobId: audioId, data: { enunciado: deQualFala, bytes: blob.size, mime: blob.type, modeloAlvo: settings.voice.transcriptionModel } });
+      attempt = traceSpan("stt.result", "transcrição", { enunciado: deQualFala, bytes: blob.size, fila: pending.length });
+      /*
+       * O limite de 20 s precisa chegar ao `fetch`.
+       *
+       * O controlador existia, disparava e não cancelava nada: o sinal nunca era entregue à
+       * requisição. Um servidor de transcrição que travasse segurava a fila inteira para sempre —
+       * a pessoa continuava falando e nenhum trecho seguinte era transcrito.
+       */
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20_000);
-      const text = await transcribeAudio(endpoint, blob, settings.voice.transcriptionModel).finally(() => clearTimeout(timer));
+      const text = await transcribeAudio(endpoint, blob, settings.voice.transcriptionModel, controller.signal).finally(() => clearTimeout(timer));
       const clean = text.trim();
       const descartado = !clean || HALLUCINATIONS.some((pattern) => pattern.test(clean));
       /*
@@ -195,16 +221,17 @@ async function drain() {
         ok: !descartado,
         code: descartado ? "descartado" : undefined,
         blobId: audioId,
-        data: { texto: clean, bruto: text, bytes: blob.size, modelo: settings.voice.transcriptionModel, descartado, motivo: descartado ? (clean ? "reconhecido como alucinação do modelo de transcrição" : "transcrição vazia") : undefined },
+        data: { enunciado: deQualFala, texto: clean, bruto: text, bytes: blob.size, modelo: settings.voice.transcriptionModel, descartado, motivo: descartado ? (clean ? "reconhecido como alucinação do modelo de transcrição" : "transcrição vazia") : undefined },
       });
       contarDebug();
       if (!descartado) {
-        void send({ type: "voice:transcript", text: clean, final: true, timestamp: Date.now() });
+        void send({ type: "voice:transcript", text: clean, final: true, timestamp: Date.now(), enunciado: deQualFala });
         if (mode === "live") publish("thinking");
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha ao transcrever áudio.";
-      attempt.end({ ok: false, code: "falha", data: { erro: message } });
+      const expirou = error instanceof DOMException && error.name === "AbortError";
+      const message = expirou ? "A transcrição não respondeu em 20 s; o trecho foi descartado." : error instanceof Error ? error.message : "Falha ao transcrever áudio.";
+      (attempt ?? traceSpan("stt.result", "transcrição", { enunciado: deQualFala, bytes: blob.size })).end({ ok: false, code: expirou ? "tempo_esgotado" : "falha", data: { enunciado: deQualFala, erro: message } });
       void send({ type: "voice:error", message });
     }
   }
@@ -214,7 +241,11 @@ async function drain() {
 async function start(nextMode: "live" | "dictation") {
   if (stream) { trace("voice", "start ignorado: microfone já aberto", { data: { mode: nextMode } }); return; }
   mode = nextMode;
-  const opening = traceSpan("voice", "abrir microfone", { mode: nextMode });
+  // O nível de rastreio é sincronizado aqui, antes do primeiro trecho de fala: quem descobria o
+  // nível só na primeira transcrição perdia o que veio antes dela. `rastreio` no evento diz, em
+  // quem for revisar, se esta sessão estava sendo guardada por inteiro ou só medida.
+  await voiceTarget().catch(() => undefined);
+  const opening = traceSpan("voice", "abrir microfone", { mode: nextMode, rastreio: clientDetail() });
   windowStarted = Date.now();
   samples = 0; peak = 0; sum = 0;
   try {
@@ -253,17 +284,17 @@ async function start(nextMode: "live" | "dictation") {
     }, 50);
 
     segmenter = new UtteranceSegmenter({
-      onStart: () => { trace("voice", "fala começou"); if (mode === "live") publish("listening"); },
+      onStart: () => { enunciado = crypto.randomUUID(); trace("voice", "fala começou", { data: { enunciado } }); if (mode === "live") publish("listening"); },
       onEnd: (chunks) => {
         const amostras = chunks.reduce((total, item) => total + item.length, 0);
         const engolido = speaking || Date.now() < speakingUntil;
         trace("voice", engolido ? "fala ignorada (a Vela estava falando)" : "fala terminou", {
           ok: !engolido,
-          data: { segundos: Number((amostras / (audio?.sampleRate ?? SAMPLE_RATE)).toFixed(2)) },
+          data: { enunciado, segundos: Number((amostras / (audio?.sampleRate ?? SAMPLE_RATE)).toFixed(2)) },
         });
         if (engolido) return;
         if (pending.length >= MAX_PENDING) { pending.shift(); void send({ type: "voice:error", message: "Transcrição atrasada; um trecho foi descartado." }); }
-        pending.push(encodeWav(chunks, audio?.sampleRate ?? SAMPLE_RATE));
+        pending.push({ wav: encodeWav(chunks, audio?.sampleRate ?? SAMPLE_RATE), enunciado });
         void drain();
       },
     }, { sampleRate: audio.sampleRate });
@@ -273,7 +304,7 @@ async function start(nextMode: "live" | "dictation") {
      * conexão cair, a transcrição em lote continua inteira. Ele nunca abre um turno — só escreve
      * na tela enquanto a pessoa fala.
      */
-    const streamingUrl = (await loadSettings()).voice.streamingUrl.trim();
+    const streamingUrl = (await carregarSettings()).voice.streamingUrl.trim();
     if (mode === "live" && streamingUrl) {
       const connecting = traceSpan("voice", "texto ao vivo", { url: streamingUrl });
       let opened = false;
@@ -284,10 +315,10 @@ async function start(nextMode: "live" | "dictation") {
           lastPartial = text;
           // O rascunho muda a cada palavra: no nível normal isso seria centenas de eventos por
           // frase. No completo é justamente o que mostra como a transcrição foi se corrigindo.
-          traceFull("stt.partial", "rascunho da fala", { data: { texto: text } });
+          traceFull("stt.partial", "rascunho da fala", { data: { enunciado, texto: text } });
           void send({ type: "voice:partial", text });
         },
-        onFinal: (text) => { lastPartial = ""; trace("stt.partial", "trecho fechado no texto ao vivo", { ok: true, data: { texto: text, fechado: true } }); },
+        onFinal: (text) => { lastPartial = ""; trace("stt.partial", "trecho fechado no texto ao vivo", { ok: true, data: { enunciado, texto: text, fechado: true } }); },
         onError: (message) => {
           if (!opened) { opened = true; connecting.end({ ok: false, code: "falha", data: { erro: message } }); }
           else trace("voice", "texto ao vivo falhou", { ok: false, data: { erro: message } });
@@ -579,11 +610,24 @@ async function speakReading(endpoint: VoiceEndpoint, voice: string, text: string
   return stage.recordedDone;
 }
 
+/*
+ * O enunciado tem nome proprio.
+ *
+ * A fala e gravada aqui e o turno so nasce depois, no background, quando a transcricao chega — o
+ * que deixava a captura, os rascunhos e a transcricao carimbados como "sem turno", fora do
+ * relatorio do turno que eles mesmos abriram. Quem revisava via a resposta da Vela sem a pergunta
+ * que a causou. Este id viaja junto da transcricao e costura os dois lados sem adivinhar por
+ * proximidade no tempo.
+ */
+let enunciado = "";
+
 let streamingStop: (() => void) | null = null;
 
 async function speak(text: string, readingId?: string) {
   let url = "";
-  const attempt = traceSpan("tts.audio", "síntese", { chars: text.length, leitura: !!readingId });
+  // A síntese é medida a partir do pedido, não antes dele: começando antes, somava a leitura das
+  // preferências e aparecia no relatório antes do próprio "mandou falar".
+  let attempt = traceSpan("tts.audio", "síntese", { chars: text.length, leitura: !!readingId });
   try {
     const { settings, endpoint } = await voiceTarget();
     const spoken = speakable(text);
@@ -597,6 +641,7 @@ async function speak(text: string, readingId?: string) {
     traceFull("tts.request", "texto enviado para falar", {
       data: { original: text, falado: spoken, voz: settings.voice.speechVoice, modelo: settings.voice.speechModel, taxa: settings.voice.speechRate, leitura: !!readingId, streaming: settings.voice.streamSpeech },
     });
+    attempt = traceSpan("tts.audio", "síntese", { chars: text.length, leitura: !!readingId });
     if (!spoken) { attempt.end({ ok: false, code: "vazio", data: { original: text } }); return; }
     output?.pause();
     segmenter?.suspend();
@@ -620,7 +665,10 @@ async function speak(text: string, readingId?: string) {
 
     if (settings.voice.streamSpeech) {
       try {
-        const recorded = await speakStreaming(endpoint, spoken, settings.voice.speechVoice, rate);
+        // A reprodução em streaming também precisa de `tts.play`: sem ela o relatório mostrava o
+        // áudio pronto e nunca dizia se ele chegou a tocar — que é a pergunta de quem não ouviu nada.
+        const tocando = traceSpan("tts.play", "reprodução", { modo: "streaming", taxa: rate });
+        const recorded = await speakStreaming(endpoint, spoken, settings.voice.speechVoice, rate).finally(() => tocando.end({ ok: true }));
         const audioId = recorded ? await guardarAudio("resposta falada (streaming)", recorded.bytes, recorded.mime || "audio/wav") : undefined;
         attempt.end({ ok: true, blobId: audioId, data: { modo: "streaming", voz: settings.voice.speechVoice, taxa: rate, bytes: recorded?.bytes.byteLength, falado: spoken } });
         contarDebug();

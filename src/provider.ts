@@ -403,12 +403,12 @@ export async function checkVoiceEndpoint(endpoint: VoiceEndpoint): Promise<Conne
   }
 }
 
-export async function transcribeAudio(endpoint: VoiceEndpoint, audio: Blob, model: string): Promise<string> {
+export async function transcribeAudio(endpoint: VoiceEndpoint, audio: Blob, model: string, signal?: AbortSignal): Promise<string> {
   const form = new FormData();
   form.append("file", audio, "vela-fala.wav");
   form.append("model", model);
   form.append("language", "pt");
-  const response = await fetch(voiceUrl(endpoint, "audio/transcriptions"), { method: "POST", headers: { Accept: "application/json", ...voiceHeaders(endpoint) }, body: form });
+  const response = await fetch(voiceUrl(endpoint, "audio/transcriptions"), { method: "POST", headers: { Accept: "application/json", ...voiceHeaders(endpoint) }, body: form, signal });
   if (!response.ok) { const detail = await responseDetail(response); throw new Error(`Transcrição falhou (HTTP ${response.status})${detail ? `: ${detail}` : "."}`); }
   const payload = await response.json() as { text?: string; transcript?: string };
   return payload.text ?? payload.transcript ?? "";

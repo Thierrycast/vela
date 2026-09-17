@@ -503,3 +503,28 @@ console.log("\n=== relatorio de uma conversa falada ===");
     console.log(`  contém “${esperado}”: ${texto.includes(esperado) ? "sim" : "NAO"}`);
   }
 }
+
+// A fala que abriu um turno e gravada antes de o turno existir, com o carimbo "sem-turno". O
+// relatorio a traz de volta pelo id do enunciado — e so por ele: uma fala de outro enunciado,
+// gravada no mesmo segundo, precisa continuar de fora.
+console.log("\n=== a fala volta para o turno que ela abriu ===");
+{
+  const { relatorioCompleto } = await import("../src/trace-report");
+  const agora = Date.now();
+  const evento = (extra: Record<string, unknown>) => ({ at: agora, from: "offscreen", ...extra }) as never;
+  const eventos = [
+    evento({ kind: "audio.capture", label: "trecho de fala capturado", turn: "sem-turno", blobId: "aaaa1111", data: { enunciado: "fala-1", bytes: 40_000 } }),
+    evento({ kind: "stt.result", label: "transcrição", turn: "sem-turno", ms: 500, ok: true, data: { enunciado: "fala-1", texto: "abre o carrinho", modelo: "whisper" } }),
+    evento({ kind: "stt.result", label: "transcrição", turn: "sem-turno", ms: 300, ok: false, code: "descartado", data: { enunciado: "fala-2", texto: "obrigado", descartado: true } }),
+    evento({ kind: "ui", label: "orb montado", turn: "sem-turno" }),
+    evento({ kind: "user.input", label: "abre o carrinho", turn: "t9", from: "background", data: { origem: "voz", enunciado: "fala-1", texto: "abre o carrinho" } }),
+    evento({ kind: "turn", label: "turno completo", turn: "t9", from: "background", ms: 900, ok: true }),
+  ];
+  const texto = relatorioCompleto(eventos, { completo: true });
+  const turno = texto.slice(texto.indexOf("# Turno t9"), texto.indexOf("# Fora de qualquer turno"));
+  const fora = texto.slice(texto.indexOf("# Fora de qualquer turno"));
+  console.log(`  captura dentro do turno: ${turno.includes("**microfone**") ? "sim" : "NAO"}`);
+  console.log(`  transcrição dentro do turno: ${turno.includes("abre o carrinho") && turno.includes("**transcrição**") ? "sim" : "NAO"}`);
+  console.log(`  fala de outro enunciado ficou de fora: ${!turno.includes("obrigado") && fora.includes("transcrição") ? "sim" : "NAO"}`);
+  console.log(`  evento de painel ficou de fora: ${fora.includes("orb montado") ? "sim" : "NAO"}`);
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "acao": "definirSettings",
+    "patch": {
+      "activeProviderId": "falso",
+      "providers": [{
+        "id": "falso",
+        "name": "Modelo falso (fixtures)",
+        "baseUrl": "http://127.0.0.1:8799",
+        "protocol": "openai-compatible",
+        "apiKey": "teste",
+        "defaultModel": "falso-1",
+        "fastModel": "falso-1",
+        "enabled": true,
+        "capabilities": { "streaming": true, "tools": true, "vision": false, "audio": false, "webFetch": false }
+      }],
+      "agent": { "autonomy": "auto", "maxRounds": 4, "fullTrace": false }
+    }
+  },
+  { "acao": "abrirPagina", "url": "http://127.0.0.1:8799/lista.html", "ms": 2500 },
+  { "acao": "clicar", "seletor": "[aria-label=\"Iniciar Live Voice\"]" },
+  { "acao": "esperar", "ms": 1500 },
+  { "acao": "clicar", "seletor": "[aria-label=\"Gravar esta sessão para revisar depois\"]" },
+  { "acao": "esperar", "ms": 25000 },
+  { "acao": "clicar", "seletor": "[aria-label^=\"Parar a gravação e baixar\"]" },
+  { "acao": "esperar", "ms": 4000 },
+  { "acao": "clicar", "seletor": "[aria-label=\"Parar Live Voice\"]" },
+  { "acao": "esperar", "ms": 2000 }
+]

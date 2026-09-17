@@ -105,6 +105,29 @@ inteligência da resposta — é que a trilha registrou o caminho inteiro (promp
 crua, chamada de ferramenta, resultado, tokens) com o rastreio completo ligado. Sem isso, checar o
 rastreio dependeria da chave de API de quem está revisando.
 
+### A voz inteira, sem ninguém falar
+
+```bash
+node tools/drive.mjs --fixtures --audio=fala.wav --roteiro=tools/fixtures/roteiro-voz.json
+node tools/drive.mjs --fixtures --audio=fala.wav --roteiro=tools/fixtures/roteiro-voz-pacote.json
+```
+
+`--audio` põe um microfone falso tocando o arquivo (WAV PCM 16 bits, mono). O caminho inteiro roda
+de verdade: VAD, texto ao vivo, transcrição, turno (contra o modelo falso), síntese e reprodução,
+usando o servidor de voz configurado. O primeiro roteiro confere a trilha; o segundo aperta o botão
+de gravar do palco e confere o pacote de revisão baixado.
+
+Uma fala de teste sai do próprio servidor de voz:
+
+```bash
+curl -X POST http://SERVIDOR/v1/audio/speech -H "Content-Type: application/json" \
+  -d '{"input":"Abra a página de resultados.","model":"tts-1","voice":"piper:pt_BR-cadu-medium"}' -o fala.mp3
+ffmpeg -i fala.mp3 -ac 1 -ar 48000 -c:a pcm_s16le -af apad=pad_dur=3 fala.wav
+```
+
+Downloads feitos durante o roteiro caem numa pasta do perfil temporário — nunca na pasta Downloads
+de quem roda — e o resumo lista cada arquivo baixado.
+
 ## Trocar de modelo
 
 O nome do modelo na barra de envio abre a lista do próprio gateway, com busca — sem sair da

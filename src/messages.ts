@@ -18,7 +18,7 @@ export type SidecarInbound =
   | { type: "chat:running"; running: boolean }
   | { type: "voice:state"; state: VoiceState }
   | { type: "voice:error"; message: string }
-  | { type: "voice:transcript"; text: string }
+  | { type: "voice:transcript"; text: string; enunciado?: string }
   /** Rascunho do que está sendo falado agora. Nunca vira turno; some quando o final chega. */
   | { type: "voice:partial"; text: string }
   | { type: "chat:prefill"; text: string }
@@ -52,7 +52,9 @@ export type SidecarOutbound =
   | { type: "chat:attach"; name: string; text: string }
   | { type: "chat:detach"; index: number }
   | { type: "voice:debug-start" }
-  | { type: "voice:debug-stop" };
+  | { type: "voice:debug-stop" }
+  /** O documento offscreen não enxerga `chrome.storage`: as preferências vêm por aqui. */
+  | { type: "settings:get" };
 
 /** Assinatura compartilhada por quem avisa a UI: o loop principal, ferramentas que fazem trabalho
  *  assíncrono depois de já terem respondido (como delegar uma tarefa), e a ponte MCP. */

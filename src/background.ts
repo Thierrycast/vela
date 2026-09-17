@@ -225,10 +225,10 @@ async function publishSession() {
  */
 type Origem = "texto" | "voz" | "lens" | "ponte" | "atalho";
 
-async function runTurn(text: string, useFastModel = false, origem: Origem = "texto") {
+async function runTurn(text: string, useFastModel = false, origem: Origem = "texto", enunciado?: string) {
   ensureKeepAlive();
   void ensureSession(text).then(publishSession);
-  return agentLoop.submit(text, notifySurfaces, { useFastModel, origem });
+  return agentLoop.submit(text, notifySurfaces, { useFastModel, origem, enunciado });
 }
 
 /** Entrada da ponte MCP: um agente de fora descreve o objetivo e a Vela executa no navegador
@@ -274,7 +274,7 @@ async function lastAnswerId(): Promise<string | null> {
  * porque quer corrigir o rumo. O turno em andamento é abortado e o novo entra no lugar — sem
  * isso, `submit` recusava calado e a fala se perdia inteira.
  */
-async function speakTurn(text: string) {
+async function speakTurn(text: string, enunciado?: string) {
   if (agentLoop.isRunning()) {
     traceRecord("voice", "interrompi o turno para atender a nova fala", { from: "background", data: { texto: text.slice(0, 200) } });
     cancelPendingApprovals();
@@ -286,7 +286,7 @@ async function speakTurn(text: string) {
     while (agentLoop.isRunning() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 60));
   }
   const previous = await lastAnswerId();
-  const accepted = await runTurn(text, voiceMode === "live", "voz");
+  const accepted = await runTurn(text, voiceMode === "live", "voz", enunciado);
   if (!accepted) {
     traceRecord("voice", "fala descartada: o turno anterior não encerrou", { from: "background", ok: false, code: "ocupada", data: { texto: text.slice(0, 200) } });
     return;
@@ -359,6 +359,9 @@ async function stopVoice() {
   voiceMode = "off";
   await chrome.runtime.sendMessage({ type: "voice:stop" }).catch(() => undefined);
   await chrome.offscreen?.closeDocument().catch(() => undefined);
+  // Encerrar a voz com a gravação ligada é o jeito mais comum de parar de gravar: o offscreen
+  // entrega o pacote no `voice:stop`, e o nível de rastreio precisa voltar junto.
+  await devolverRastreio();
   void notifyTabs({ type: "pulse:hide" });
   broadcast({ type: "voice:state", state: "idle" });
 }
@@ -430,19 +433,27 @@ async function applySidecarMessage(message: SidecarOutbound) {
  * a pessoa tinha escolhido — deixar o rastreio completo ligado sem ela saber custaria disco e
  * guardaria conteúdo de página que ela não pediu para guardar.
  */
-let rastreioAnterior: boolean | null = null;
+/*
+ * O nível anterior mora no `storage.session`, não numa variável.
+ *
+ * O service worker dorme e acorda no meio de uma sessão de voz longa; guardado em memória, o valor
+ * a restaurar sumia junto, e o rastreio completo ficava ligado para sempre sem ninguém ter pedido.
+ */
+const RASTREIO_ANTERIOR = "vela:rastreio-anterior";
 
 async function ligarRastreioCompleto() {
   const settings = await loadSettings();
-  rastreioAnterior = settings.agent.fullTrace;
+  const jaGuardado = (await chrome.storage.session.get(RASTREIO_ANTERIOR))[RASTREIO_ANTERIOR];
+  // Apertar gravar duas vezes não pode trocar o "anterior" por "ligado": aí nada voltaria.
+  if (jaGuardado === undefined) await chrome.storage.session.set({ [RASTREIO_ANTERIOR]: settings.agent.fullTrace });
   if (settings.agent.fullTrace) return;
   await saveSettings({ ...settings, agent: { ...settings.agent, fullTrace: true } });
   configureTrace({ detail: "completo" });
 }
 
 async function devolverRastreio() {
-  const anterior = rastreioAnterior;
-  rastreioAnterior = null;
+  const anterior = (await chrome.storage.session.get(RASTREIO_ANTERIOR))[RASTREIO_ANTERIOR];
+  await chrome.storage.session.remove(RASTREIO_ANTERIOR);
   if (anterior !== false) return;
   const settings = await loadSettings();
   await saveSettings({ ...settings, agent: { ...settings.agent, fullTrace: false } });
@@ -506,12 +517,21 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   void getSession().then((session) => { if (session && changeInfo.groupId === session.groupId) void adoptTab(tabId).then(publishSession); });
 });
 
-chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; title?: string; message?: string; text?: string; url?: string; intent?: string; state?: string; scriptId?: string; id?: string; decision?: string; telemetry?: { metrics?: unknown; state?: string }; entry?: unknown; recording?: boolean; items?: number }, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; title?: string; message?: string; text?: string; url?: string; intent?: string; state?: string; scriptId?: string; id?: string; decision?: string; telemetry?: { metrics?: unknown; state?: string }; entry?: unknown; recording?: boolean; items?: number; enunciado?: string }, _sender, sendResponse) => {
   if (message.type === "lens:action" && message.text) {
     void runLensAction({ intent: (message.intent ?? "context") as LensIntent, text: message.text, url: message.url ?? "", title: message.title ?? "" });
   }
   if (message.type === "agent:pause") { cancelPendingApprovals(); agentLoop.abort(); }
   if (message.type === "bridge:status") { sendResponse(bridgeStatus()); return true; }
+  /*
+   * O documento offscreen só enxerga `chrome.runtime` — `chrome.storage` não existe lá.
+   *
+   * `loadSettings()` chamado de dentro dele devolvia os padrões em silêncio, e a voz inteira rodava
+   * com eles: servidor, modelo de transcrição, voz, velocidade e o nível de rastreio. Trocar a voz
+   * nas Configurações não mudava nada, e o rastreio completo nunca gravava áudio — porque quem
+   * decide isso estava lendo um objeto que nunca saiu de fábrica.
+   */
+  if (message.type === "settings:get") { void loadSettings().then(sendResponse); return true; }
   // Áudio some junto: metade de um registro é pior que nenhum, porque o relatório continua
   // citando arquivos que não existem mais.
   if (message.type === "trace:clear") { void Promise.all([clearTrace(), clearBlobs()]); return false; }
@@ -561,7 +581,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
   }
   if (message.type === "voice:transcript" && message.text) {
     const text = message.text;
-    if (voiceMode === "live") { void notifyActiveTab({ type: "pulse:transcript", text }); void speakTurn(text); }
+    if (voiceMode === "live") { void notifyActiveTab({ type: "pulse:transcript", text }); void speakTurn(text, message.enunciado); }
     else broadcast({ type: "voice:transcript", text });
   }
   if (message.type === "voice:debug-state") broadcast({ type: "voice:debug-state", recording: !!message.recording, items: Number(message.items) || 0 });

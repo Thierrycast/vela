@@ -15,10 +15,22 @@
  * uso normal fica caro), ou não manda nada (e o modo completo não serve para a voz, que é
  * justamente onde ele mais importa).
  */
-import { TraceEvent, TraceDetail, TraceKind } from "./trace";
+import { TraceEvent, TraceDetail, TraceKind, configureTrace } from "./trace";
 
 let detalhe: TraceDetail = "normal";
-export const setClientDetail = (nivel: TraceDetail) => { detalhe = nivel; };
+
+/*
+ * Um nivel so por documento.
+ *
+ * Havia dois: este, consultado por quem grava daqui, e o de `trace.ts`, que nesta superficie nunca
+ * era configurado e portanto respondia "normal" para sempre. Quem olhava so o primeiro achava que
+ * estava tudo gravando; `saveBlob` olhava o segundo e descartava todo audio em silencio — a
+ * gravacao da conversa falada, que e a razao de o modo completo existir, nunca chegou a acontecer.
+ */
+export const setClientDetail = (nivel: TraceDetail) => {
+  detalhe = nivel;
+  configureTrace({ detail: nivel });
+};
 export const clientDetail = () => detalhe;
 
 type Extra = Partial<Pick<TraceEvent, "data" | "ok" | "ms" | "code" | "round" | "callId" | "actionId" | "blobId">>;

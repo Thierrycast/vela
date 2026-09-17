@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Download, FileText, Flag, Package, Pause, Play, Trash2, Volume2 } from "lucide-react";
 import { TraceEvent, TraceKind, toJsonl } from "./trace";
-import { relatorioCompleto, relatorioDoTurno } from "./trace-report";
+import { relatorioCompleto, relatorioDeUmTurno } from "./trace-report";
 import { readBlob } from "./trace-blobs";
 import { baixarArquivo, carimbo, montarPacote } from "./trace-package";
 import { useTheme } from "./use-settings";
@@ -107,8 +107,10 @@ function DebugPanel() {
       setEmpacotando(false);
     }
   };
-  const relatorioDe = (lista: TraceEvent[], turno: string) =>
-    baixar(`vela-turno-${turno.slice(0, 8)}-${carimbo()}.md`, relatorioDoTurno(lista, { completo: temPrompt }), "text/markdown");
+  // A trilha inteira, e não só a fatia do turno: a fala que abriu um turno de voz foi gravada
+  // antes de ele existir, e só a adoção por enunciado a traz de volta para dentro dele.
+  const relatorioDe = (turno: string) =>
+    baixar(`vela-turno-${turno.slice(0, 8)}-${carimbo()}.md`, relatorioDeUmTurno(visible, turno, { completo: temPrompt }), "text/markdown");
 
   const limpar = () => { void chrome.runtime.sendMessage({ type: "trace:clear" }); setEvents([]); setSelected(null); };
 
@@ -176,7 +178,7 @@ function DebugPanel() {
               <span>{new Date(base).toLocaleTimeString()}</span>
               {total !== undefined && <span className="debug-total">{(total / 1000).toFixed(1)}s no total</span>}
               <span className="debug-count">{list.length} eventos</span>
-              <button className="debug-turn-report" onClick={() => relatorioDe(list, turn)} title="Relatório em Markdown só deste turno">relatório</button>
+              <button className="debug-turn-report" onClick={() => relatorioDe(turn)} title="Relatório em Markdown só deste turno">relatório</button>
             </header>
             {list.map((event) => (
               <button

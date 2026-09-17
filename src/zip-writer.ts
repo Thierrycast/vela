@@ -25,6 +25,15 @@ function dosDateTime(date: Date) {
 
 export type ZipEntry = { name: string; data: Uint8Array };
 
+/*
+ * Bit 11 do campo de flags: "o nome deste arquivo está em UTF-8".
+ *
+ * Sem ele, leitores de ZIP decodificam o nome como CP437 — o padrão histórico do formato — e
+ * "fala do usuário" saía como "fala do usu├írio" no Explorer e no 7-Zip. Os nomes do pacote de
+ * revisão levam o rótulo do áudio, em português, então todo acento virava lixo.
+ */
+const NOME_EM_UTF8 = 0x0800;
+
 export function buildZip(entries: ZipEntry[]): Blob {
   const parts: BlobPart[] = [];
   const central: Uint8Array[] = [];
@@ -40,7 +49,7 @@ export function buildZip(entries: ZipEntry[]): Blob {
     const lv = new DataView(local.buffer);
     lv.setUint32(0, 0x04034b50, true);
     lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0, true);
+    lv.setUint16(6, NOME_EM_UTF8, true);
     lv.setUint16(8, 0, true);
     lv.setUint16(10, time, true);
     lv.setUint16(12, day, true);
@@ -57,7 +66,7 @@ export function buildZip(entries: ZipEntry[]): Blob {
     cv.setUint32(0, 0x02014b50, true);
     cv.setUint16(4, 20, true);
     cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0, true);
+    cv.setUint16(8, NOME_EM_UTF8, true);
     cv.setUint16(10, 0, true);
     cv.setUint16(12, time, true);
     cv.setUint16(14, day, true);

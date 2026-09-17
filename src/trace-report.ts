@@ -87,13 +87,24 @@ function resumo(eventos: TraceEvent[]): string {
  * o texto transcrito, como se ele fosse o fato.
  */
 function voz(eventos: TraceEvent[]): string {
-  const etapas = eventos.filter((evento) => evento.kind.startsWith("audio.") || evento.kind.startsWith("stt.") || evento.kind.startsWith("tts."));
+  // Ordem de início, não de fim: uma etapa medida grava quando termina, e a síntese em streaming só
+  // termina depois de tocar — pela ordem de gravação, "tocou" aparecia antes de "síntese".
+  // Quando duas etapas começam no mesmo instante (a duração é arredondada ao milissegundo), vale a
+  // ordem do pipeline: na reprodução em streaming a síntese e o toque nascem juntos.
+  const inicio = (evento: TraceEvent) => evento.at - (evento.ms ?? 0);
+  const ORDEM: Record<string, number> = { "audio.capture": 0, "stt.partial": 1, "stt.result": 2, "tts.request": 3, "tts.audio": 4, "tts.play": 5 };
+  const etapas = eventos
+    .filter((evento) => evento.kind.startsWith("audio.") || evento.kind.startsWith("stt.") || evento.kind.startsWith("tts."))
+    .sort((primeiro, segundo) => {
+      const diferenca = inicio(primeiro) - inicio(segundo);
+      return Math.abs(diferenca) < 20 ? (ORDEM[primeiro.kind] ?? 9) - (ORDEM[segundo.kind] ?? 9) : diferenca;
+    });
   if (!etapas.length) return "";
 
   const linhas = ["## A conversa falada", ""];
   for (const evento of etapas) {
     const dados = (evento.data ?? {}) as Record<string, unknown>;
-    const quando = hora(evento.at);
+    const quando = hora(inicio(evento));
     const audio = evento.blobId ? ` · áudio \`${evento.blobId.slice(0, 8)}\`` : "";
 
     if (evento.kind === "audio.capture") {
@@ -255,9 +266,54 @@ function avulsos(eventos: TraceEvent[]): string {
   return linhas.join("\n") + "\n";
 }
 
+/**
+ * A fala que abriu o turno volta para dentro dele.
+ *
+ * A captura, os rascunhos e a transcrição acontecem antes de o turno existir — o turno nasce da
+ * transcrição —, então esses eventos ficam carimbados como "sem turno" e o relatório mostrava a
+ * resposta da Vela sem a pergunta que a causou. A costura é pelo id do enunciado, que viaja do
+ * offscreen até o evento de entrada do turno: nada aqui é deduzido por proximidade no tempo.
+ */
+function adotarFalaDoTurno(todos: Turno[]): Turno[] {
+  const soltos = todos.find((turno) => turno.id === SEM_TURNO);
+  if (!soltos) return todos;
+  const donoDe = new Map<string, string>();
+  for (const turno of todos) {
+    if (turno.id === SEM_TURNO) continue;
+    const entrada = turno.eventos.find((evento) => evento.kind === "user.input");
+    const id = (entrada?.data as { enunciado?: string } | undefined)?.enunciado;
+    if (id) donoDe.set(id, turno.id);
+  }
+  if (!donoDe.size) return todos;
+
+  const sobraram: TraceEvent[] = [];
+  const adotados = new Map<string, TraceEvent[]>();
+  for (const evento of soltos.eventos) {
+    const id = (evento.data as { enunciado?: string } | undefined)?.enunciado;
+    const dono = id ? donoDe.get(id) : undefined;
+    if (!dono) { sobraram.push(evento); continue; }
+    adotados.set(dono, [...(adotados.get(dono) ?? []), { ...evento, turn: dono }]);
+  }
+  return todos
+    .map((turno) => turno.id === SEM_TURNO ? { ...turno, eventos: sobraram } : { ...turno, eventos: [...turno.eventos, ...(adotados.get(turno.id) ?? [])] })
+    .filter((turno) => turno.eventos.length);
+}
+
+/**
+ * Um turno só, mas com a fala que o abriu.
+ *
+ * Recebe a trilha inteira e o turno desejado, e não apenas os eventos daquele turno: a captura e a
+ * transcrição estão fora dele até a adoção acontecer, e quem passasse só a fatia já teria perdido
+ * exatamente o que se quer ler.
+ */
+export function relatorioDeUmTurno(eventos: TraceEvent[], turno: string, options: ReportOptions = {}): string {
+  const alvo = adotarFalaDoTurno(agruparPorTurno(eventos)).find((item) => item.id === turno);
+  return alvo ? relatorioDoTurno(alvo.eventos, options) : "# Turno vazio\n";
+}
+
 /** Vários turnos num arquivo só, do mais recente para o mais antigo. */
 export function relatorioCompleto(eventos: TraceEvent[], options: ReportOptions = {}): string {
-  const todos = agruparPorTurno(eventos).reverse();
+  const todos = adotarFalaDoTurno(agruparPorTurno(eventos)).reverse();
   const turnos = todos.filter((turno) => turno.id !== SEM_TURNO);
   const soltos = todos.find((turno) => turno.id === SEM_TURNO);
   const cabecalho = [

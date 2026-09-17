@@ -518,6 +518,49 @@ A corrida que isso já quase custou continua tratada: `voice:stop` só responde 
 terminar, porque `background.ts` fecha o documento offscreen assim que a mensagem resolve — e o
 pacote ainda estaria sendo montado.
 
+### O offscreen não enxerga `chrome.storage`, e a voz rodava com os padrões
+
+Descoberto só quando a voz foi dirigida de ponta a ponta num Chrome real, com microfone falso: a
+sessão tinha o rastreio completo ligado e nenhum áudio foi guardado. O evento de abertura do
+microfone dizia `rastreio: "normal"`.
+
+Um documento offscreen só tem `chrome.runtime`. `loadSettings()` chamado de lá não falha — encontra
+`chrome.storage` indefinido e devolve os padrões, em silêncio. Toda a voz usava esses padrões:
+servidor, modelo de transcrição, voz, velocidade e o nível de rastreio. Passou despercebido porque
+os padrões coincidem com a configuração do próprio desenvolvedor; trocar a voz nas Configurações
+simplesmente não mudava nada, e nada dava erro.
+
+Agora o offscreen pede as preferências ao background (`settings:get`). E o nível de detalhe virou
+um só por documento: `setClientDetail` também configura `trace.ts`, porque `saveBlob` consultava o
+nível de lá — que nesta superfície nunca era configurado e respondia "normal" para sempre.
+
+### A fala tem nome, e é ele que a devolve ao turno
+
+A captura, os rascunhos do texto ao vivo e a transcrição acontecem **antes** de o turno existir — o
+turno nasce da transcrição. Esses eventos ficavam carimbados como "sem turno", e o relatório de uma
+conversa falada mostrava a resposta da Vela sem a pergunta que a causou.
+
+Cada enunciado ganha um id no início da fala (`onStart` do VAD). Ele vai em todo evento da
+captura, viaja com `voice:transcript` até o background e entra no `user.input` do turno. O
+relatório adota os eventos soltos pelo id — nunca por proximidade no tempo: uma fala descartada no
+mesmo segundo pertence a outro enunciado e continua de fora.
+
+O relatório real de uma sessão já mostrou por que isso importa: o texto ao vivo escreveu
+"resultados **imediatos**" enquanto o Whisper em lote ouviu "resultados **e me diga**". Sem os
+rascunhos junto da transcrição, a divergência entre os dois modelos não aparecia.
+
+### O limite da transcrição não cancelava nada
+
+`drain()` criava um `AbortController` com limite de 20 s e nunca entregava o sinal ao `fetch`. Um
+servidor de transcrição travado segurava a fila para sempre: a pessoa continuava falando e nenhum
+trecho seguinte era transcrito. O sinal agora chega à requisição, e o estouro sai na trilha como
+`tempo_esgotado`, distinto de falha.
+
+### Nome de arquivo no zip precisa declarar UTF-8
+
+O pacote de revisão nomeia os áudios pelo rótulo, em português. Sem o bit 11 das flags, leitores de
+ZIP decodificam o nome como CP437 e "fala do usuário" abria como "fala do usu├írio".
+
 ### Velocidade da fala, ajustada no cliente
 
 O servidor de voz fala num ritmo fixo por voz (é o piper vs. kokoro que decide a velocidade
