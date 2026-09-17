@@ -129,6 +129,3 @@ export function evictTab(tabId: number) {
   for (const [id, grave] of graves) if (grave.tabId === tabId) graves.delete(id);
   for (const key of lastUrl.keys()) if (key.startsWith(`${tabId}:`)) lastUrl.delete(key);
 }
-
-/** Só para diagnóstico e testes: quantos refs vivos e quantas lápides. */
-export const refRegistrySize = () => ({ routes: routes.size, graves: graves.size });

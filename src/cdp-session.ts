@@ -43,9 +43,6 @@ export const cdpAvailable = () => typeof chrome !== "undefined" && !!chrome.debu
 /** O turno decide se a promoção pode acontecer; a decisão não é por ação. */
 export function configureSticky(enabled: boolean) { allowSticky = enabled; }
 
-export const isAttached = (tabId: number) => states.get(tabId)?.attached ?? false;
-export const isSticky = (tabId: number) => states.get(tabId)?.sticky ?? false;
-
 async function attach(tabId: number): Promise<boolean> {
   const state = stateOf(tabId);
   if (state.attached) return true;
@@ -126,13 +123,25 @@ export async function releaseObserver(tabId: number) {
   if (!state.sticky && !state.holders.size) await detach(tabId);
 }
 
-/** Fim do turno: nada de depurador anexado sobrando entre uma tarefa e outra. */
+/** Quem quiser ser avisado de que a sessão acabou — hoje, a gravação de console e rede. */
+const onEnd: Array<(tabId: number) => void> = [];
+export const whenSessionEnds = (handler: (tabId: number) => void) => { onEnd.push(handler); };
+
+/**
+ * Fim do turno: nada de depurador anexado sobrando entre uma tarefa e outra.
+ *
+ * Avisar quem observava é obrigatório, e não cortesia. Desanexar apaga os domínios do protocolo
+ * (`Network.enable` e companhia) mas não apaga a anotação de "esta aba está sendo observada" que
+ * vive em `page-observability.ts` — e uma anotação sem gravação faz a leitura seguinte responder
+ * "já estava gravando" sobre um buffer que ninguém estava alimentando. Silêncio que parece dado.
+ */
 export async function endCdpSessions() {
   for (const [tabId, state] of states) {
     state.sticky = false;
     state.actions = 0;
     state.holders.clear();
     await detach(tabId);
+    for (const handler of onEnd) handler(tabId);
   }
   states.clear();
 }

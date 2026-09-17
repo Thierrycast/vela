@@ -72,18 +72,6 @@ export async function preciseHover(tabId: number, point: Point): Promise<Outcome
   }, indisponivel);
 }
 
-/** Texto no elemento em foco. `Input.insertText` não simula teclas, mas passa por `isTrusted`. */
-export async function preciseType(tabId: number, text: string): Promise<Outcome> {
-  return withSession(tabId, "action", async () => {
-    try {
-      await send(tabId, "Input.insertText", { text });
-      return { ok: true, detail: "texto inserido pelo caminho confiável" };
-    } catch (error) {
-      return { ok: false, detail: error instanceof Error ? error.message : "o comando de inserção falhou" };
-    }
-  }, indisponivel);
-}
-
 /**
  * Preencher um campo pelo caminho confiável, do foco ao texto, **num anexo só**.
  *

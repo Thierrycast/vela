@@ -9,7 +9,7 @@ import { beginTurn, record as traceRecord, span } from "./trace";
 import { collectBrowserContext, clearAttachments } from "./browser-context";
 import { recordTurn } from "./action-stats";
 import { cancelDelegated } from "./background-task";
-import { noteSource } from "./domain-policy";
+import { noteSource, resetDomainMemory } from "./domain-policy";
 import * as conversation from "./conversation";
 
 const newId = () => crypto.randomUUID();
@@ -34,6 +34,12 @@ export async function snapshot(): Promise<LoopSnapshot> {
 export async function reset() {
   abort();
   events = []; telemetry = [];
+  /*
+   * Conversa nova, decisões novas: o que o usuário autorizou visitar na conversa anterior não
+   * continua valendo aqui. Manter a memória de proveniência entre conversas iria alargando o que
+   * passa sem confirmação até o gate não significar mais nada.
+   */
+  resetDomainMemory();
   await conversation.reset();
 }
 

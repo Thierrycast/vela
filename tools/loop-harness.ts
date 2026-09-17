@@ -85,13 +85,21 @@ function installChrome(store: Record<string, unknown>, page: ReturnType<typeof f
     },
     notifications: { create: async () => "id" },
     tabs: {
-      query: async () => [{ id: 7, windowId: 1, url: "https://exemplo.com", title: "Exemplo", active: true }],
+      // A sessao tem duas abas: a 7 esta em foco e a 8 fica atras. E a 8 que exercita o
+      // enderecamento por numero — com a 7 a regra nem chega a ser consultada, porque ela e a ativa.
+      query: async (consulta?: { groupId?: number; active?: boolean }) => {
+        const ativa = { id: 7, windowId: 1, url: "https://exemplo.com", title: "Exemplo", active: true };
+        const fundo = { id: 8, windowId: 1, url: "https://exemplo.com/outra", title: "Outra", active: false };
+        return consulta?.groupId !== undefined ? [ativa, fundo] : [ativa];
+      },
       remove: async () => undefined,
       // Um pixel JPEG de mentira: o que importa no teste é o caminho da imagem até a mensagem.
       captureVisibleTab: async () => "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
       update: async () => { setTimeout(() => navListeners.forEach((fn) => fn({ tabId: 7, frameId: 0, url: "https://destino.com" })), 10); },
       create: async () => ({ id: 8 }),
-      get: async () => ({ id: 7, url: "https://exemplo.com" }),
+      // Devolve a aba pedida, senao o cenario de enderecamento por numero acabaria lendo a 7
+      // e passando por verdadeiro sem ter exercitado nada.
+      get: async (id: number) => ({ id, url: id === 8 ? "https://exemplo.com/outra" : "https://exemplo.com" }),
       sendMessage: async (_tabId: number, message: { type: string; action?: BrowserAction }, options?: { frameId?: number }) => page(message, options?.frameId ?? 0),
     },
     webNavigation: {
@@ -368,7 +376,7 @@ await run("aba de fora e recusada", [
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
 
 await run("aba da sessao e aceita por numero", [
-  [delta("Lendo a aba 7."), toolCall("c1", "browser_action", { action: "extractPage", tabId: 7 }), DONE],
+  [delta("Lendo a aba de tras."), toolCall("c1", "browser_action", { action: "extractPage", tabId: 8 }), DONE],
   [delta("Pronto."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
 
@@ -379,6 +387,12 @@ await run("modo preciso move o ponteiro de verdade", [
   [delta("Agora abriu."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto", preciseMode: true } });
 console.log("CDP:", cdpLog.join(" → ") || "(nao escalou)");
+
+// 18e. Habilidade de enderecar aba desligada: o tabId deixa de ser aceito, e a recusa diz onde ligar.
+await run("aba por numero com a habilidade desligada", [
+  [delta("Lendo a outra aba."), toolCall("c1", "browser_action", { action: "extractPage", tabId: 8 }), DONE],
+  [delta("Entendi."), DONE],
+], { agent: { ...defaultSettings.agent, autonomy: "auto" }, capabilities: { ...defaultSettings.capabilities, tabAddressing: false } });
 
 // 18. O registro de refs, exercitado direto — é lógica pura e não precisa do loop inteiro.
 // O que importa aqui é a **estabilidade**: o mesmo elemento, relido, tem de receber o mesmo ref.

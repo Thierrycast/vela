@@ -3,6 +3,7 @@ import { Activity, Download, RotateCcw, Trash2, Upload } from "lucide-react";
 import { AppSettings, LogEntry } from "./types";
 import { clearLogs, loadLogs } from "./storage";
 import { ActionStats, clearActionStats, loadActionStats } from "./action-stats";
+import { clearRouteCache, routeCacheSize } from "./route-cache";
 import { StorageSlice, buildBackup, clearSlice, formatBytes, measureStorage, resetPreferences, restoreBackup } from "./maintenance";
 import { clearTrace, readTrace, toJsonl, traceSize } from "./trace";
 function Row({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
@@ -27,6 +28,7 @@ export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>
   const [includeKeys, setIncludeKeys] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   const [trace, setTrace] = useState<{ events: number; bytes: number } | null>(null);
+  const [rotas, setRotas] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = () => {
@@ -34,6 +36,7 @@ export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>
     void loadActionStats().then(setStats);
     void measureStorage().then(setSlices);
     void traceSize().then(setTrace);
+    void routeCacheSize().then(setRotas);
   };
   useEffect(refresh, []);
 
@@ -105,6 +108,17 @@ export function AdvancedPanel({ update }: { update: (patch: Partial<AppSettings>
           <span className="status-badge">{(stats.toolCalls / Math.max(1, stats.rounds)).toFixed(2)}</span>
         </Row>
       </>}
+    </div>
+
+    <h2 className="subsection">Caminhos lembrados</h2>
+    <p className="picker-intro">Por onde a Vela chega a cada coisa nos sites que você usa, para não redescobrir o mesmo caminho a cada conversa. É palpite conferido na hora, nunca resposta pronta, e some sozinho quando erra ou quando envelhece.</p>
+    <div className="settings-group">
+      <Row label="Caminhos guardados" description="Só domínio, o que se procurava e um seletor. Nada do conteúdo das páginas.">
+        <span className="status-badge">{rotas === null ? "—" : rotas === 0 ? "nenhum ainda" : `${rotas} caminho(s)`}</span>
+      </Row>
+      <Row label="Esquecer tudo" description="Útil depois que um site muda de layout: ela reaprende do zero na próxima vez.">
+        <button className="secondary-button" onClick={() => void clearRouteCache().then(refresh)} disabled={!rotas}>Esquecer caminhos</button>
+      </Row>
     </div>
 
     <h2 className="subsection">Trilha de execução</h2>

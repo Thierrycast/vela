@@ -48,6 +48,7 @@ const CAPABILITY_ROWS: Array<{ key: keyof Capabilities; label: string; descripti
   { key: "readConsole", label: "Ler o console da página", description: "Deixa a Vela ver os erros e mensagens que a página escreve para si mesma — muitas vezes o motivo de uma ação não ter funcionado está escrito ali. Usa o depurador, com a faixa de aviso. Nasce desligado." },
   { key: "readNetwork", label: "Ler a rede da página", description: "Mostra as requisições que o site faz, o que às vezes revela o endereço que devolve os dados prontos e economiza uma dezena de cliques. Nunca guarda cabeçalhos, e apaga token e senha que apareçam no endereço. Usa o depurador, com a faixa de aviso. Nasce desligado." },
   { key: "routeCache", label: "Lembrar caminhos por site", description: "Guarda por onde se chega a cada coisa nos sites que você usa — o campo de busca daqui, o botão de enviar dali — para não redescobrir o mesmo caminho a cada conversa. Fica só neste navegador, é sempre conferido antes de usar, e é esquecido assim que erra. Nasce desligado." },
+  { key: "tabAddressing", label: "Agir em aba de segundo plano", description: "Deixa a Vela trabalhar numa aba pelo número dela, sem trazê-la para a frente — é o que permite processar uma lista em várias abas sem arrancar a sua tela a cada item. Só alcança abas que ela mesma abriu." },
   { key: "delegate", label: "Tarefas em segundo plano", description: "Deixa a Vela mandar uma tarefa longa para rodar por trás, numa aba própria, enquanto continua conversando com você. Até duas ao mesmo tempo; o resto espera em fila." },
 ];
 

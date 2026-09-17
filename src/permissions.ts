@@ -43,11 +43,6 @@ export async function revokeHostAccess(): Promise<boolean> {
   try { return await chrome.permissions.remove(ALL_URLS); } catch { return false; }
 }
 
-export const optionalPermission = async (name: chrome.runtime.ManifestPermission): Promise<boolean> => {
-  if (typeof chrome === "undefined" || !chrome.permissions?.contains) return true;
-  try { return await chrome.permissions.contains({ permissions: [name] }); } catch { return false; }
-};
-
 /**
  * A recusa por falta de acesso precisa dizer o que fazer, e não pode parecer limitação da página.
  * Sem esta distinção o modelo trata como "a Vela não consegue agir aqui" e procura outro caminho —

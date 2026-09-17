@@ -81,6 +81,9 @@ async function routeTab(action: BrowserAction, activeId: number | undefined): Pr
   if (action.tabId === undefined || action.tabId === activeId) {
     return { ok: true, tabId: activeId ?? -1, frameId: 0, ref: undefined };
   }
+  if (!(await loadSettings()).capabilities.tabAddressing) {
+    return { ok: false, failure: failure("denied", "Agir numa aba pelo número está desligado nas configurações da Vela (Configurações → Habilidades). Traga a aba para a frente com tab_manage e trabalhe nela, ou peça ao usuário para ligar essa habilidade.") };
+  }
   if (!(await isSessionTab(action.tabId))) {
     return { ok: false, failure: failure("denied", `A aba ${action.tabId} não é da sessão da Vela — ela é do usuário, e você não age nela por número. Use tab_manage com op "list" para ver quais abas são suas.`) };
   }

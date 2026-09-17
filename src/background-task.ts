@@ -24,7 +24,6 @@ const queue: Array<() => Promise<void>> = [];
 let cancelled = false;
 
 export const isDelegatedRunning = () => running > 0;
-export const delegatedQueueSize = () => queue.length;
 
 /** O "parar" do painel vale para o que está em segundo plano também — senão a pessoa aperta parar
  *  e a Vela continua clicando em algum lugar que ela não está vendo. */

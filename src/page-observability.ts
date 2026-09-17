@@ -1,4 +1,4 @@
-import { enableDomain, releaseObserver, withSession } from "./cdp-session";
+import { enableDomain, releaseObserver, whenSessionEnds, withSession } from "./cdp-session";
 
 /**
  * O que a página diz para si mesma: console e rede.
@@ -144,8 +144,18 @@ export function stopWatching(tabId: number) {
   watching.console.delete(tabId);
   watching.network.delete(tabId);
   buffers.delete(tabId);
-  releaseObserver(tabId);
+  void releaseObserver(tabId);
 }
+
+/*
+ * A gravação morre junto com a sessão do depurador.
+ *
+ * Sem isto a marca de "estou observando esta aba" sobrevivia ao fim do turno, enquanto os domínios
+ * do protocolo tinham sido desligados junto com o anexo. Na tarefa seguinte, `startWatching`
+ * responderia `jaEstava: true` — e a leitura viria vazia, parecendo que a página não fez nada,
+ * quando na verdade ninguém estava ouvindo.
+ */
+whenSessionEnds(stopWatching);
 
 export function readConsole(tabId: number, pattern: string | undefined, limit: number): ConsoleEntry[] {
   const all = bufferOf(tabId).console;
