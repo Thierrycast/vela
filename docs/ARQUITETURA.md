@@ -1114,7 +1114,7 @@ se espalhava pela barra.
 painel → chat:submit ──► agent-loop (background)
                           │
                           ├─ collectBrowserContext + buildSystemPrompt
-                          ├─ streamChat ──► OmniRoute
+                          ├─ streamChat ──► gateway de IA
                           ├─ tool_call ──► tool-runner ──► executeAction
                           │                                 ├─ gate de autonomia
                           │                                 ├─ beginTrace (cursor visível)

@@ -127,7 +127,7 @@ const webSearchTool = {
   type: "function",
   function: {
     name: "web_search",
-    description: "Pesquisa na web pelo OmniRoute. Use para descobrir URLs e fatos.",
+    description: "Pesquisa na web pelo gateway configurado. Use para descobrir URLs e fatos.",
     parameters: { type: "object", properties: { query: { type: "string" }, max_results: { type: "number" } }, required: ["query"] },
   },
 };
