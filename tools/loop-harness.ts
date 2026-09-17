@@ -65,6 +65,8 @@ function fakePage(): (message: { type: string; action?: BrowserAction }, frameId
 }
 
 const cdpLog: string[] = [];
+/** As chaves de cada gravação no storage: é o que mostra se a conversa grava só o que mudou. */
+const gravacoes: string[][] = [];
 /** O que o caminho confiável conseguiu escrever no campo travado. Null enquanto ninguém escreveu. */
 let textoInserido: string | null = null;
 
@@ -73,7 +75,11 @@ function installChrome(store: Record<string, unknown>, page: ReturnType<typeof f
   const sessionStore: Record<string, unknown> = { "vela:session": { groupId: 1, title: "teste", tabIds: [7] } };
   (globalThis as Record<string, unknown>).chrome = {
     storage: {
-      local: { get: async (key: string) => (key in store ? { [key]: store[key] } : {}), set: async (values: Record<string, unknown>) => { Object.assign(store, values); }, remove: async (key: string) => { delete store[key]; } },
+      local: {
+        get: async (key: string | string[] | null) => key === null ? { ...store } : Object.fromEntries((Array.isArray(key) ? key : [key]).filter((item) => item in store).map((item) => [item, store[item]])),
+        set: async (values: Record<string, unknown>) => { Object.assign(store, values); gravacoes.push(Object.keys(values)); },
+        remove: async (key: string | string[]) => { for (const item of Array.isArray(key) ? key : [key]) delete store[item]; },
+      },
       // A sessão precisa existir de verdade: sem ela, tab_manage recusa por "não há grupo" e o
       // teste não chega a exercitar a regra que importa — fechar aba de fora é proibido.
       session: {
@@ -132,7 +138,7 @@ const DONE = "data: [DONE]\n\n";
  *  cenário que precisa clicar no que acabou de ler só descobre o número na hora. */
 type Chunk = string | (() => string);
 
-async function run(name: string, rounds: Chunk[][], settings: Partial<AppSettings> = {}, decision: "allow" | "deny" = "allow", surfaces = 1, antes?: () => Promise<void>) {
+async function run(name: string, rounds: Chunk[][], settings: Partial<AppSettings> = {}, decision: "allow" | "deny" = "allow", surfaces = 1, antes?: () => Promise<void>, pedido = "mensagem de teste") {
   emitted.length = 0; wire.length = 0; cdpLog.length = 0; autoDecision = decision; superficies = surfaces;
   const store: Record<string, unknown> = {
     "vela:settings": { ...defaultSettings, ...settings, providers: [{ ...defaultSettings.providers[0], apiKey: "k", defaultModel: "m" }] },
@@ -150,7 +156,7 @@ async function run(name: string, rounds: Chunk[][], settings: Partial<AppSetting
     return new Response(sseStream(chunks), { status: 200, headers: { "x-omniroute-provider": "teste" } });
   };
 
-  await agentLoop.submit("mensagem de teste", emit);
+  await agentLoop.submit(pedido, emit);
 
   const messages = await conversation.all();
   console.log(`\n=== ${name} ===`);
@@ -238,6 +244,7 @@ await run("repetição idêntica é bloqueada", [
 
 // 8.6. A captura vira mensagem do usuário com imagem — resposta de ferramenta não carrega imagem.
 await run("screenshot anexa a imagem ao histórico", [
+  [delta("Vou ler antes."), toolCall("c0", "browser_action", { action: "extractPage" }), DONE],
   [delta("Vou olhar a tela."), toolCall("c1", "browser_action", { action: "screenshot" }), DONE],
   [delta("Vi o que precisava."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
@@ -541,4 +548,120 @@ console.log("\n=== gate de dominio reconhece link sem esquema ===");
   console.log(`  link do retrato conta como da página: ${classify("https://golpe-exemplo.com.br/login") === "page" ? "sim" : "NAO"}`);
   console.log(`  domínio digitado sem https conta como do usuário: ${classify("https://github.com/x") === "user" ? "sim" : "NAO"}`);
   console.log(`  número de versão não vira domínio: ${classify("https://v1.2") === "unknown" ? "sim" : "NAO"}`);
+}
+
+// A escada de leitura. O modelo que vai direto à captura para ler texto recebe a recusa com o degrau
+// barato; depois de ler por texto, a mesma captura roda. E se a pessoa pediu a imagem, não há
+// escada a subir.
+console.log("\n=== escada: captura antes de ler é adiada ===");
+{
+  await run("captura direto", [
+    [delta("Vou olhar."), toolCall("c1", "browser_action", { action: "screenshot" }), DONE],
+    [delta("Lendo por texto."), toolCall("c2", "browser_action", { action: "extractPage", extractMode: "text" }), DONE],
+    [delta("Agora sim, a imagem."), toolCall("c3", "browser_action", { action: "screenshot" }), DONE],
+    [delta("Pronto."), DONE],
+  ], { agent: { ...defaultSettings.agent, autonomy: "auto" } }, "allow", 1, undefined, "o que tem nesta página?");
+  const tools = (await conversation.all()).filter((item) => item.role === "tool");
+  console.log(`  primeira captura recusada com o degrau barato: ${tools[0]?.content.startsWith("ERRO [escada]") ? "sim" : "NAO"}`);
+  console.log(`  captura depois da leitura por texto rodou: ${(await conversation.all()).some((item) => item.images?.length) ? "sim" : "NAO"}`);
+
+  await run("pedido visual", [
+    [delta("Tirando o print."), toolCall("c1", "browser_action", { action: "screenshot" }), DONE],
+    [delta("Pronto."), DONE],
+  ], { agent: { ...defaultSettings.agent, autonomy: "auto" } }, "allow", 1, undefined, "tira um print dessa página");
+  console.log(`  pedido de imagem captura direto: ${(await conversation.all()).some((item) => item.images?.length) ? "sim" : "NAO"}`);
+
+  await run("modelo sem visão", [
+    [delta("Lendo."), toolCall("c1", "browser_action", { action: "extractPage" }), DONE],
+    [delta("Olhando."), toolCall("c2", "browser_action", { action: "screenshot" }), DONE],
+    [delta("Pronto."), DONE],
+  ], { agent: { ...defaultSettings.agent, autonomy: "auto" } }, "allow", 1, async () => {
+    const atual = (await chrome.storage.local.get("vela:settings"))["vela:settings"] as AppSettings;
+    await chrome.storage.local.set({ "vela:settings": { ...atual, providers: atual.providers.map((item) => ({ ...item, capabilities: { ...item.capabilities, vision: false } })) } });
+  });
+  const enviado = JSON.parse(wire[0]) as { tools: Array<{ function: { name: string; parameters: { properties: { action?: { enum?: string[] } } } } }> };
+  const acoes = enviado.tools.find((tool) => tool.function.name === "browser_action")?.function.parameters.properties.action?.enum ?? [];
+  const recusou = (await conversation.all()).some((item) => item.role === "tool" && item.content.includes("não enxerga imagens"));
+  console.log(`  sem visão, screenshot nem é oferecido e é recusado se pedido: ${!acoes.includes("screenshot") && acoes.includes("extractPage") && recusou ? "sim" : "NAO"}`);
+}
+
+// Resultados grandes de pedidos anteriores não viajam de novo em toda rodada do pedido seguinte.
+console.log("\n=== contexto: resultado grande de pedido anterior é resumido ===");
+{
+  await run("pedido longo", [
+    [delta("Lendo."), toolCall("c1", "browser_action", { action: "extractPage" }), DONE],
+    [delta("Li."), DONE],
+  ], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+  const lido = (await conversation.all()).find((item) => item.role === "tool")!;
+  await conversation.patch(lido.id, { content: `${lido.content}${"x".repeat(5_000)}` });
+  wire.length = 0;
+  (globalThis as Record<string, unknown>).fetch = async (_url: string, init: { body: string }) => {
+    wire.push(init.body);
+    return new Response(sseStream([delta("Ok."), DONE]), { status: 200 });
+  };
+  await agentLoop.submit("e agora?", emit);
+  const corpo = JSON.parse(wire[0]) as { messages: Array<{ role: string; content: string }> };
+  const antigo = corpo.messages.find((item) => item.role === "tool")?.content ?? "";
+  console.log(`  resultado anterior chegou resumido: ${antigo.length < 1_000 && antigo.includes("resumido") ? "sim" : "NAO"} (${antigo.length} caracteres)`);
+}
+
+// O degrau aceito pelo gateway é lembrado: a recusa de `stream_options` custa uma ida só, não uma
+// por rodada.
+console.log("\n=== provedor: degrau aceito é lembrado ===");
+{
+  let tentativas = 0;
+  await run("gateway sem stream_options", [[delta("Ok."), DONE]], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+  (globalThis as Record<string, unknown>).fetch = async (_url: string, init: { body: string }) => {
+    tentativas += 1;
+    if (init.body.includes("stream_options")) return new Response(JSON.stringify({ error: "stream_options is not supported" }), { status: 400 });
+    return new Response(sseStream([delta("Ok."), DONE]), { status: 200 });
+  };
+  await agentLoop.submit("um", emit);
+  const primeira = tentativas;
+  await agentLoop.submit("dois", emit);
+  console.log(`  primeira vez aprende com uma recusa, a segunda vai direto: ${primeira === 2 && tentativas === 3 ? "sim" : "NAO"} (${primeira}, ${tentativas - primeira})`);
+}
+
+// A conversa grava só o que mudou, e o formato antigo de chave única migra sozinho.
+console.log("\n=== armazenamento: grava só a conversa que mudou ===");
+{
+  const loja: Record<string, unknown> = {
+    "vela:settings": { ...defaultSettings, providers: [{ ...defaultSettings.providers[0], apiKey: "k", defaultModel: "m" }] },
+    "vela:conversations": [
+      { id: "antiga-1", title: "antiga um", updatedAt: 1, messages: [{ id: "a", role: "user", content: "um", createdAt: 1, status: "complete" }] },
+      { id: "antiga-2", title: "antiga dois", updatedAt: 2, messages: [{ id: "b", role: "user", content: "dois", createdAt: 2, status: "complete" }] },
+    ],
+  };
+  installChrome(loja, fakePage());
+  const modulo = await import("../src/storage");
+  const indice = await modulo.loadConversationIndex();
+  console.log(`  migrou para chave por conversa: ${indice.length === 2 && "vela:conversa:antiga-1" in loja && !("vela:conversations" in loja) ? "sim" : "NAO"}`);
+  gravacoes.length = 0;
+  await modulo.saveConversationChanges(indice, [{ id: "antiga-2", title: "antiga dois", updatedAt: 3, messages: [] }], []);
+  const chaves = gravacoes.flat();
+  console.log(`  gravou só a conversa alterada e o índice: ${chaves.includes("vela:conversa:antiga-2") && !chaves.includes("vela:conversa:antiga-1") ? "sim" : "NAO"}`);
+}
+
+// A narração: a resposta começa a ser falada enquanto ainda está sendo escrita, sem repetir o que já
+// foi falado no fim do turno, sem antecipar uma desistência que o loop pode descartar, e sem ler
+// código em voz alta.
+console.log("\n=== voz: a resposta é falada enquanto é escrita ===");
+{
+  const { criarNarrador } = await import("../src/voice-narrator");
+  const ditas: string[] = [];
+  const narrador = criarNarrador((frase) => ditas.push(frase));
+  const resposta = "Abri o carrinho e conferi os itens. São três produtos no total. O frete sai por vinte reais";
+  for (const pedaco of resposta.match(/.{1,7}/g) ?? []) narrador.pedaco("m1", pedaco);
+  console.log(`  falou antes de terminar: ${ditas.length >= 2 ? "sim" : "NAO"} (${ditas.length} trecho(s))`);
+  console.log(`  primeira frase inteira: ${ditas[0] === "Abri o carrinho e conferi os itens." ? "sim" : "NAO"}`);
+  console.log(`  o fim que não fechou frase sobra para o final: ${narrador.restante("m1", resposta) === "O frete sai por vinte reais" ? "sim" : "NAO"}`);
+
+  const comRecusa = criarNarrador((frase) => ditas.push(`recusa:${frase}`));
+  comRecusa.pedaco("m2", "Não consigo fazer isso agora, desculpe. ");
+  console.log(`  desistência do modelo rápido não é falada: ${!ditas.some((item) => item.startsWith("recusa:")) ? "sim" : "NAO"}`);
+
+  const comCodigo = criarNarrador(() => undefined);
+  const trecho = "Olha o exemplo:\n```js\nconst x = 1. Isso aqui. \n";
+  comCodigo.pedaco("m3", trecho);
+  console.log(`  bloco de código aberto não vira fala: ${comCodigo.jaFalou("m3") === false ? "sim" : "NAO"}`);
 }

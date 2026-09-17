@@ -1,4 +1,4 @@
-import { Fragment, ReactNode, useState } from "react";
+import { Fragment, ReactNode, memo, useState } from "react";
 import { Check, Copy } from "lucide-react";
 
 /**
@@ -80,7 +80,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
 const splitRow = (line: string) => line.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((cell) => cell.trim());
 const isDivider = (line: string) => /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(line) && line.includes("-");
 
-export function Markdown({ text }: { text: string }) {
+function MarkdownView({ text }: { text: string }) {
   const lines = text.split("\n");
   const blocks: ReactNode[] = [];
   let cursor = 0;
@@ -166,3 +166,13 @@ export function Markdown({ text }: { text: string }) {
 
   return <div className="markdown">{blocks}</div>;
 }
+
+/*
+ * Memorizado pelo texto.
+ *
+ * Cada token do streaming atualiza a lista de mensagens, e a lista inteira renderizava de novo —
+ * inclusive todas as respostas antigas, cada uma reinterpretando o próprio Markdown e o realce de
+ * código. Numa conversa longa isso era o painel travando enquanto a Vela escrevia. Com o texto
+ * igual, a resposta antiga não é tocada; só a que está chegando é refeita.
+ */
+export const Markdown = memo(MarkdownView);

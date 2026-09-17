@@ -143,7 +143,18 @@ async function runTracedAction(action: BrowserAction, actionId: string, trace: T
   const target = resolved?.element ?? null;
 
   // Rola antes de mirar: senão o cursor persegue a posição que o elemento tinha.
-  if (target) { target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior }); await new Promise((resolve) => requestAnimationFrame(resolve)); }
+  /*
+   * Esperar um quadro só faz sentido numa aba visível.
+   *
+   * Aba em segundo plano não desenha, e `requestAnimationFrame` nela simplesmente não dispara até a
+   * aba voltar à frente. Agir numa aba pelo `tabId` — o que o lote multi-aba faz o tempo todo —
+   * parava aqui até estourar o limite da ação e voltava "a página não respondeu", numa página que
+   * estava perfeitamente pronta. O teto curto garante que ninguém fique preso esperando pintura.
+   */
+  if (target) {
+    target.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+    if (document.visibilityState === "visible") await Promise.race([new Promise((resolve) => requestAnimationFrame(resolve)), new Promise((resolve) => setTimeout(resolve, 50))]);
+  }
 
   // A viagem do cursor é o caminho da ação, não um enfeite paralelo.
   await traceLayer.begin(actionId, target, trace, ghost);

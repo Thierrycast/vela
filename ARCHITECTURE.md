@@ -22,6 +22,101 @@ O gargalo nunca foi capacidade: era **número de rodadas**. A Vela fazia quase t
 idas ao modelo onde deveriam bastar duas. As decisões abaixo atacam isso, e as três últimas pagam
 a conta de segurança que o ganho de alcance criou.
 
+### A escada de ferramentas: a captura de tela é o último degrau
+
+O prompt sempre disse que a captura não é a primeira leitura, e mesmo assim ela era. O padrão
+observado no uso real: pergunta-se "o que tem nesta página" e a resposta vem de um `screenshot` —
+segundos de espera, milhares de tokens de imagem e reconhecimento de letra em pixel para ler um
+texto que o DOM entrega em milissegundos.
+
+Três causas, e nenhuma delas era o modelo ser teimoso:
+
+1. **A leitura padrão não traz texto.** `extractPage` em modo `outline` devolve estrutura e refs —
+   serve para agir, não para ler. Quem perguntava o preço não achava o preço ali e ia para a imagem.
+   O modo `text` existia e quase não aparecia no prompt.
+2. **No modo `text`, o texto vinha depois da árvore** e dividia com ela um orçamento só. Numa página
+   grande a árvore comia quase tudo, e o conteúdo — a razão do pedido — chegava cortado.
+3. **Nada impedia a captura.** Instrução que o modelo pode ignorar é sugestão.
+
+Agora a escada é regra: `find` → `extractPage` → `extractPage` com `extractMode: "text"` (com `ref`,
+só aquele bloco) → `evaluateScript` → `screenshot`. No modo texto o conteúdo vem primeiro; o modo
+outline termina dizendo como ler o conteúdo. E `tool-ladder.ts` recusa a captura enquanto não houver
+uma leitura por texto **no mesmo pedido** — a recusa nomeia o degrau barato, e a captura seguinte
+passa, porque a ordem é uma escada, não uma proibição. Quando a pessoa pede a imagem ("tira um
+print", "como está o layout"), não há o que subir e a captura roda direto. Modelo sem visão não
+recebe a ação: a imagem viraria texto por conversão no gateway, o caminho mais lento possível.
+
+### Menos rodadas, e cada rodada mais leve
+
+- **O degrau aceito pelo gateway fica lembrado.** A escada de variantes da requisição recomeçava do
+  topo a cada rodada: um gateway que recusa `stream_options` cobrava uma ida, uma recusa 400 e uma
+  volta antes de **toda** rodada de **toda** tarefa. Agora a primeira recusa ensina, e as seguintes
+  vão direto.
+- **Resultado grande de pedido anterior vira resumo.** A conversa inteira é reenviada a cada rodada.
+  A leitura de dez mil caracteres de meia hora atrás continuava viajando junto, sem ajudar: a página
+  já mudou, e o que importava dela está na resposta que a Vela deu. O pedido atual fica intacto.
+- **A seleção do usuário é lida uma vez por pedido.** Ela é "o que estava selecionado quando ele
+  pediu" e não muda enquanto a Vela trabalha; era relida a cada rodada, com espera de até 600 ms, e
+  podia ser trocada por uma seleção que a própria Vela criou ao clicar.
+- **A memória permanente foi para o fim do system prompt.** No topo, cada `memory_write` invalidava
+  o cache de prefixo do provider e a rodada seguinte pagava o prompt inteiro de novo.
+
+### O que ficou mais rápido dentro da página
+
+Medido no Chrome real, numa fixture de ~8 mil elementos (`tools/fixtures/pesada.html`), mediana de
+dez execuções:
+
+| | antes | depois |
+|---|---|---|
+| `extractPage` | 54 ms | 39 ms |
+| `find` | 74 ms | 49 ms |
+| `click` numa página que reage | 418 ms | 132 ms |
+
+- **Esperar a reação, não o relógio.** Todo clique esperava 400 ms fixos e todo hover 450, mesmo
+  quando a página reagia em 30. Agora a espera termina quando a página reage e fica quieta por um
+  instante; quando nada acontece, ela vai até o teto — é esse tempo que sustenta dizer "sem efeito
+  perceptível" sem acusar à toa uma página lenta.
+- **Medir visibilidade só em quem é candidato.** `isVisible` pede geometria e estilo calculado (força
+  layout) e era chamada para todo elemento da página, no retrato e na busca. Decidir antes pela tag e
+  pelos atributos deixa a medição cara para dezenas em vez de milhares.
+- **Ação em aba de segundo plano não espera pintura.** O content script esperava um
+  `requestAnimationFrame` antes de mirar — e aba em segundo plano não desenha, então o quadro nunca
+  vinha: a ação estourava o limite e voltava "a página não respondeu", numa página pronta. É o
+  caminho que o lote multi-aba usa o tempo todo.
+
+### A conversa grava só o que mudou
+
+As cinquenta conversas moravam numa chave só de `chrome.storage.local`. Cada gravação — a cada pausa
+de 400 ms durante uma tarefa — serializava e reescrevia todas elas para mudar uma mensagem da
+conversa aberta. E sem `unlimitedStorage`, passar de 10 MB fazia o Chrome recusar a gravação em
+silêncio: daí em diante nem as configurações salvavam.
+
+Agora cada conversa tem chave própria, com um índice leve por cima; grava-se só a que mudou, e o
+formato antigo migra sozinho na primeira leitura. `unlimitedStorage` entrou no manifest — é a única
+permissão que o Chrome não anuncia no diálogo de instalação, porque não dá acesso a nada. Os
+registros de diagnóstico, que eram lidos e regravados inteiros a cada chamada de ferramenta, agora
+vão em lote de um segundo.
+
+### O painel desenha por quadro, não por token
+
+Cada token do streaming disparava uma atualização de estado, e a lista inteira renderizava de novo —
+com todas as respostas antigas reinterpretando o próprio Markdown e o realce de código. Numa conversa
+longa era o painel travando justamente enquanto a Vela escrevia. Os pedaços agora são juntados por
+quadro de animação, e o `Markdown` é memorizado pelo texto: a resposta antiga não é tocada.
+
+### A resposta é falada enquanto é escrita
+
+Na voz, a Vela só abria a boca quando o turno inteiro terminava: o modelo gerava todas as frases, o
+turno fechava, e só então a resposta ia para a síntese. Numa resposta de três frases, a pessoa
+esperava em silêncio a geração das três para ouvir a primeira — e silêncio, numa conversa falada, é
+lido como "não me ouviu".
+
+`voice-narrator.ts` manda cada frase completa para uma fila de fala assim que ela chega; o que sobrar
+no fim do turno é falado depois, pela mesma fila, sem repetir o que já foi dito. Duas coisas não são
+antecipadas: a desistência do modelo rápido (o loop ainda pode descartá-la e refazer com o robusto —
+falada antes, a pessoa ouviria uma recusa que não aconteceu) e o texto dentro de um bloco de código
+ainda aberto, que seria lido em voz alta.
+
 ### O que a revisão da branch inteira pegou
 
 Uma revisão de `main...navegacao-agentica` achou onze defeitos que nenhum teste tinha exercitado. Os

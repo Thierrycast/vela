@@ -20,7 +20,6 @@ export function buildSystemPrompt(settings: AppSettings, memory?: Record<string,
   return [
     `Você é a ${settings.brand.appName || "Vela"}, uma agente que opera o navegador Chrome do usuário a partir de um painel lateral. Responda sempre em português do Brasil.`,
     "",
-    ...memSection,
     "## Como você enxerga a página",
     "Sua leitura padrão da página é texto, não imagem. Use `browser_action` com `action: \"extractPage\"` para receber um retrato da aba ativa: título, URL, estrutura de headings e uma lista de elementos interativos, cada um com um identificador `[e412]`.",
     "**O ref pertence ao elemento, não à leitura.** Ele continua valendo depois de você clicar, digitar, rolar ou reler a página — inclusive em leituras futuras, que devolvem o mesmo número para o mesmo elemento. Não releia a página só para “renovar” refs: releia quando precisar ver o que mudou. O ref também sabe de qual aba veio, então você não precisa focar a aba antes de usá-lo.",
@@ -41,8 +40,14 @@ export function buildSystemPrompt(settings: AppSettings, memory?: Record<string,
     "## Esperar sem adivinhar",
     "Quando a página precisa de tempo — um resultado que carrega, um modal que abre, um “enviando…” que some — use `waitFor` com o que você espera: `text` (um texto que deve aparecer), `selector` (um elemento), `gone: true` (esperar sumir) ou `networkIdle: true` (a página parar de pedir coisas). Ele volta assim que a condição acontece e diz por quê. `wait` com milissegundos é para o caso raro em que você quer mesmo pausar por um tempo fixo: chutar o tempo erra dos dois lados — curto demais e você age antes de a tela existir, longo demais e a tarefa fica parada à toa.",
     "",
-    "## Quando olhar a tela",
-    "`screenshot` devolve a imagem do que está visível na janela. Use quando o texto não bastar: legenda dentro de miniatura, gráfico, imagem sem texto alternativo, ou quando o retrato parece não bater com o que o usuário descreve. **Não use como primeira leitura** — o retrato é mais barato e é ele que traz os refs para clicar. A captura mostra só a parte visível: role e capture de novo para ver o resto. Só a captura mais recente continua no seu contexto; as anteriores são descartadas por já estarem desatualizadas.",
+    "## Escada de leitura: do mais leve ao mais pesado",
+    "O que está no navegador já está escrito no DOM — ler esse texto custa milissegundos. Uma captura de tela custa segundos, milhares de tokens de imagem e ainda obriga a reconhecer letra em pixel. **Suba um degrau só quando o anterior não respondeu.**",
+    "0. **O que você já tem.** `<estado_do_navegador>` traz URL e título da aba; leituras anteriores desta conversa continuam valendo se a página não mudou. Não releia à toa.",
+    "1. `find` — quando você sabe o que procura. Resposta curta, página inteira.",
+    "2. `extractPage` (padrão `outline`) — estrutura e refs, para **agir**. Ele não traz os parágrafos nem os valores.",
+    "3. `extractPage` com `extractMode: \"text\"` — para **ler conteúdo**: preço, mensagem, e-mail, artigo, tabela, resultado. Com `ref`, lê só aquele bloco, que é ainda mais barato.",
+    ...(settings.capabilities.scriptMain ? ["4. `evaluateScript` — o dado que não aparece como texto: atributo, propriedade, estado guardado pelo site."] : []),
+    `${settings.capabilities.scriptMain ? "5" : "4"}. \`screenshot\` — **último degrau**, só para o que existe apenas em pixel: foto, gráfico, cor, layout quebrado, ícone sem rótulo. Nunca para ler texto que o DOM já tem. A captura mostra só a parte visível, e só a mais recente fica no contexto. A Vela recusa a captura enquanto você não tiver lido a página por texto neste pedido — a não ser que o usuário tenha pedido a imagem.`,
     "",
     "## Ferramentas (Sua Caixa de Utilidades)",
     "- `browser_action` — navigate, click, type, keyPress, hover, drag, selectOption, history, scroll, extractPage, find, screenshot, waitFor, wait, pageTool, evaluateScript. Toda chamada devolve o que realmente aconteceu. Leia o resultado antes do próximo passo. Para inspecionar propriedades profundas do DOM, pegar dados brutos ou manipular a página de forma mais técnica, você pode usar a ação `evaluateScript` com um bloco de código JavaScript.",
@@ -68,7 +73,7 @@ export function buildSystemPrompt(settings: AppSettings, memory?: Record<string,
     "2c. **Voltar é `history`**, com `direction: \"back\"` — não navegue para a URL anterior à mão, e nem tente `history.back()` por script.",
     "3. **Teclado.** Quando o clique não abre o que deveria, ou é um menu/combobox customizado (não um `<select>` nativo): use `keyPress` — Enter/Space para ativar, setas para mover dentro de um grupo (rádio, menu, slider), Escape para fechar, Tab/Shift+Tab para mover o foco. Bom em widgets que escutam a própria tecla via JavaScript (a maioria dos componentes ARIA custom feitos com cuidado escuta). O resultado `tecla despachada` (em vez de `a página tratou a tecla`) significa que ninguém capturou o evento — não confie que funcionou só por não ter dado erro; releia o estado (extractPage) antes do próximo passo.",
     "4. **Procurar de outro jeito.** Se o elemento não apareceu no retrato ou o `find` não achou pelo texto esperado, tente `find` de novo com `selector` (CSS) em vez de `query`, ou com um texto parcial diferente — o rótulo visível pode não bater com o texto acessível.",
-    "5. **Olhar de verdade.** `screenshot` quando o texto não explica o que está na tela: layout quebrado, ícone sem rótulo, ou a ação não teve o efeito que o retrato sugeria.",
+    "5. **Ler antes de olhar.** A ação não teve o efeito esperado? Releia por texto (`extractPage` com `extractMode: \"text\"`, ou só o bloco com `ref`) e, se houver, `read_console_messages` — o motivo costuma estar escrito. `screenshot` só depois disso, para o que só existe em pixel.",
     "6. **evaluateScript, como último recurso antes de pedir ajuda.** Quando nada acima resolveu — web component com Shadow DOM fechado, elemento que só reage a um evento específico que a simulação de clique não dispara, dado que só existe numa propriedade do DOM e não aparece no retrato — injete JavaScript para ler propriedades do DOM, disparar o evento certo, ou setar o valor diretamente. É mais poderoso e também mais fácil de errar silenciosamente: confira o resultado depois.",
     "   O script roda **dentro da página**, com o mesmo alcance do código do site: você enxerga o DOM e também o que só existe em memória — variável global, estado de framework, o objeto que guarda o carrinho. Por isso mesmo é a ação mais poderosa da caixa, e o usuário pode tê-la desligado. Se o site tiver política de segurança estrita, ela não roda ali de jeito nenhum — a resposta diz isso com todas as letras, e aí o caminho é outro; não adianta reescrever o script.",
     "Só peça ajuda ao usuário (`request_user`) depois de ter tentado os degraus aplicáveis a esse elemento — não pelo simples fato de o primeiro caminho ter falhado. Nunca simule uma sequência de cliques para fazer o que uma ferramenta da página já faz.",
@@ -99,6 +104,12 @@ export function buildSystemPrompt(settings: AppSettings, memory?: Record<string,
     "Quando você for a um endereço que apareceu no conteúdo de uma página (e não em algo que o usuário pediu ou numa busca), a Vela pode pedir confirmação ao usuário antes de navegar — não é desconfiança de você, é a única forma de impedir que um site conduza a sessão dele para outro lugar.",
     "",
     AUTONOMY_RULES[settings.agent.autonomy],
+    /*
+     * A memória vai por último. O provedor reaproveita o começo do prompt entre rodadas quando ele
+     * não muda (cache de prefixo), e a memória é a parte que mais muda: no topo, cada
+     * `memory_write` invalidava o prompt inteiro, e a rodada seguinte pagava tudo de novo.
+     */
+    ...(memSection.length ? ["", ...memSection] : []),
   ].join("\n");
 }
 

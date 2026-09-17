@@ -1,5 +1,5 @@
 import { ChatMessage } from "./types";
-import { loadMessages, loadConversations, saveConversations } from "./storage";
+import { loadConversationIndex, loadConversationsById, loadMessages, saveConversationChanges } from "./storage";
 
 export type ConversationSummary = { id: string; title: string; updatedAt: number };
 export type Conversation = ConversationSummary & { messages: ChatMessage[] };
@@ -10,6 +10,9 @@ const MAX_MESSAGES = 200;
 let cache: Conversation[] | null = null;
 let activeId: string | null = null;
 let persistTimer = 0;
+/** O que mudou desde a última gravação: é só isso que vai ao storage. */
+const sujas = new Set<string>();
+const removidas = new Set<string>();
 
 function makeConversation(): Conversation {
   return { id: crypto.randomUUID(), title: "Nova tarefa", updatedAt: Date.now(), messages: [] };
@@ -22,11 +25,13 @@ function titleFrom(messages: ChatMessage[]) {
 
 async function ensure(): Promise<Conversation[]> {
   if (cache) return cache;
-  cache = await loadConversations();
+  const indice = await loadConversationIndex();
+  cache = await loadConversationsById(indice.map((item) => item.id));
   if (!cache.length) {
     // Migração do formato antigo, que guardava uma lista única de mensagens.
     const legacy = await loadMessages();
     cache = [legacy.length ? { id: crypto.randomUUID(), title: titleFrom(legacy), updatedAt: Date.now(), messages: legacy } : makeConversation()];
+    sujas.add(cache[0].id);
   }
   activeId ??= cache[0].id;
   return cache;
@@ -37,7 +42,8 @@ async function active(): Promise<Conversation> {
   return conversations.find((item) => item.id === activeId) ?? conversations[0];
 }
 
-function schedulePersist() {
+function schedulePersist(id = activeId) {
+  if (id) sujas.add(id);
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => { persistTimer = 0; void flush(); }, 400) as unknown as number;
 }
@@ -45,13 +51,18 @@ function schedulePersist() {
 export async function flush() {
   if (persistTimer) { clearTimeout(persistTimer); persistTimer = 0; }
   if (!cache) return;
-  const trimmed = cache
+  cache.sort((left, right) => right.updatedAt - left.updatedAt);
+  // As que passam do teto saem da memória e do storage, em vez de só deixarem de ser regravadas.
+  for (const sobra of cache.splice(MAX_CONVERSATIONS)) { removidas.add(sobra.id); sujas.delete(sobra.id); }
+  const mudadas = cache
+    .filter((item) => sujas.has(item.id))
     // Captura não é persistida: uma tela em base64 come o orçamento de `chrome.storage.local`
     // sozinha, e ao reabrir a conversa ela já estaria mentindo sobre o que está na página.
-    .map((item) => ({ ...item, messages: item.messages.slice(-MAX_MESSAGES).map((message) => message.images ? { ...message, images: undefined } : message) }))
-    .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, MAX_CONVERSATIONS);
-  await saveConversations(trimmed);
+    .map((item) => ({ ...item, messages: item.messages.slice(-MAX_MESSAGES).map((message) => message.images ? { ...message, images: undefined } : message) }));
+  const apagar = [...removidas];
+  sujas.clear();
+  removidas.clear();
+  await saveConversationChanges(cache.map(({ id, title, updatedAt }) => ({ id, title, updatedAt })), mudadas, apagar);
 }
 
 export async function all(): Promise<ChatMessage[]> { return (await active()).messages; }
@@ -82,6 +93,7 @@ export async function reset() {
   const next = makeConversation();
   conversations.unshift(next);
   activeId = next.id;
+  sujas.add(current.id);
   await flush();
 }
 
@@ -99,6 +111,8 @@ export async function remove(id: string): Promise<{ existia: boolean; eraAtiva: 
 
   const eraAtiva = conversations[index].id === activeId;
   conversations.splice(index, 1);
+  removidas.add(id);
+  sujas.delete(id);
   // Apagar a última deixaria `ensure` recarregando do storage e ressuscitando o que foi apagado,
   // porque uma lista vazia é o sinal de "cache frio". Uma conversa nova toma o lugar.
   if (!conversations.length) conversations.push(makeConversation());

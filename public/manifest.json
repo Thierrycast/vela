@@ -36,7 +36,8 @@
     "webNavigation",
     "offscreen",
     "alarms",
-    "debugger"
+    "debugger",
+    "unlimitedStorage"
   ],
   "optional_permissions": [
     "notifications",

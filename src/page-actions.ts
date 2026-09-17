@@ -8,6 +8,36 @@ function failure(code: Extract<ActionResult, { ok: false }>["code"], summary: st
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/*
+ * Esperar a página reagir, e não um tempo fixo.
+ *
+ * Todo clique esperava 400 ms e todo hover 450, sempre — inclusive quando a página tinha reagido em
+ * 30 ms. Numa tarefa de dez cliques são quatro segundos parados. Agora a espera termina assim que a
+ * reação acontece e a página fica quieta por um instante (ou a URL muda). Quando nada acontece, a
+ * espera continua indo até o teto: é esse tempo que sustenta dizer "sem efeito perceptível" sem
+ * acusar à toa uma página que só demorou a responder.
+ */
+function observarReacao() {
+  const inicio = performance.now();
+  let ultima = 0;
+  const urlAntes = location.href;
+  const observer = new MutationObserver(() => { ultima = performance.now(); });
+  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+  return {
+    get mudou() { return ultima > 0; },
+    async assentar(teto: number, minimo = 120, quieto = 90) {
+      for (;;) {
+        await wait(30);
+        const agora = performance.now();
+        if (agora - inicio >= teto) break;
+        if (location.href !== urlAntes) break;
+        if (ultima && agora - inicio >= minimo && agora - ultima >= quieto) break;
+      }
+      observer.disconnect();
+    },
+  };
+}
+
 const MAX_WAIT = 30_000;
 const DEFAULT_WAIT = 8_000;
 
@@ -343,17 +373,14 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
   if (action.type === "hover") {
     const rect = element.getBoundingClientRect();
     const base = { bubbles: true, cancelable: true, composed: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, view: window } as const;
-    let mutated = false;
-    const observer = new MutationObserver(() => { mutated = true; });
-    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+    const reacao = observarReacao();
     element.dispatchEvent(new PointerEvent("pointerover", { ...base, pointerId: 1, isPrimary: true }));
     element.dispatchEvent(new MouseEvent("mouseover", base));
     element.dispatchEvent(new PointerEvent("pointermove", { ...base, pointerId: 1, isPrimary: true }));
     element.dispatchEvent(new MouseEvent("mousemove", base));
     if (element instanceof HTMLElement) element.focus({ preventScroll: true });
-    await wait(450);
-    observer.disconnect();
-    return { ok: true, summary: `Passei o mouse sobre ${describeTarget(element)}${note ?? ""} — ${mutated ? "alguma coisa apareceu; leia a página para ver o quê" : "nada mudou na página"}.` };
+    await reacao.assentar(450);
+    return { ok: true, summary: `Passei o mouse sobre ${describeTarget(element)}${note ?? ""} — ${reacao.mudou ? "alguma coisa apareceu; leia a página para ver o quê" : "nada mudou na página"}.` };
   }
 
   /*
@@ -416,12 +443,10 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
 
   if (action.type === "click") {
     const before = captureSignals(element);
-    let mutated = false;
-    const observer = new MutationObserver(() => { mutated = true; });
-    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+    const reacao = observarReacao();
     pointerSequence(element);
-    await wait(400);
-    observer.disconnect();
+    await reacao.assentar(400);
+    const mutated = reacao.mudou;
     const after = captureSignals(element);
     const navigated = after.url !== before.url;
     const toggled = after.checked !== before.checked;

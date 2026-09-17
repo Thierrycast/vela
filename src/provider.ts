@@ -16,16 +16,21 @@ export type ChatEvent =
 /** A ordem aqui é a ordem em que o modelo lê as opções; as de leitura vêm antes das de ação. */
 const BROWSER_ACTIONS: Array<BrowserAction["type"]> = ["navigate", "click", "type", "keyPress", "scroll", "extractPage", "find", "screenshot", "hover", "drag", "selectOption", "history", "waitFor", "wait", "pageTool", "evaluateScript"];
 
+/** Só um `false` explícito tira a visão: perfil antigo sem o campo continua enxergando. */
+const enxerga = (settings: AppSettings) => settings.providers.find((item) => item.id === settings.activeProviderId)?.capabilities?.vision !== false;
+
 const browserActionTool = (settings: AppSettings) => ({
   type: "function",
   function: {
     name: "browser_action",
-    description: "Opera uma aba — a ativa por padrão, ou a que você indicar em tabId. Comece por extractPage: ele devolve os refs dos elementos e, quando existirem, as ferramentas próprias da página. Quando souber o texto do que procura, use find em vez de rolar — ele varre a página inteira, inclusive o que está fora da tela, e devolve refs prontos. Prefira pageTool a simular cliques.",
+    description: "Opera uma aba — a ativa por padrão, ou a que você indicar em tabId. Leia do mais leve ao mais pesado: find quando souber o que procura; extractPage para os elementos e refs; extractPage com extractMode text para ler o conteúdo (preços, mensagens, artigos); screenshot só para o que existe apenas em imagem. Prefira pageTool a simular cliques.",
     parameters: {
       type: "object",
       properties: {
         // Habilidade desligada some do enum: anunciar uma ação que será recusada só gasta rodada.
-        action: { type: "string", enum: BROWSER_ACTIONS.filter((type) => isActionEnabled(settings, type)) },
+        // Modelo sem visão não recebe `screenshot`: a captura viraria texto por conversão no gateway,
+        // o caminho mais lento para o que o DOM já entrega escrito.
+        action: { type: "string", enum: BROWSER_ACTIONS.filter((type) => isActionEnabled(settings, type) && (type !== "screenshot" || enxerga(settings))) },
         tabId: { type: "number", description: "Em qual aba agir. Omita para a aba ativa. Use o número mostrado em <abas_da_sessao> quando quiser trabalhar numa aba sem tirar o usuário da dele. Não passe junto com ref: o ref já sabe de que aba veio." },
         url: { type: "string", description: "Para navigate." },
         newTab: { type: "boolean", description: "Para navigate: abre em aba nova dentro da sessão." },
@@ -497,6 +502,16 @@ const VARIANTS: Variant[] = [
   { usage: false, sendParallelField: false, toolChoice: false, tools: false },
 ];
 
+/*
+ * O degrau que funcionou fica lembrado por gateway e modelo.
+ *
+ * Cada rodada recomeçava do primeiro degrau. Um gateway que recusa `stream_options` cobrava uma
+ * requisição a mais — ida, recusa HTTP 400, volta — em **toda** rodada de **toda** tarefa, antes da
+ * que de fato respondia: latência pura, somada ao tempo até o primeiro token que a pessoa sente.
+ * Memória do service worker basta: se ele dormir, a primeira rodada seguinte reaprende em uma recusa.
+ */
+const degrauAceito = new Map<string, number>();
+
 function nextVariant(current: number, errorText: string): number {
   if (/stream_options|include_usage/i.test(errorText) && current < 1) return 1;
   if (/parallel_tool_calls/i.test(errorText) && current < 2) return 2;
@@ -563,7 +578,8 @@ export async function* streamChat(
   const cleanup = () => { clearTimeout(timeout); signal?.removeEventListener("abort", abortFromCaller); };
 
   let response: Response | null = null;
-  let variantIndex = 0;
+  const chaveDoDegrau = `${profile.baseUrl}|${profile.defaultModel}`;
+  let variantIndex = degrauAceito.get(chaveDoDegrau) ?? 0;
   try {
     while (variantIndex >= 0 && variantIndex < VARIANTS.length) {
       let attempt: Response;
@@ -579,7 +595,7 @@ export async function* streamChat(
         yield { type: "error", message: error instanceof DOMException && error.name === "AbortError" ? "A requisição foi cancelada ou excedeu 2 minutos." : error instanceof Error ? error.message : "Falha de rede." };
         return;
       }
-      if (attempt.ok && attempt.body) { response = attempt; break; }
+      if (attempt.ok && attempt.body) { response = attempt; degrauAceito.set(chaveDoDegrau, variantIndex); break; }
       const detail = await responseDetail(attempt);
       if (attempt.status !== 400) { cleanup(); yield { type: "error", message: `Provider retornou HTTP ${attempt.status}${detail ? `: ${detail}` : "."}` }; return; }
       const next = nextVariant(variantIndex, detail);

@@ -1,0 +1,207 @@
+[
+ {
+  "acao": "abrirPagina",
+  "url": "http://127.0.0.1:8799/pesada.html",
+  "ms": 2500
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "retrato",
+  "url": "/pesada.html"
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 100"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 107"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 114"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 121"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 128"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 135"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 142"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 149"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 156"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "find",
+   "query": "adicionar 163"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"0\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"1\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"2\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"3\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"4\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"5\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"6\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"7\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"8\"]"
+  }
+ },
+ {
+  "acao": "agir",
+  "url": "/pesada.html",
+  "acaoDaPagina": {
+   "type": "click",
+   "selector": "[data-id=\"9\"]"
+  }
+ }
+]

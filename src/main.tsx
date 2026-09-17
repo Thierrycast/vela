@@ -100,10 +100,31 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const pendentes = new Map<string, string>();
+    let quadro = 0;
+    const aplicarPendentes = () => {
+      quadro = 0;
+      if (!pendentes.size) return;
+      const lote = new Map(pendentes);
+      pendentes.clear();
+      setMessages((current) => current.map((item) => lote.has(item.id) ? { ...item, content: item.content + lote.get(item.id)! } : item));
+    };
     const apply = (message: SidecarInbound) => {
+      // Qualquer outra mensagem pode depender do texto já acumulado (um patch de status, um snapshot):
+      // o que estava esperando o quadro entra antes dela.
+      if (message.type !== "chat:delta" && pendentes.size) { cancelAnimationFrame(quadro); aplicarPendentes(); }
       if (message.type === "chat:snapshot") { setMessages(message.messages); setEvents(message.events); setTelemetry(message.telemetry); setRunning(message.running); }
       if (message.type === "chat:message") setMessages((current) => [...current, message.message]);
-      if (message.type === "chat:delta") setMessages((current) => current.map((item) => item.id === message.id ? { ...item, content: item.content + message.text } : item));
+      if (message.type === "chat:delta") {
+        /*
+         * Tokens chegam mais rápido do que a tela desenha. Aplicar cada um era uma atualização de
+         * estado por token — várias por quadro, cada uma refazendo a lista. Juntos por quadro, o
+         * texto aparece na mesma velocidade que o olho enxerga e o painel faz uma fração do trabalho.
+         */
+        pendentes.set(message.id, (pendentes.get(message.id) ?? "") + message.text);
+        if (!quadro) quadro = requestAnimationFrame(aplicarPendentes);
+        return;
+      }
       if (message.type === "chat:patch") setMessages((current) => current.map((item) => item.id === message.id ? { ...item, ...message.patch } : item));
       if (message.type === "chat:reset") { setMessages([]); setEvents([]); setTelemetry([]); setAttachments([]); }
       if (message.type === "chat:event") setEvents((current) => [...current.slice(-60), message.event]);

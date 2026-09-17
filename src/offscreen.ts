@@ -40,7 +40,8 @@ chrome.runtime.onMessage.addListener((message: { type?: string; text?: string; i
   if (message.type === "voice:stop") { void stop().then(() => sendResponse({ ok: true })); return true; }
   if (message.type === "voice:toggle-mute") { toggleMute(); return false; }
   if (message.type === "voice:speak" && message.text) { void speak(message.text, message.id); return false; }
-  if (message.type === "voice:speak-stop") { streamingStop?.(); output?.pause(); output = null; return false; }
+  if (message.type === "voice:speak-queue" && message.text) { enfileirarFala(message.text); return false; }
+  if (message.type === "voice:speak-stop") { geracaoDeFala += 1; streamingStop?.(); output?.pause(); output = null; return false; }
   if (message.type === "voice:debug-start") { startDebugRecording(); return false; }
   if (message.type === "voice:debug-stop") { void stopDebugRecording(); return false; }
   return false;
@@ -622,6 +623,20 @@ async function speakReading(endpoint: VoiceEndpoint, voice: string, text: string
 let enunciado = "";
 
 let streamingStop: (() => void) | null = null;
+
+/*
+ * Fila de fala: frases que chegam enquanto a resposta ainda está sendo escrita.
+ *
+ * `voice:speak` interrompe o que estiver tocando — é o certo para "leia esta mensagem", e o errado
+ * para a narração em pedaços, em que a segunda frase cortaria a primeira. A fila toca uma depois da
+ * outra; parar a fala avança a geração, e o que estava esperando na fila não toca mais.
+ */
+let filaDeFala: Promise<void> = Promise.resolve();
+let geracaoDeFala = 0;
+function enfileirarFala(texto: string) {
+  const minha = geracaoDeFala;
+  filaDeFala = filaDeFala.then(() => (minha === geracaoDeFala ? speak(texto) : undefined)).catch(() => undefined);
+}
 
 async function speak(text: string, readingId?: string) {
   let url = "";

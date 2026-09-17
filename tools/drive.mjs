@@ -103,7 +103,8 @@ function responderModeloFalso(pedido, resposta) {
       manda(molde({ tool_calls: [{ index: 0, function: { arguments: JSON.stringify({ action: "extractPage" }) } }] }));
       manda(molde({}, "tool_calls"));
     } else {
-      for (const pedaco of ["Li a pagina: ", "e uma lista de compras ", "com tres produtos."]) manda(molde({ content: pedaco }));
+      // Duas frases e um final em aberto: e o que exercita a narracao falando enquanto escreve.
+      for (const pedaco of ["Li a pagina: ", "e uma lista de compras com tres produtos. ", "O primeiro deles e cafe moido. ", "Quer que eu adicione"]) manda(molde({ content: pedaco }));
       manda(molde({}, "stop"));
     }
     manda({ id: "falso-1", object: "chat.completion.chunk", choices: [], usage: { prompt_tokens: 1234, completion_tokens: 56, total_tokens: 1290 } });
@@ -257,6 +258,7 @@ const DIGITAR = (texto) => `(async () => {
 
 for (const [indice, passo] of roteiro.entries()) {
   const rotulo = `${indice + 1}. ${passo.acao}`;
+  const comecou = Date.now();
   try {
     if (passo.acao === "definirSettings") {
       await evaluate(workerSession, `(async () => {
@@ -353,7 +355,9 @@ for (const [indice, passo] of roteiro.entries()) {
         const resposta = await chrome.tabs.sendMessage(aba.id, { type: "agent:action", action: ${JSON.stringify(acaoDaPagina)}, actionId: "check" }, { frameId: ${JSON.stringify(passo.frameId ?? 0)} });
         return JSON.stringify(resposta, null, 1);
       })()`);
-      console.log(`${rotulo} →
+      // O tempo de cada acao entra no relatorio: e a medida de quanto custa um clique de verdade,
+      // e sem ela nao da para dizer se uma mudanca deixou a navegacao mais rapida ou mais lenta.
+      console.log(`${rotulo} → (${Date.now() - comecou} ms)
 ${saida}`);
     } else if (passo.acao === "mundoPagina") {
       /*

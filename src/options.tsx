@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronRight, FileCode2, KeyRound, Palette, Plug, Plus, RefreshCw, Shield, SlidersHorizontal, Trash2, Wifi, Zap } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import { Capabilities, defaultSettings, ProviderProfile, ThemeMode } from "./types";
-import { loadConversations } from "./storage";
+import { countConversations } from "./storage";
 import { hasHostAccess, requestHostAccess, revokeHostAccess } from "./permissions";
 import { useSettings, useTheme } from "./use-settings";
 import { ConnectionCheck, listModels, probeAudioEndpoints, testConnection } from "./provider";
@@ -80,7 +80,7 @@ function Options() {
   const [connection, setConnection] = useState<Record<string, ConnectionCheck | "testing">>({});
   const tested = useRef(new Set<string>());
   useEffect(() => {
-    void loadConversations().then((list) => setConversationCount(list.length));
+    void countConversations().then(setConversationCount);
     if (typeof chrome !== "undefined") {
       void chrome.permissions?.getAll?.().then((granted) => setPermissions(granted.permissions ?? [])).catch(() => setPermissions(null));
       void hasHostAccess().then(setHostAccess);

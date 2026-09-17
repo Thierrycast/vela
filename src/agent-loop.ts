@@ -10,6 +10,7 @@ import { collectBrowserContext, clearAttachments } from "./browser-context";
 import { recordTurn } from "./action-stats";
 import { cancelDelegated, configureDelegation } from "./background-task";
 import { noteSource, resetDomainMemory } from "./domain-policy";
+import { iniciarPedido } from "./tool-ladder";
 import * as conversation from "./conversation";
 
 const newId = () => crypto.randomUUID();
@@ -128,6 +129,28 @@ async function compactSnapshots() {
   }
 }
 
+/**
+ * Resultados grandes de pedidos anteriores viram um resumo curto.
+ *
+ * Cada rodada reenvia a conversa inteira. Uma leitura de texto de dez mil caracteres, uma lista de
+ * `find`, a saída de um script — tudo o que um pedido de meia hora atrás produziu continuava indo ao
+ * modelo em toda rodada de todo pedido seguinte, custando tokens e tempo até o primeiro token sem
+ * ajudar em nada: a página já mudou, e o que importava daquele resultado está na resposta que a Vela
+ * deu. O pedido atual fica intacto; dos anteriores sobra o começo, que basta para lembrar o que foi
+ * feito, e o aviso de que o resto saiu.
+ */
+const LIMITE_ANTERIOR = 1_500;
+
+async function compactarTurnosAnteriores(inicioDoTurno: string) {
+  const messages = await conversation.all();
+  const inicio = messages.findIndex((message) => message.id === inicioDoTurno);
+  if (inicio <= 0) return;
+  for (const message of messages.slice(0, inicio)) {
+    if (message.role !== "tool" || message.content.length <= LIMITE_ANTERIOR) continue;
+    await conversation.patch(message.id, { content: `${message.content.slice(0, 500)}\n[resultado de um pedido anterior, resumido para poupar contexto — ${message.content.length} caracteres no original. Se precisar desse dado de novo, leia outra vez.]` });
+  }
+}
+
 /** Devolve se o turno foi aceito: quem chama pela voz precisa saber que a fala se perdeu. */
 /** Respostas em que o modelo rápido desiste em texto puro, sem tentar nenhuma ferramenta.
  *  Não precisa ser precisa: um falso positivo só custa uma repetição extra com o modelo robusto,
@@ -196,12 +219,15 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
   configureTrace({ detail: settings.agent.fullTrace ? "completo" : "normal" });
   // O que o usuário escreveu é decisão dele: endereços que ele mencionou passam sem confirmação.
   noteSource("user", text);
+  iniciarPedido(text);
   running = true;
   controller = new AbortController();
   emit({ type: "chat:running", running: true });
   void appendLog({ level: "info", event: "chat.started", detail: `provider=${settings.activeProviderId}; model=${profile?.defaultModel || "unset"}` });
 
-  await addMessage({ id: newId(), role: "user", content: text, createdAt: Date.now(), status: "complete" }, emit);
+  const pedidoId = newId();
+  await addMessage({ id: pedidoId, role: "user", content: text, createdAt: Date.now(), status: "complete" }, emit);
+  let selecaoDoTurno: string | undefined;
 
   try {
     for (let round = 0; round < maxRounds; round += 1) {
@@ -217,7 +243,10 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
       const calls: ToolCall[] = [];
       let failed = false;
       await compactSnapshots();
-      const context = await collectBrowserContext(settings);
+      if (round === 0) await compactarTurnosAnteriores(pedidoId);
+      const context = await collectBrowserContext(settings, { lerSelecao: round === 0 });
+      if (round === 0) selecaoDoTurno = context.selection;
+      else context.selection = selecaoDoTurno;
 
       // Multi-tier Voice: começa com o fastModel; se precisar de mais de uma rodada (chamou
       // ferramenta na anterior), sobe para o defaultModel mais robusto a partir daqui.

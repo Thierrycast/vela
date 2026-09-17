@@ -128,7 +128,18 @@ ffmpeg -i fala.mp3 -ac 1 -ar 48000 -c:a pcm_s16le -af apad=pad_dur=3 fala.wav
 Downloads feitos durante o roteiro caem numa pasta do perfil temporário — nunca na pasta Downloads
 de quem roda — e o resumo lista cada arquivo baixado.
 
+### Medir se ficou mais rápido
+
+```bash
+node tools/drive.mjs --fixtures --roteiro=tools/fixtures/roteiro-medicao.json
+```
+
+Dez leituras, dez buscas e dez cliques numa página de ~8 mil elementos, com o tempo de cada ação ao
+lado. É assim que se compara uma mudança com o estado anterior (`git stash push src`, build, rodar,
+`git stash pop`) em vez de confiar na impressão de que ficou melhor.
+
 ## Trocar de modelo
+
 
 O nome do modelo na barra de envio abre a lista do próprio gateway, com busca — sem sair da
 conversa. Sem digitar nada aparecem o modelo atual e os cinco últimos usados, que cobrem o dia a
@@ -136,6 +147,12 @@ dia; a busca existe porque uma lista de mil e quatrocentos modelos não se naveg
 vale para o provider ativo e é a mesma preferência que aparece em Configurações → Providers.
 
 ## O que a Vela sabe fazer sozinha
+
+**Ler do mais leve ao mais pesado.** Primeiro `find` (quando ela sabe o que procura), depois o
+retrato da página, depois o texto do conteúdo, e só no fim a captura de tela — que custa segundos e
+milhares de tokens para reconhecer em pixel o que o DOM entrega escrito. A captura fica bloqueada
+até ter havido uma leitura por texto no mesmo pedido; quando você pede a imagem ("tira um print",
+"como está o layout"), ela vai direto.
 
 **Agrupar o que já é previsível.** Abrir a página, clicar no campo de busca, digitar e apertar
 Enter não são quatro conversas com o modelo: são um lote. `browser_batch` executa a sequência numa

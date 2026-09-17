@@ -18,6 +18,7 @@ import { readConsole, readNetwork, startWatching } from "./page-observability";
 import { looksLikeInjection, wrapUntrusted } from "./untrusted";
 import { noteSource } from "./domain-policy";
 import { record as traceRecord } from "./trace";
+import { recusaDaCaptura, registrarAcao } from "./tool-ladder";
 
 type ToolArguments = {
   action?: BrowserAction["type"]; url?: string; newTab?: boolean; ref?: string; selector?: string;
@@ -117,8 +118,19 @@ export async function runToolCall(call: ToolCall, settings: AppSettings, emit: E
       if (actionGate && !isEnabled(settings, actionGate)) {
         return { content: refuse(actionGate), event: { kind: "error", text: `${CAPABILITY_LABELS[actionGate]}: habilidade desligada.` } };
       }
+      if (action.type === "screenshot") {
+        // Modelo sem visão recebia a captura e o gateway a convertia por conta própria — o caminho
+        // mais lento possível para um texto que o DOM já tinha. Sem visão, a captura não existe.
+        if (profile?.capabilities?.vision === false) return { content: "ERRO [unsupported] Este modelo não enxerga imagens, então a captura de tela não serve aqui. Leia a página por texto: extractPage com extractMode \"text\", ou find.", event: { kind: "error", text: "Captura indisponível: modelo sem visão." } };
+        const recusa = recusaDaCaptura();
+        if (recusa) {
+          traceRecord("tool.call", "captura adiada: ainda não houve leitura por texto", { ok: false, code: "escada" });
+          return { content: recusa, event: { kind: "status", text: "Li a página por texto antes de capturar a tela." } };
+        }
+      }
       if (action.type === "extractPage") action.bypassWireguard = settings.agent.bypassWireguard;
       const result = await executeAction(action, settings.agent.autonomy);
+      registrarAcao(action.type, result.ok);
       void recordAction(action, result);
       return {
         content: renderActionResult(result, action),

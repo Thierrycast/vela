@@ -91,12 +91,17 @@ function collect(root: Document | ShadowRoot | Element, interactive: Element[], 
     if (node instanceof Element) {
       if (node.hasAttribute("data-vela-ui")) { node = walker.nextSibling() as Element | null; continue; }
       if (node.shadowRoot) collect(node.shadowRoot, interactive, structure);
-      if (interactive.length < HARD_LIMIT && isVisible(node)) {
+      if (interactive.length < HARD_LIMIT) {
         // O corte acontece **depois** da ordenação por viewport, não aqui: cortando na ordem do
         // documento, um menu de navegação com cem links consumia a cota sozinho e o conteúdo que
         // a pessoa quer nunca aparecia no retrato.
-        if (isInteractive(node)) interactive.push(node);
-        else if (structure.length < MAX_STRUCTURE && isLandmark(node)) structure.push(node);
+        //
+        // A categoria é decidida antes da visibilidade. `isVisible` pede geometria e estilo
+        // calculado — força layout — e era chamada para **todo** elemento da página, inclusive os
+        // milhares de `div` e `span` que nunca entrariam no retrato. Olhar tag e atributos primeiro
+        // é barato e deixa a medição cara só para quem é candidato.
+        if (isInteractive(node)) { if (isVisible(node)) interactive.push(node); }
+        else if (structure.length < MAX_STRUCTURE && isLandmark(node) && isVisible(node)) structure.push(node);
       }
     }
     node = walker.nextNode() as Element | null;
@@ -118,12 +123,13 @@ function describeStructure(element: Element) {
   return label;
 }
 
-function readableText() {
-  let text = document.body.innerText ?? "";
+function readableText(root: Document | Element = document) {
+  const base = root instanceof Document ? root.body : root;
+  let text = (base as HTMLElement).innerText ?? base.textContent ?? "";
   // Em páginas onde innerText falha ou vem vazio (ex: tudo no ShadowDOM), tentamos o fallback
   if (!text.trim()) {
     const chunks: string[] = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(base, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
       if (!node.parentElement?.closest("script,style,noscript,svg,[data-vela-ui]")) {
@@ -227,8 +233,15 @@ export function findElements(options: FindOptions) {
   }
 
   const scored: Array<{ element: Element; score: number; text: string }> = [];
+  /*
+   * Visibilidade é conferida só em quem casou.
+   *
+   * Era o primeiro filtro, aplicado aos até doze mil elementos da varredura — e medir visibilidade
+   * pede geometria e estilo calculado, que forçam layout. Casar texto e papel antes é o mesmo
+   * resultado com a medição cara feita em dezenas de candidatos em vez de em milhares.
+   */
+  const visivel = (element: Element) => isVisible(element);
   for (const element of pool) {
-    if (!isVisible(element)) continue;
     const name = accessibleName(element);
     const text = (element.textContent ?? "").replace(/\s+/g, " ").trim();
     const attributes = [element.getAttribute("aria-label"), element.getAttribute("title"), element.getAttribute("alt"), element.getAttribute("placeholder"), element.getAttribute("href")].filter(Boolean).join(" ");
@@ -250,6 +263,7 @@ export function findElements(options: FindOptions) {
       const onlyRole = intent.words.length === 0 && intent.roles.size > 0;
       if (!wordsHit && !phraseHit && !(onlyRole && roleMatches)) continue;
       if (intent.roles.size > 0 && !roleMatches && !phraseHit) continue;
+      if (!visivel(element)) continue;
 
       const exact = foldedName === needle ? 40 : 0;
       const inName = intent.words.length > 0 && intent.words.every((word) => foldedName.includes(word));
@@ -259,7 +273,7 @@ export function findElements(options: FindOptions) {
         score: exact + (inName ? 22 : 0) + (phraseHit ? 10 : 0) + (roleMatches && intent.roles.size ? 30 : 0) + (hinted.has(element) ? 25 : 0) + size + (isInteractive(element) ? 14 : 0),
         text: name || text,
       });
-    } else if (intent.roles.size === 0 || roleMatches) {
+    } else if ((intent.roles.size === 0 || roleMatches) && visivel(element)) {
       scored.push({ element, score: (roleMatches && intent.roles.size ? 30 : 0) + (isInteractive(element) ? 10 : 0), text: name || text });
     }
   }
@@ -327,7 +341,10 @@ export function captureSnapshot(options: SnapshotOptions = {}) {
 
   // Cabe o que cabe: o que está na tela sobrevive primeiro, mas a ordem final é a do documento.
   const onScreen = interactive.filter((element) => { const rect = element.getBoundingClientRect(); return rect.bottom > 0 && rect.top < innerHeight; });
-  const offScreen = interactive.filter((element) => !onScreen.includes(element));
+  // Conjunto, e não `includes` numa lista: com mil elementos a busca linear fazia um milhão de
+  // comparações a cada leitura.
+  const naTela = new Set(onScreen);
+  const offScreen = interactive.filter((element) => !naTela.has(element));
   const kept = new Set([...onScreen, ...offScreen].slice(0, MAX_NODES));
   const chosen = new Set<Element>([...structure, ...kept]);
   const ordered = [...interactive, ...structure].filter((element) => chosen.has(element));
@@ -357,10 +374,19 @@ export function captureSnapshot(options: SnapshotOptions = {}) {
     ...lines,
   ];
   if (interactive.length > kept.size) sections.push(`[${interactive.length - kept.size} elementos não couberam neste retrato — use find com o texto do que você procura em vez de rolar a página]`);
-  if (mode === "text") { sections.push("", "# Texto da página", readableText()); }
   sweep();
 
-  const full = sections.join("\n");
+  /*
+   * No modo texto, o texto vem **antes** da árvore.
+   *
+   * Vinha depois, e o orçamento é um só: numa página com muitos elementos a árvore consumia quase
+   * tudo e o texto — a razão de ter pedido este modo — chegava cortado ou nem chegava. Sem o
+   * conteúdo por texto, o modelo ia à captura de tela para enxergar o que estava escrito. Com `ref`
+   * o texto é só daquele bloco, que é o jeito mais barato de ler um trecho da página.
+   */
+  const full = mode === "text"
+    ? [...sections.slice(0, 3), "# Texto", readableText(root), "", ...sections.slice(3)].join("\n")
+    : [...sections, "", "[Isto é estrutura e elementos. Para ler o conteúdo — preços, mensagens, parágrafos, tabelas — use extractMode \"text\" (com ref, só aquele bloco). Não capture a tela para ler texto.]"].join("\n");
   const slice = full.slice(offset, offset + budget);
   return {
     content: slice,

@@ -1,11 +1,12 @@
 import { AppSettings, defaultSettings } from "./types";
 import { UserScript } from "./script-store";
-import { normalizeSettings, SETTINGS_KEY } from "./storage";
+import { CONVERSATION_INDEX_KEY, CONVERSATION_PREFIX, normalizeSettings, SETTINGS_KEY } from "./storage";
 
 export type StorageSlice = { key: string; label: string; description: string; bytes: number; clearable: boolean };
 
 const SLICES: Array<Omit<StorageSlice, "bytes">> = [
-  { key: "vela:conversations", label: "Conversas arquivadas", description: "Tudo que aparece no histórico da topbar.", clearable: true },
+  // Cada conversa tem chave própria; a fatia soma todas pelo prefixo (ver storage.ts).
+  { key: CONVERSATION_PREFIX, label: "Conversas arquivadas", description: "Tudo que aparece no histórico da topbar.", clearable: true },
   { key: "vela:messages", label: "Conversa atual", description: "As mensagens da tarefa aberta agora.", clearable: true },
   { key: "vela:user-scripts", label: "Scripts", description: "Os userscripts salvos neste perfil.", clearable: true },
   { key: "vela:logs", label: "Registros", description: "Eventos de diagnóstico dos últimos usos.", clearable: true },
@@ -18,14 +19,19 @@ export const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : byte
 export async function measureStorage(): Promise<StorageSlice[]> {
   if (typeof chrome === "undefined" || !chrome.storage?.local) return SLICES.map((slice) => ({ ...slice, bytes: 0 }));
   const everything = await chrome.storage.local.get(null);
+  const tamanho = (value: unknown) => value === undefined ? 0 : new Blob([JSON.stringify(value)]).size;
   return SLICES.map((slice) => {
-    const value = everything[slice.key];
-    return { ...slice, bytes: value === undefined ? 0 : new Blob([JSON.stringify(value)]).size };
+    if (slice.key !== CONVERSATION_PREFIX) return { ...slice, bytes: tamanho(everything[slice.key]) };
+    const chaves = Object.keys(everything).filter((key) => key.startsWith(CONVERSATION_PREFIX) || key === CONVERSATION_INDEX_KEY || key === "vela:conversations");
+    return { ...slice, bytes: chaves.reduce((soma, key) => soma + tamanho(everything[key]), 0) };
   });
 }
 
 export async function clearSlice(key: string) {
-  if (typeof chrome !== "undefined" && chrome.storage?.local) await chrome.storage.local.remove(key);
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+  if (key !== CONVERSATION_PREFIX) { await chrome.storage.local.remove(key); return; }
+  const everything = await chrome.storage.local.get(null);
+  await chrome.storage.local.remove(Object.keys(everything).filter((item) => item.startsWith(CONVERSATION_PREFIX) || item === CONVERSATION_INDEX_KEY || item === "vela:conversations"));
 }
 
 export type Backup = { produto: "vela"; versao: 1; exportadoEm: string; settings: AppSettings; scripts: UserScript[] };

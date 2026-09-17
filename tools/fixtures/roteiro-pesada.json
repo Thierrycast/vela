@@ -1,0 +1,9 @@
+[
+  { "acao": "abrirPagina", "url": "http://127.0.0.1:8799/pesada.html", "ms": 2500 },
+  { "acao": "retrato", "url": "/pesada.html" },
+  { "acao": "retrato", "url": "/pesada.html" },
+  { "acao": "retrato", "url": "/pesada.html" },
+  { "acao": "agir", "url": "/pesada.html", "acaoDaPagina": { "type": "find", "query": "adicionar 137" } },
+  { "acao": "agir", "url": "/pesada.html", "acaoDaPagina": { "type": "find", "query": "adicionar 291" } },
+  { "acao": "agir", "url": "/pesada.html", "acaoDaPagina": { "type": "click", "selector": "[data-id=\"12\"]" } }
+]

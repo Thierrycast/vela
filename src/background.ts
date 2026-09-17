@@ -13,6 +13,7 @@ import { injectIntoActiveTab, syncContentScriptRegistration } from "./injection"
 import { bridgeStatus, configureBridge, onKeepAliveAlarm, syncBridge } from "./bridge";
 import { TraceEvent, clearTrace, configureTrace, onTrace, readTrace, record as traceRecord } from "./trace";
 import { clearBlobs } from "./trace-blobs";
+import { criarNarrador } from "./voice-narrator";
 import { SETTINGS_KEY, loadSettings, saveSettings } from "./storage";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -225,10 +226,10 @@ async function publishSession() {
  */
 type Origem = "texto" | "voz" | "lens" | "ponte" | "atalho";
 
-async function runTurn(text: string, useFastModel = false, origem: Origem = "texto", enunciado?: string) {
+async function runTurn(text: string, useFastModel = false, origem: Origem = "texto", enunciado?: string, emit: (message: SidecarInbound) => unknown = notifySurfaces) {
   ensureKeepAlive();
   void ensureSession(text).then(publishSession);
-  return agentLoop.submit(text, notifySurfaces, { useFastModel, origem, enunciado });
+  return agentLoop.submit(text, emit as typeof notifySurfaces, { useFastModel, origem, enunciado });
 }
 
 /** Entrada da ponte MCP: um agente de fora descreve o objetivo e a Vela executa no navegador
@@ -248,7 +249,7 @@ async function askAgent(prompt: string): Promise<string> {
  * Quando a fala chegava com a Vela ocupada, o turno era descartado em silêncio e ela **repetia a
  * resposta anterior**: você perguntava outra coisa e ouvia de novo o que já tinha ouvido.
  */
-async function speakAnswerAfter(previousId: string | null) {
+async function speakAnswerAfter(previousId: string | null, narrador?: ReturnType<typeof criarNarrador>) {
   const messages = await conversation.all();
   const last = [...messages].reverse().find((item: ChatMessage) => item.role === "assistant" && item.content.trim());
   if (!last || last.id === previousId) {
@@ -259,7 +260,11 @@ async function speakAnswerAfter(previousId: string | null) {
     void chrome.runtime.sendMessage({ type: "voice:speak", text: "Não consegui concluir essa. Quer que eu tente de outro jeito?" }).catch(() => undefined);
     return;
   }
-  void chrome.runtime.sendMessage({ type: "voice:speak", text: last.content }).catch(() => undefined);
+  if (!narrador) { void chrome.runtime.sendMessage({ type: "voice:speak", text: last.content }).catch(() => undefined); return; }
+  // O que a narração já falou não se repete: só o fim que ainda não tinha fechado em frase, na fila,
+  // depois do que já está tocando.
+  const restante = narrador.restante(last.id, last.content);
+  if (restante) void chrome.runtime.sendMessage({ type: "voice:speak-queue", text: restante }).catch(() => undefined);
 }
 
 async function lastAnswerId(): Promise<string | null> {
@@ -286,12 +291,17 @@ async function speakTurn(text: string, enunciado?: string) {
     while (agentLoop.isRunning() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 60));
   }
   const previous = await lastAnswerId();
-  const accepted = await runTurn(text, voiceMode === "live", "voz", enunciado);
+  const narrador = criarNarrador((frase) => { void chrome.runtime.sendMessage({ type: "voice:speak-queue", text: frase }).catch(() => undefined); });
+  const comNarracao = (message: SidecarInbound) => {
+    if (message.type === "chat:delta") narrador.pedaco(message.id, message.text);
+    return notifySurfaces(message);
+  };
+  const accepted = await runTurn(text, voiceMode === "live", "voz", enunciado, comNarracao);
   if (!accepted) {
     traceRecord("voice", "fala descartada: o turno anterior não encerrou", { from: "background", ok: false, code: "ocupada", data: { texto: text.slice(0, 200) } });
     return;
   }
-  await speakAnswerAfter(previous);
+  await speakAnswerAfter(previous, narrador);
 }
 
 /** Ler uma resposta em voz alta sobe o runtime de áudio sozinho: não faz sentido exigir que o

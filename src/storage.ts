@@ -131,12 +131,65 @@ export const saveSettings = (settings: AppSettings) => local.set(SETTINGS_KEY, s
 
 export const loadMessages = () => local.get<ChatMessage[]>(MESSAGES_KEY, []);
 export type StoredConversation = { id: string; title: string; updatedAt: number; messages: ChatMessage[] };
-export const loadConversations = () => local.get<StoredConversation[]>(CONVERSATIONS_KEY, []);
-export const saveConversations = (conversations: StoredConversation[]) => local.set(CONVERSATIONS_KEY, conversations);
+export type ConversationIndexEntry = { id: string; title: string; updatedAt: number };
+
+/*
+ * Uma chave por conversa, e um índice leve.
+ *
+ * As cinquenta conversas moravam numa chave só, e cada gravação — a cada pausa de 400 ms durante
+ * uma tarefa — serializava e reescrevia todas elas, megabytes, para mudar uma mensagem da conversa
+ * aberta. Pior: sem `unlimitedStorage`, passar de 10 MB fazia o Chrome recusar a gravação em
+ * silêncio, e daí em diante nem as configurações salvavam. Agora se grava só a conversa que mudou.
+ */
+export const CONVERSATION_INDEX_KEY = "vela:conversa-indice";
+export const CONVERSATION_PREFIX = "vela:conversa:";
+const conversationKey = (id: string) => `${CONVERSATION_PREFIX}${id}`;
+
+export async function loadConversationIndex(): Promise<ConversationIndexEntry[]> {
+  const indice = await local.get<ConversationIndexEntry[] | null>(CONVERSATION_INDEX_KEY, null);
+  if (indice) return indice;
+  // Migração do formato de chave única: divide uma vez e apaga o antigo.
+  const antigas = await local.get<StoredConversation[]>(CONVERSATIONS_KEY, []);
+  if (!antigas.length || typeof chrome === "undefined" || !chrome.storage?.local) return [];
+  const novoIndice = antigas.map(({ id, title, updatedAt }) => ({ id, title, updatedAt }));
+  await chrome.storage.local.set(Object.fromEntries([[CONVERSATION_INDEX_KEY, novoIndice], ...antigas.map((item) => [conversationKey(item.id), item])]));
+  await chrome.storage.local.remove(CONVERSATIONS_KEY);
+  return novoIndice;
+}
+
+export async function loadConversationsById(ids: string[]): Promise<StoredConversation[]> {
+  if (!ids.length || typeof chrome === "undefined" || !chrome.storage?.local) return [];
+  const stored = await chrome.storage.local.get(ids.map(conversationKey));
+  return ids.flatMap((id) => (stored[conversationKey(id)] as StoredConversation | undefined) ?? []);
+}
+
+export async function saveConversationChanges(index: ConversationIndexEntry[], changed: StoredConversation[], removed: string[]) {
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+  await chrome.storage.local.set(Object.fromEntries([[CONVERSATION_INDEX_KEY, index], ...changed.map((item) => [conversationKey(item.id), item])]));
+  if (removed.length) await chrome.storage.local.remove(removed.map(conversationKey));
+}
+
+export const countConversations = async () => (await loadConversationIndex()).length;
 export const loadLogs = () => local.get<LogEntry[]>(LOGS_KEY, []);
+
+/*
+ * Registros entram em lote.
+ *
+ * Cada chamada de ferramenta, cada rodada e cada telemetria lia os 250 registros e os regravava
+ * inteiros — várias gravações por rodada para um diagnóstico que a trilha já cobre em detalhe.
+ * Juntos num intervalo de um segundo, viram uma gravação só.
+ */
+let logsPendentes: LogEntry[] = [];
+let logsTimer: ReturnType<typeof setTimeout> | undefined;
 export const appendLog = async (entry: Omit<LogEntry, "id" | "createdAt">) => {
-  const logs = await loadLogs();
-  await local.set(LOGS_KEY, [...logs, { ...entry, id: crypto.randomUUID(), createdAt: Date.now() }].slice(-250));
+  logsPendentes.push({ ...entry, id: crypto.randomUUID(), createdAt: Date.now() });
+  if (logsTimer) return;
+  logsTimer = setTimeout(() => {
+    logsTimer = undefined;
+    const lote = logsPendentes;
+    logsPendentes = [];
+    void loadLogs().then((logs) => local.set(LOGS_KEY, [...logs, ...lote].slice(-250))).catch(() => undefined);
+  }, 1_000);
 };
 export const clearLogs = () => local.set(LOGS_KEY, []);
 

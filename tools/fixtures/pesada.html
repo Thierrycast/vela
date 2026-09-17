@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Página pesada — 8 mil elementos</title>
+<style>
+  body { font: 14px system-ui; margin: 0; padding: 12px; }
+  .cartao { border: 1px solid #ddd; border-radius: 6px; padding: 8px; margin: 4px 0; }
+  .oculto { display: none; }
+</style>
+</head>
+<body>
+<!--
+  Existe para medir o custo de ler uma página grande, que é onde a leitura fica lenta e o agente
+  começa a preferir a captura de tela. Uma fixture pequena não mede nada: o trabalho por elemento
+  só aparece quando há milhares deles.
+-->
+<h1>Catálogo grande</h1>
+<main>
+  <div id="conteudo"></div>
+</main>
+<script>
+  const conteudo = document.getElementById("conteudo");
+  const partes = [];
+  for (let item = 0; item < 400; item += 1) {
+    partes.push(`<section class="cartao" aria-label="Produto ${item}">
+      <h3>Produto ${item}</h3>
+      <div><span>Preço</span> <strong>R$ ${(item % 97) + 9},90</strong> <em>em estoque</em></div>
+      <div class="detalhe"><span>Cor</span><span>Tamanho</span><span>Peso</span><span>Marca</span></div>
+      <div class="oculto"><button>Comparar ${item}</button></div>
+      <button data-id="${item}">Adicionar ${item}</button>
+      <a href="/produto/${item}">Ver detalhes ${item}</a>
+    </section>`);
+  }
+  conteudo.innerHTML = partes.join("");
+  // Clique com reacao imediata: e o caso em que esperar um tempo fixo e puro desperdicio.
+  const carrinho = document.createElement("ul");
+  carrinho.id = "carrinho";
+  document.body.append(carrinho);
+  conteudo.addEventListener("click", (evento) => {
+    const alvo = evento.target.closest("button[data-id]");
+    if (!alvo) return;
+    const linha = document.createElement("li");
+    linha.textContent = `Produto ${alvo.dataset.id} no carrinho`;
+    carrinho.append(linha);
+  });
+  document.title = `Catálogo grande — ${document.querySelectorAll("*").length} elementos`;
+</script>
+</body>
+</html>
