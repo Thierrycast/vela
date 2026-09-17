@@ -394,6 +394,26 @@ await run("aba por numero com a habilidade desligada", [
   [delta("Entendi."), DONE],
 ], { agent: { ...defaultSettings.agent, autonomy: "auto" }, capabilities: { ...defaultSettings.capabilities, tabAddressing: false } });
 
+// 18f. A regra do "so mudou o numero": ela existe para contador, e nao pode engolir identificador.
+// Medida numa lista virtualizada de verdade, a versao ingenua deixava "Pedido #1043" virar
+// "Pedido #9001" sem reclamar — o clique errado silencioso que a assinatura existe para barrar.
+console.log("\n=== contador muda, identificador nao ===");
+{
+  const { compareForTest } = await import("../src/element-registry");
+  const casos: Array<[string, string, string]> = [
+    ["3 novas mensagens", "4 novas mensagens", "drifted"],
+    ["Notificações (3)", "Notificações (12)", "drifted"],
+    ["Pedido #1043", "Pedido #9001", "recycled"],
+    ["NF 8842", "NF 9911", "recycled"],
+    ["Item 12 de 340", "Item 13 de 340", "recycled"],
+    ["Salvar", "Salvar", "identical"],
+  ];
+  for (const [antes, depois, esperado] of casos) {
+    const obtido = compareForTest(antes, depois);
+    console.log(`  “${antes}” → “${depois}”: ${obtido}${obtido === esperado ? "" : `  ESPERAVA ${esperado}`}`);
+  }
+}
+
 // 18. O registro de refs, exercitado direto — é lógica pura e não precisa do loop inteiro.
 // O que importa aqui é a **estabilidade**: o mesmo elemento, relido, tem de receber o mesmo ref.
 // Sem isso, todo clique depois de uma releitura exigiria uma rodada só para reconquistar o alvo.

@@ -1,0 +1,24 @@
+[
+  { "acao": "abrirPagina", "url": "http://127.0.0.1:8799/virtual.html", "ms": 2500 },
+  { "acao": "retrato", "url": "/virtual.html", "depth": 6 },
+
+  { "acao": "agir", "url": "/virtual.html", "refDe": "Pedido #1043", "guardarComo": "item",
+    "acaoDaPagina": { "type": "hover" } },
+
+  { "acao": "agir", "url": "/virtual.html", "acaoDaPagina": { "type": "click", "selector": "#novo" } },
+  { "acao": "esperar", "ms": 400 },
+
+  { "acao": "agir", "url": "/virtual.html", "usarRef": "item", "acaoDaPagina": { "type": "click" } },
+
+  { "acao": "mundoPagina", "url": "/virtual.html", "mundo": "MAIN",
+    "script": "const j = document.getElementById('janela'); j.scrollTop = 900; j.dispatchEvent(new Event('scroll')); return j.scrollTop;" },
+  { "acao": "esperar", "ms": 400 },
+
+  { "acao": "agir", "url": "/virtual.html", "usarRef": "item", "acaoDaPagina": { "type": "click" } },
+
+  { "acao": "agir", "url": "/virtual.html", "acaoDaPagina": { "type": "click", "selector": "#abrir-modal" } },
+  { "acao": "agir", "url": "/virtual.html", "refDe": "Fechar", "guardarComo": "fechar", "acaoDaPagina": { "type": "hover" } },
+  { "acao": "agir", "url": "/virtual.html", "usarRef": "fechar", "acaoDaPagina": { "type": "click" } },
+  { "acao": "esperar", "ms": 300 },
+  { "acao": "agir", "url": "/virtual.html", "usarRef": "fechar", "acaoDaPagina": { "type": "click" } }
+]

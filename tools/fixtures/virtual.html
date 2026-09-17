@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Pedidos — lista virtualizada</title>
+<style>
+  body { font: 15px system-ui; margin: 24px; max-width: 760px; }
+  #janela { height: 240px; overflow-y: auto; border: 1px solid #ccc; position: relative; }
+  #trilho { position: relative; }
+  .linha { position: absolute; left: 0; right: 0; height: 40px; display: flex; align-items: center;
+           gap: 12px; padding: 0 10px; border-bottom: 1px solid #eee; box-sizing: border-box; }
+  dialog { padding: 18px; }
+</style>
+</head>
+<body>
+<!--
+  Esta página existe para um caso só: o nó que continua vivo e passa a significar outra coisa.
+
+  A lista é virtualizada de verdade — oito `<li>` reaproveitados para quinhentos pedidos. Rolar não
+  cria nem destrói elemento nenhum: troca o texto dos mesmos oito. É assim que React e Vue fazem, e
+  é o que torna um ref estável perigoso sem conferência de assinatura: o ref continua resolvendo,
+  o elemento continua clicável, e o item que ele representa já é outro.
+
+  O botão "chegou pedido novo" produz o caso irmão: o item que o ref representava continua na tela,
+  só que em outro nó. Aí a resposta certa não é recusar — é reencontrá-lo pelo texto.
+-->
+<h1>Pedidos</h1>
+
+<p>
+  <button id="novo">Chegou pedido novo</button>
+  <button id="abrir-modal">Abrir detalhes</button>
+  <button id="ir-detalhe">Ir para /detalhe (sem recarregar)</button>
+</p>
+
+<div id="janela"><div id="trilho"><ul id="lista" style="margin:0;padding:0"></ul></div></div>
+
+<dialog id="modal">
+  <p>Detalhes do pedido</p>
+  <button id="fechar-modal">Fechar</button>
+</dialog>
+
+<iframe id="quadro" src="/embutido.html" width="420" height="120" title="Resumo da conta"></iframe>
+
+<script>
+  const ALTURA = 40;
+  const VISIVEIS = 8;
+  let dados = Array.from({ length: 500 }, (_, i) => ({ id: 1043 + i, valor: (20 + i * 0.5).toFixed(2) }));
+
+  const lista = document.getElementById("lista");
+  const trilho = document.getElementById("trilho");
+  const janela = document.getElementById("janela");
+
+  // Os oito nós são criados uma vez e nunca mais. Tudo o que a rolagem faz é reescrevê-los.
+  const linhas = Array.from({ length: VISIVEIS }, () => {
+    const li = document.createElement("li");
+    li.className = "linha";
+    li.innerHTML = '<span class="rotulo"></span><span class="valor"></span><button class="ver">Ver</button>';
+    lista.append(li);
+    return li;
+  });
+
+  function pintar() {
+    trilho.style.height = `${dados.length * ALTURA}px`;
+    const inicio = Math.floor(janela.scrollTop / ALTURA);
+    linhas.forEach((li, k) => {
+      const item = dados[inicio + k];
+      li.style.transform = `translateY(${(inicio + k) * ALTURA}px)`;
+      li.style.display = item ? "flex" : "none";
+      if (!item) return;
+      li.querySelector(".rotulo").textContent = `Pedido #${item.id}`;
+      li.querySelector(".valor").textContent = `R$ ${item.valor}`;
+      li.querySelector(".ver").setAttribute("data-pedido", String(item.id));
+    });
+  }
+
+  janela.addEventListener("scroll", pintar);
+  pintar();
+
+  // Item novo no topo: o que o ref apontava continua na tela, um nó abaixo.
+  document.getElementById("novo").addEventListener("click", () => {
+    dados = [{ id: 9001, valor: "99.90" }, ...dados];
+    pintar();
+  });
+
+  const modal = document.getElementById("modal");
+  document.getElementById("abrir-modal").addEventListener("click", () => modal.showModal());
+  document.getElementById("fechar-modal").addEventListener("click", () => modal.close());
+
+  // Navegação de SPA: a URL muda, o documento não. Os refs têm de sobreviver a isto.
+  document.getElementById("ir-detalhe").addEventListener("click", () => {
+    history.pushState({}, "", "/detalhe");
+    document.querySelector("h1").textContent = "Pedidos — detalhe";
+  });
+</script>
+</body>
+</html>

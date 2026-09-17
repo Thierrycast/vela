@@ -110,15 +110,47 @@ export function signatureOf(element: Element): Signature {
   };
 }
 
-/** Rótulo que só difere em número — "3 novas mensagens" e "4 novas mensagens" — é o mesmo botão. */
 const withoutDigits = (value: string) => fold(value).replace(/\d+/g, "#");
+const letterCount = (value: string) => (value.match(/\p{L}/gu) ?? []).length;
+
+/**
+ * O contador que muda não é a linha que trocou — mas a diferença entre os dois é fina.
+ *
+ * "3 novas mensagens" virando "4 novas mensagens" é o mesmo botão com o número atualizado, e
+ * recusar aí custaria uma rodada à toa. "Pedido #1043" virando "Pedido #9001" **também** difere só
+ * em dígitos, e é a coisa mais diferente que existe: outra linha, outro pedido, outro clique.
+ *
+ * Medido contra uma lista virtualizada de verdade, essa regra ingênua deixava passar exatamente o
+ * caso que a assinatura existe para barrar. O que separa os dois é quanto texto sobra quando os
+ * números saem: num contador, o rótulo continua dizendo o que o botão faz; num identificador, o
+ * número **era** o conteúdo — tirado ele, sobra um prefixo curto que serve para qualquer item da
+ * lista. Dez letras é o corte: acima disso o rótulo se sustenta sozinho, abaixo ele não distingue
+ * nada, e na dúvida a resposta é tratar como elemento reciclado.
+ */
+const MIN_LETRAS_PARA_CONTADOR = 10;
 
 function compare(recorded: Signature, current: Signature): Verdict {
   if (recorded.role !== current.role || recorded.tag !== current.tag) return "recycled";
   if (recorded.attrHash !== current.attrHash) return "recycled";
   if (recorded.nameHash === current.nameHash) return recorded.path === current.path ? "identical" : "moved";
-  if (withoutDigits(recorded.nameShown) === withoutDigits(current.nameShown)) return "drifted";
+  const semDigitos = withoutDigits(recorded.nameShown);
+  if (semDigitos === withoutDigits(current.nameShown) && letterCount(semDigitos) >= MIN_LETRAS_PARA_CONTADOR) return "drifted";
   return "recycled";
+}
+
+/**
+ * A regra de contador-versus-identificador, exposta para teste.
+ *
+ * Ela decide se um rotulo que mudou continua sendo o mesmo elemento, e errar aqui nao produz erro:
+ * produz clique no item errado com relatorio de sucesso. E barata de testar isoladamente e cara de
+ * testar so em pagina real, entao vale as duas coisas.
+ */
+export function compareForTest(antes: string, depois: string): Verdict {
+  const base = { tag: "span", role: "generic", attrHash: 0, path: "a/b" };
+  return compare(
+    { ...base, nameHash: hash(fold(antes)), nameShown: antes },
+    { ...base, nameHash: hash(fold(depois)), nameShown: depois },
+  );
 }
 
 const distinctive = (sig: Signature) => sig.nameShown.trim().length >= 3 && !GENERIC.has(fold(sig.nameShown));
@@ -189,8 +221,12 @@ export function resolveLocal(id: number): Resolution {
   }
 
   record.seenAt = Date.now();
+  // O rótulo **de antes** é guardado agora: regravar a assinatura primeiro e só depois montar a
+  // resposta fazia o "era X, agora é Y" sair com o mesmo texto dos dois lados — dizendo ao modelo
+  // que nada tinha mudado justamente na hora de contar o que mudou.
+  const anterior = record.sig.nameShown;
   if (verdict === "drifted") record.sig = current;
-  return { status: "ok", element, verdict, recorded: record.sig.nameShown, current: current.nameShown, rebound: false };
+  return { status: "ok", element, verdict, recorded: anterior, current: current.nameShown, rebound: false };
 }
 
 /** O ref como ele chega do background, já traduzido para o número local deste frame: `#12`. */

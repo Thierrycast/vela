@@ -182,6 +182,9 @@ await sleep(2500);
 
 // --- passos -------------------------------------------------------------------------
 const resultados = [];
+/** Refs guardados entre passos: o caso da reciclagem so existe se o ref for lido ANTES da pagina
+ *  mudar e usado DEPOIS. Resolver na hora de agir mediria outra coisa. */
+const refsGuardados = new Map();
 if (fixtureServer) process.on("exit", () => fixtureServer.close());
 
 /** Digitar é no React: mexer só no `value` não dispara onChange, e a mensagem nunca sai. */
@@ -244,9 +247,40 @@ for (const [indice, passo] of roteiro.entries()) {
        * que se quer conferir aqui e a arvore: se o botao de cada item aparece dentro do item.
        */
       const alvo = passo.url ? (String(passo.url).startsWith("http") ? passo.url : enderecoFixture(passo.url)) : null;
-      const acaoDaPagina = passo.acao === "retrato"
+      let acaoDaPagina = passo.acao === "retrato"
         ? { type: "extractPage", ...(passo.depth ? { depth: passo.depth } : {}) }
         : passo.acaoDaPagina;
+
+      /*
+       * `refDe` resolve o ref pelo texto antes de agir. O numero local de um elemento so existe
+       * depois da leitura, e escreve-lo no roteiro a mao o amarraria a uma ordem de varredura que
+       * muda a cada ajuste da pagina — o teste passaria a falhar por motivo errado.
+       */
+      if (passo.usarRef) {
+        const guardado = refsGuardados.get(passo.usarRef);
+        if (!guardado) { console.log(`${rotulo} → nao tenho ref guardado com o nome "${passo.usarRef}"`); resultados.push({ nome: rotulo, passou: false }); continue; }
+        acaoDaPagina = { ...acaoDaPagina, ref: guardado };
+        console.log(`   (usando o ref ${guardado}, lido antes da pagina mudar)`);
+      }
+
+      if (passo.refDe) {
+        const achado = await evaluate(workerSession, `(async () => {
+          const abas = await chrome.tabs.query({});
+          const aba = abas.find((item) => (item.url ?? "").startsWith(${JSON.stringify(alvo)}));
+          if (!aba) return "";
+          // frameId 0: sem isto a mensagem vai para todos os quadros, e quem responde primeiro
+          // pode ser um iframe — que nao tem o elemento procurado e devolve "nao achei".
+          const r = await chrome.tabs.sendMessage(aba.id, { type: "agent:action", action: { type: "find", query: ${JSON.stringify(passo.refDe)}, limit: 3 }, actionId: "ref" }, { frameId: 0 });
+          // A barra invertida precisa sobreviver a esta string: escrita simples, o template literal
+          // a engole e a expressao vira uma classe de caracteres que casa com quase tudo.
+          const m = /\\[#(\\d+)\\]/.exec(r?.content ?? "");
+          return m && m[1] ? "#" + m[1] : "";
+        })()`);
+        if (!achado) { console.log(`${rotulo} → nao achei "${passo.refDe}" para pegar o ref`); resultados.push({ nome: rotulo, passou: false }); continue; }
+        console.log(`   (ref de "${passo.refDe}" = ${achado})`);
+        acaoDaPagina = { ...acaoDaPagina, ref: achado };
+        if (passo.guardarComo) refsGuardados.set(passo.guardarComo, achado);
+      }
       const saida = await evaluate(workerSession, `(async () => {
         const alvo = ${JSON.stringify(alvo)};
         const abas = await chrome.tabs.query({});
@@ -254,7 +288,9 @@ for (const [indice, passo] of roteiro.entries()) {
         if (!aba) return "nenhuma aba casa com " + alvo + " — abertas: " + abas.map((item) => item.url).join(", ");
         try { await chrome.scripting.executeScript({ target: { tabId: aba.id }, files: ["content.js"] }); }
         catch (erro) { return "nao consegui injetar o content script: " + (erro?.message ?? erro); }
-        const resposta = await chrome.tabs.sendMessage(aba.id, { type: "agent:action", action: ${JSON.stringify(acaoDaPagina)}, actionId: "check" });
+        // Sempre o quadro de cima: numa pagina com iframe, a mensagem sem frameId chega a todos e
+        // quem responde primeiro pode ser o de dentro — que nao tem o elemento e diz que nao achou.
+        const resposta = await chrome.tabs.sendMessage(aba.id, { type: "agent:action", action: ${JSON.stringify(acaoDaPagina)}, actionId: "check" }, { frameId: ${JSON.stringify(passo.frameId ?? 0)} });
         return JSON.stringify(resposta, null, 1);
       })()`);
       console.log(`${rotulo} →

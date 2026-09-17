@@ -189,7 +189,7 @@ const TEXT = { type: "string" };
 const TOOLS = [
   {
     name: "vela_read_page",
-    description: "Lê a aba ativa do Chrome do usuário e devolve título, URL, estrutura e a lista de elementos interativos, cada um com um identificador [ref_N_M]. Use estes refs em vela_act. Campos sensíveis (senha, código de verificação, cartão) chegam como [valor omitido].",
+    description: "Lê a aba ativa do Chrome do usuário e devolve título, URL, estrutura e a lista de elementos interativos, cada um com um identificador [e412]. Use estes refs em vela_act — eles continuam valendo em releituras da mesma pagina e deixam de valer quando a aba navega. Campos sensíveis (senha, código de verificação, cartão) chegam como [valor omitido].",
     inputSchema: {
       type: "object",
       properties: {

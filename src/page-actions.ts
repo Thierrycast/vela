@@ -1,5 +1,5 @@
 import { ActionResult, BrowserAction } from "./types";
-import { accessibleName, fold, roleOf } from "./dom-semantics";
+import { accessibleName, fold, isVisible, roleOf } from "./dom-semantics";
 import { captureSnapshot, findElements } from "./page-snapshot";
 import { resolveRef } from "./element-registry";
 import { callPageTool, describePageTools, listPageTools } from "./page-tools";
@@ -99,6 +99,17 @@ export function resolveTarget(action: { ref?: string; selector?: string }): Targ
     }
     if (resolution.status === "changed") {
       return { element: null, error: failure("ref_changed", `Esse elemento ainda existe, mas agora é outra coisa: quando você o leu era “${resolution.recorded}” e agora é “${resolution.current}”. Isso acontece em listas que reaproveitam as mesmas linhas conforme você rola. Não fiz nada. Chame find com query “${resolution.recorded}” para pegar o ref atual desse item — é mais direto que reler a página inteira.`) };
+    }
+    /*
+     * Existir não é o mesmo que estar disponível.
+     *
+     * Um `<dialog>` fechado, uma aba de conteúdo escondida e um menu recolhido mantêm seus botões
+     * no DOM, resolvendo normalmente. Clicar neles não dá erro: dá "sem efeito perceptível", que
+     * manda o modelo procurar culpa no alvo errado — ele tentaria outro seletor, outro caminho,
+     * quando o que falta é reabrir o que se fechou.
+     */
+    if (!isVisible(resolution.element)) {
+      return { element: null, error: failure("element_not_interactable", `“${resolution.recorded}” ainda está na página, mas não está visível — o que costuma significar que o modal, o menu ou a aba onde ele fica foi fechado. Reabra o que o contém e leia de novo; clicar nele agora não faria nada.`) };
     }
     const note = resolution.rebound
       ? " (a lista reaproveitou os elementos ao rolar; reencontrei o item pelo texto)"

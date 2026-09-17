@@ -169,7 +169,7 @@ const store: Record<string, unknown> = {
   "vela:brand-renamed": true,
   "vela:logs": events.map((event, index) => ({ id: String(index), level: event.kind === "error" ? "error" : "info", event: event.kind === "error" ? "agent.tool_error" : "agent.tool_completed", createdAt: Date.now() - index * 60_000 })),
   "vela:user-scripts": sampleScripts,
-  "vela:action-stats": { total: 46, noEffect: 4, failures: 3, byCode: { stale_snapshot: 2, element_not_found: 1 }, byType: { click: 22, type: 9, extractPage: 15 }, since: Date.now() - 86_400_000 },
+  "vela:action-stats": { total: 46, noEffect: 4, failures: 3, turns: 9, rounds: 31, toolCalls: 46, batchItems: 12, byCode: { ref_changed: 2, element_not_found: 1 }, byType: { click: 22, type: 9, extractPage: 15 }, since: Date.now() - 86_400_000 },
 };
 
 const noop = () => undefined;

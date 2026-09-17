@@ -96,6 +96,29 @@ mais ampla da lista — o código roda com a autoridade do site, numa aba logada
 estrito continua recusando; nesse caso a resposta diz que o caminho não existe ali, em vez de
 deixar o modelo reescrever o script dez vezes contra uma parede.
 
+### O contador que muda e a linha que trocou diferem por dez letras
+
+A assinatura tinha uma regra generosa demais: rótulo que difere só em dígitos era considerado o
+mesmo elemento com o número atualizado. Ela existia para o caso honesto — "3 novas mensagens"
+virando "4 novas mensagens" é o mesmo botão, e recusar ali custaria uma rodada à toa.
+
+Contra uma lista virtualizada de verdade (`tools/fixtures/virtual.html`, oito nós reaproveitados
+para quinhentos pedidos), essa regra deixou passar exatamente o caso que a assinatura existe para
+barrar: o ref de "Pedido #1043" clicou em "Pedido #9001" e **reportou sucesso**. Identificadores
+numéricos — pedido, nota fiscal, protocolo, código — também diferem só em dígitos, e são a coisa
+mais diferente que existe.
+
+O que separa os dois é quanto texto sobra quando os números saem. Num contador, o rótulo continua
+dizendo o que o botão faz; num identificador, o número **era** o conteúdo, e sem ele resta um
+prefixo curto que serve para qualquer linha. O corte está em dez letras.
+
+Dois consertos vieram junto, achados na mesma bateria. A mensagem de "era X, agora é Y" saía com o
+mesmo texto dos dois lados, porque a assinatura era regravada antes de a resposta ser montada —
+dizia que nada mudou justamente ao contar o que mudou. E um elemento que existe mas está invisível
+(botão de um `<dialog>` fechado, aba de conteúdo escondida) resolvia normalmente e recebia um
+clique inútil; agora ele recusa explicando que o que falta é reabrir o que se fechou, em vez de
+mandar o modelo procurar culpa no alvo.
+
 ### O retrato é uma árvore, não uma lista
 
 A lista plana dizia o que existe e escondia a única coisa que o modelo não consegue deduzir: a qual
@@ -438,9 +461,10 @@ esse ref de volta. Seletor CSS tem quatro problemas que ref não tem: o modelo *
 seletor a partir de um DOM que viu parcialmente; `querySelector` pega silenciosamente o primeiro
 de N; class names hasheados (Tailwind, CSS-in-JS) quebram sempre; e shadow DOM é inexpressável.
 
-O preço do ref é ficar obsoleto quando o DOM muda — mas isso é **detectável**. Toda ação carrega
-o id do snapshot; se não bater, o modelo recebe `stale_snapshot` e relê. Seletor errado é
-indetectável, que é bem pior.
+O preço do ref é ficar obsoleto quando o DOM muda — mas isso é **detectável**, e é aí que mora a
+diferença para o seletor. Hoje a detecção é por assinatura, não por id de leitura: o ref sobrevive
+a releituras e só recusa quando o elemento morreu (`page_gone`, `element_not_found`) ou virou outra
+coisa (`ref_changed`). Seletor errado é indetectável, que é bem pior.
 
 `selector` continua aceito como alternativa para o que não aparece no snapshot.
 
@@ -505,7 +529,7 @@ autoriza a agente a agir, e quem afrouxa o freio não pode ser quem ele segura.
 ### Toda ação devolve o que realmente aconteceu
 
 `ActionResult` é `{ok:true, summary, …}` ou `{ok:false, code, summary}`, com códigos como
-`stale_snapshot`, `restricted_url`, `element_not_found`, `denied`, `timeout`. O `click` instala
+`page_gone`, `ref_changed`, `restricted_url`, `element_not_found`, `denied`, `timeout`. O `click` instala
 um `MutationObserver` e compara a URL antes/depois para reportar se a página **reagiu, navegou ou
 não fez nada**.
 
@@ -1150,6 +1174,11 @@ apaga** a que já está configurada, senão importar um backup limparia o acesso
 "Restaurar padrões" também preserva os providers.
 
 ## Medir antes de decidir sobre o CDP
+
+> **Atualizado.** A decisão foi tomada: a escalada existe, cobre clique, tecla, digitação e
+> ponteiro, e o anexo se promove a sessão quando a tarefa insiste nele. A contagem continua útil
+> por outro motivo — agora ela diz se o **Modo preciso** vale a pena ficar ligado, e acompanha
+> rodadas por tarefa, que é a medida da reforma de navegação.
 
 `action-stats.ts` conta o desfecho real de cada ação: total, quantas saíram **sem efeito
 perceptível**, e as falhas por código. A conta aparece em Opções → Avançado.
