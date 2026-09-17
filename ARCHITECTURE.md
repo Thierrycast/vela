@@ -84,6 +84,19 @@ dez execuções:
   vinha: a ação estourava o limite e voltava "a página não respondeu", numa página pronta. É o
   caminho que o lote multi-aba usa o tempo todo.
 
+### O custo fixo de cada rodada
+
+Cada ida ao modelo carrega o system prompt (~4,2 mil tokens) **e** o esquema completo das doze
+ferramentas (~2,7 mil). A lista de ferramentas dentro do prompt repetia o que o esquema já diz, com
+menos precisão e sem os parâmetros — pagava-se duas vezes pela mesma informação, em toda rodada.
+Ficaram no prompt só as ferramentas cuja regra de uso o esquema não carrega; as outras são uma linha.
+
+A contagem de ações (`action-stats.ts`) também era um ler-somar-gravar por ação: numa tarefa de
+trinta cliques, sessenta idas ao storage para mudar um número — e, pior, uma corrida em que duas
+ações terminando juntas liam o mesmo valor e uma sobrescrevia a outra, errando justamente a
+contagem que existe para medir. Agora ela acumula em memória e grava em lote, fechando no fim do
+turno.
+
 ### A conversa grava só o que mudou
 
 As cinquenta conversas moravam numa chave só de `chrome.storage.local`. Cada gravação — a cada pausa

@@ -52,18 +52,22 @@ export function buildSystemPrompt(settings: AppSettings, memory?: Record<string,
     "## Ferramentas (Sua Caixa de Utilidades)",
     "- `browser_action` — navigate, click, type, keyPress, hover, drag, selectOption, history, scroll, extractPage, find, screenshot, waitFor, wait, pageTool, evaluateScript. Toda chamada devolve o que realmente aconteceu. Leia o resultado antes do próximo passo. Para inspecionar propriedades profundas do DOM, pegar dados brutos ou manipular a página de forma mais técnica, você pode usar a ação `evaluateScript` com um bloco de código JavaScript.",
     "- `browser_batch` — várias ações de navegador numa chamada só, em sequência. Ver “Agrupe o que você já consegue prever”.",
-    "- `tab_manage` — governa as abas da sessão da Vela: listar, focar, fechar, ou fechar todas menos uma. Só alcança o grupo “Vela”; as outras abas são do usuário.",
-    "- `vela_settings` — lê e muda as preferências da própria Vela (voz, visual, cursor, moldura, tema). Consulte o campo antes de escrever para ver os valores válidos. Se o usuário pedir para trocar a voz ou o visual, faça — não mande ele abrir as configurações.",
     "- `web_search` — busca na web via provedor nativo. **Dica de Busca:** O usuário prefere DuckDuckGo! Se não for pedido de forma explícita outro motor, navegue diretamente para `https://html.duckduckgo.com/html/?q=Sua+Busca` usando `browser_action(navigate)`, pois a versão HTML do DuckDuckGo é extremamente leve e perfeita para leitura de DOM.",
     "- `web_fetch` — lê o conteúdo de uma URL **sem abrir aba**. Prefira esta ferramenta quando só precisa ler. Use `navigate` apenas quando precisar interagir com a página (login, formulário, clique) ou quando o usuário pedir para ver a página.",
     "- `read_console_messages` e `read_network_requests` — o que a página diz para si mesma. O console costuma explicar por que uma ação não teve efeito; a rede mostra de onde vêm os dados de uma lista, e às vezes dá para pegá-los direto em vez de percorrer a interface inteira. Os dois **começam a gravar quando você os chama**: chame primeiro, dispare a ação, leia depois — a primeira chamada nunca traz o passado.",
-    "- `request_user` — devolve o controle ao usuário. Use quando precisar que ele passe por um Captcha, faça um login com autenticação de dois fatores, aprove um pagamento ou dê uma confirmação humana estrita.",
-    "- `memory_write`, `memory_read` e `memory_delete` — memória permanente. Guarde preferências, perfil ou informações que o usuário pediu para você lembrar, e apague dados quando não forem mais necessários.",
-    "- `script_write` e `script_list` — automatizações pessoais do usuário, no formato de userscript do Tampermonkey. O código precisa trazer o bloco `==UserScript==` com `@name`, `@description` e `@match`. Um script salvo nasce **desativado**: o usuário revisa e habilita. Você nunca os executa.",
     "- `delegate_task` — manda uma tarefa longa para rodar por trás, numa aba própria, enquanto você continua conversando. Descreva a tarefa por completo (quem for executá-la não vê o resto desta conversa) e responda ao usuário na mesma hora dizendo que vai cuidar disso. O resultado chega sozinho quando terminar — você não espera por ele. Use quando o trabalho levaria muitas chamadas seguidas e deixaria a pessoa esperando calada; não use para o que você resolve em duas ou três trocas.",
     ...(isLiveFastTier ? [
       "  Numa conversa por voz isto vale ainda mais: uma tarefa de várias etapas deixaria a fala muda por minutos, e o resultado chega falado quando ficar pronto.",
     ] : []),
+    /*
+     * Esta lista não repete o que o esquema das ferramentas já diz.
+     *
+     * Cada rodada carrega o system prompt **e** o esquema completo das doze ferramentas — cerca de
+     * sete mil tokens de custo fixo. Descrever de novo aqui o que o esquema descreve melhor (e com
+     * os parâmetros) era pagar duas vezes pela mesma informação. Ficam só as que têm regra de uso
+     * que o esquema não carrega.
+     */
+    "- As demais ferramentas — `tab_manage`, `vela_settings`, `request_user`, `memory_write`/`memory_read`/`memory_delete`, `script_write`/`script_list` — estão descritas no próprio esquema, com os parâmetros. Duas regras que o esquema não diz: se o usuário pedir para trocar a voz ou o visual, use `vela_settings` em vez de mandá-lo abrir as configurações; e um script salvo nasce desativado — você nunca o executa.",
     "",
     "## Ordem de preferência ao agir numa página",
     "Uma escada de tentativas, não uma regra rígida: comece pelo degrau mais confiável e rápido para aquele elemento, e só suba de degrau quando o anterior falhar ou claramente não se aplicar. Nunca pare numa falha e pergunte ao usuário antes de esgotar os degraus abaixo — a única exceção é quando ele já pediu um método específico, e aí é esse método que você usa, sem escalar por conta própria.",
