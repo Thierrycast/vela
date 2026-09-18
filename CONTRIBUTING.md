@@ -24,16 +24,9 @@ Ver [docs/TESTES.md](docs/TESTES.md).
 
 ## Integração contínua
 
-O workflow que roda os quatro comandos acima em cada PR está pronto em
-[`docs/ci-workflow.yml`](docs/ci-workflow.yml). Para ativá-lo:
-
-```bash
-mkdir -p .github/workflows && git mv docs/ci-workflow.yml .github/workflows/ci.yml
-git commit -m "CI: tipos, lint, build e harness em cada PR" && git push
-```
-
-O push de um arquivo em `.github/workflows/` exige um token com escopo `workflow`
-(`gh auth refresh -s workflow -h github.com`, uma vez).
+Cada PR roda os quatro comandos acima no GitHub Actions
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Falhou lá, falha aqui: o harness não
+precisa de Chrome nem de chave de API.
 
 ## Como o código é escrito aqui
 

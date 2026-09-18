@@ -1,5 +1,6 @@
 # Vela
 
+[![CI](https://github.com/Thierrycast/vela/actions/workflows/ci.yml/badge.svg)](https://github.com/Thierrycast/vela/actions/workflows/ci.yml)
 [![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)](LICENSE)
 
 **Uma agente que opera o seu Chrome.** Ela lê a página como texto — não como imagem —, navega,
