@@ -105,6 +105,10 @@ export type AppSettings = {
     baseUrl: string;
     apiKey: string;
     transcriptionModel: string;
+    /** Idioma passado ao modelo de transcrição. "auto" deixa o servidor detectar. */
+    transcriptionLanguage: string;
+    /** Trocar a voz da síntese para uma do idioma em que a resposta foi escrita. */
+    followLanguage: boolean;
     speechModel: string;
     speechVoice: string;
     streamingUrl: string;
@@ -269,6 +273,8 @@ export const defaultSettings: AppSettings = {
     baseUrl: "",
     apiKey: "",
     transcriptionModel: "groq/whisper-large-v3-turbo",
+    transcriptionLanguage: "auto",
+    followLanguage: true,
     speechModel: "tts-1",
     speechVoice: "piper:pt_BR-cadu-medium",
     streamSpeech: true,

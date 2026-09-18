@@ -748,3 +748,28 @@ console.log("\n=== provedor: degradação não fica gravada ===");
   await agentLoop.submit("segunda", emit);
   console.log(`  "invalid" genérico não desliga as ferramentas: ${semFerramentas === 0 ? "sim" : "NAO"} (${semFerramentas} requisição(ões) sem tools)`);
 }
+
+// O filtro que separa fala de ruído. Cada item desta lista saiu de uma sessão real: foram eles que
+// abriram turnos por engano, interromperam o trabalho em andamento e fizeram a Vela anunciar
+// fracasso no que tinha acabado de dar certo.
+console.log("\n=== voz: ruído não vira pedido ===");
+{
+  const { avaliarTranscricao } = await import("../src/transcricao");
+  const ruido = [".", "...", "  ", "Thank you.", "thank you for watching", "so", "E aí", "é...", "Obrigado.", "Legendas pela comunidade Amara.org", "hmm", "Bye"];
+  const fala = ["sim", "não", "pare", "abre o carrinho", "que horas são?", "ok", "Beleza, vamos lá. Eu estou procurando um S25 Ultra."];
+  const descartou = ruido.filter((item) => avaliarTranscricao(item).descartar);
+  const passou = fala.filter((item) => !avaliarTranscricao(item).descartar);
+  console.log(`  ruído descartado: ${descartou.length === ruido.length ? "sim" : `NAO (passou: ${ruido.filter((i) => !avaliarTranscricao(i).descartar).join(", ")})`}`);
+  console.log(`  fala de verdade passa: ${passou.length === fala.length ? "sim" : `NAO (barrou: ${fala.filter((i) => avaliarTranscricao(i).descartar).join(", ")})`}`);
+  console.log(`  o motivo do descarte é dito: ${avaliarTranscricao(".").motivo ? "sim" : "NAO"}`);
+}
+
+// A voz acompanha o idioma do texto — é o que evita responder português com sotaque inglês.
+console.log("\n=== voz: idioma do texto ===");
+{
+  const { idiomaDoTexto, combinaComIdioma } = await import("../src/idioma");
+  console.log(`  português reconhecido: ${idiomaDoTexto("Abri a página de resultados e são três produtos") === "pt" ? "sim" : "NAO"}`);
+  console.log(`  inglês reconhecido: ${idiomaDoTexto("I opened the results page and there are three items") === "en" ? "sim" : "NAO"}`);
+  console.log(`  sem sinal, mantém o padrão: ${idiomaDoTexto("1706.03762", "pt") === "pt" ? "sim" : "NAO"}`);
+  console.log(`  voz casa com o idioma: ${combinaComIdioma("pt_BR", "pt") && !combinaComIdioma("en_US", "pt") ? "sim" : "NAO"}`);
+}

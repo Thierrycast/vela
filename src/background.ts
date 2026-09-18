@@ -62,6 +62,9 @@ const broadcast = (message: SidecarInbound) => {
  * 3. **Notificação do Chrome**, só quando as duas primeiras falham — página restrita, `chrome://`,
  *    Web Store, onde nenhum content script entra.
  */
+/** O painel está aberto agora? Enquanto houver porta viva, ele é a superfície da vez. */
+const painelAberto = () => sidecarPorts.size > 0;
+
 const notifySurfaces = async (message: SidecarInbound): Promise<number> => {
   broadcast(message);
   let surfaces = sidecarPorts.size;
@@ -150,6 +153,8 @@ function ensureKeepAlive() {
 }
 
 let voiceMode: "off" | "live" | "dictation" = "off";
+/** Último estado publicado pela voz: é o rótulo que a janelinha mostra ao (re)aparecer. */
+let voiceState = "idle";
 
 async function ensureVoiceRuntime() {
   if (!chrome.offscreen) throw new Error("Esta versão do Chrome não oferece documento offscreen.");
@@ -249,9 +254,21 @@ async function askAgent(prompt: string): Promise<string> {
  * Quando a fala chegava com a Vela ocupada, o turno era descartado em silêncio e ela **repetia a
  * resposta anterior**: você perguntava outra coisa e ouvia de novo o que já tinha ouvido.
  */
-async function speakAnswerAfter(previousId: string | null, narrador?: ReturnType<typeof criarNarrador>) {
+async function speakAnswerAfter(previousId: string | null, narrador?: ReturnType<typeof criarNarrador>, interrompido = false) {
   const messages = await conversation.all();
   const last = [...messages].reverse().find((item: ChatMessage) => item.role === "assistant" && item.content.trim());
+  /*
+   * Turno interrompido não anuncia fracasso.
+   *
+   * Quem interrompe foi a própria pessoa falando de novo — e o pedido novo já está sendo processado.
+   * Dizer "não consegui concluir essa" aí é mentira dupla: ela não falhou, e o que ela estava
+   * fazendo muitas vezes já tinha dado certo. Foi exatamente o que se ouviu na sessão de teste,
+   * depois de uma transcrição de ruído abrir um turno por cima do que estava em andamento.
+   */
+  if (interrompido) {
+    traceRecord("voice", "turno interrompido: nada a falar", { from: "background", data: { anterior: previousId } });
+    return;
+  }
   if (!last || last.id === previousId) {
     // Turno que termina sem resposta — porque estourou o teto de etapas, por exemplo — deixava a
     // conversa em silêncio. Numa conversa falada, silêncio é lido como "não me ouviu", e a pessoa
@@ -266,6 +283,9 @@ async function speakAnswerAfter(previousId: string | null, narrador?: ReturnType
   const restante = narrador.restante(last.id, last.content);
   if (restante) void chrome.runtime.sendMessage({ type: "voice:speak-queue", text: restante }).catch(() => undefined);
 }
+
+/** Conta os turnos abertos pela voz: o turno que não é o último não fala mais nada. */
+let turnoDaVoz = 0;
 
 async function lastAnswerId(): Promise<string | null> {
   const messages = await conversation.all();
@@ -290,6 +310,7 @@ async function speakTurn(text: string, enunciado?: string) {
     const until = Date.now() + 3000;
     while (agentLoop.isRunning() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 60));
   }
+  const meuTurno = ++turnoDaVoz;
   const previous = await lastAnswerId();
   const narrador = criarNarrador((frase) => { void chrome.runtime.sendMessage({ type: "voice:speak-queue", text: frase }).catch(() => undefined); });
   const comNarracao = (message: SidecarInbound) => {
@@ -310,7 +331,8 @@ async function speakTurn(text: string, enunciado?: string) {
     traceRecord("voice", "fala descartada: o turno anterior não encerrou", { from: "background", ok: false, code: "ocupada", data: { texto: text.slice(0, 200) } });
     return;
   }
-  await speakAnswerAfter(previous, narrador);
+  // Se outra fala abriu um turno enquanto este rodava, quem fala é o novo — este cala.
+  await speakAnswerAfter(previous, narrador, meuTurno !== turnoDaVoz);
 }
 
 /** Ler uma resposta em voz alta sobe o runtime de áudio sozinho: não faz sentido exigir que o
@@ -357,6 +379,12 @@ async function rewind(id: string, text?: string) {
   await runTurn(prompt);
 }
 
+async function mostrarPulseSePrecisa() {
+  const settings = await loadSettings();
+  if (!settings.voice.showPulse) return;
+  void notifyTabs({ type: "pulse:show", state: VOICE_LABEL[voiceState] ?? "Ouvindo", visual: settings.voice.visual, shader: settings.voice.customShader });
+}
+
 async function startVoice(mode: "live" | "dictation") {
   try {
     await ensureVoiceRuntime();
@@ -366,7 +394,14 @@ async function startVoice(mode: "live" | "dictation") {
       // A preferência viaja junto: o content script não lê settings, e pedir depois deixaria o
       // Pulse aparecendo com um visual e trocando para outro na frente do usuário.
       const settings = await loadSettings();
-      if (settings.voice.showPulse) void notifyTabs({ type: "pulse:show", state: "Ouvindo", visual: settings.voice.visual, shader: settings.voice.customShader });
+      /*
+       * A janelinha é a superfície de quem está **sem** o painel.
+       *
+       * Com o painel aberto, ela é a mesma coisa duas vezes na tela — o orb, o estado e o rascunho
+       * aparecem nos dois lugares, e a página fica com um retângulo por cima à toa. Ela entra quando
+       * o painel fecha (ver `mostrarPulseSePrecisa`) e sai quando ele volta.
+       */
+      if (settings.voice.showPulse && !painelAberto()) void notifyTabs({ type: "pulse:show", state: "Ouvindo", visual: settings.voice.visual, shader: settings.voice.customShader });
     }
   } catch (error) {
     voiceMode = "off";
@@ -491,6 +526,8 @@ chrome.runtime.onConnect.addListener((port) => {
   }
   if (port.name !== SIDECAR_PORT) return;
   sidecarPorts.add(port);
+  // O painel voltou: a janelinha sai de cena, senão a mesma conversa fica em dois lugares.
+  void notifyTabs({ type: "pulse:hide" });
   void injectIntoActiveTab();
   void (async () => {
     try {
@@ -500,7 +537,12 @@ chrome.runtime.onConnect.addListener((port) => {
       port.postMessage({ type: "chat:session", title: session?.title ?? "", tabCount: session?.tabIds.length ?? 0 } satisfies SidecarInbound);
     } catch { sidecarPorts.delete(port); }
   })();
-  port.onDisconnect.addListener(() => { void chrome.runtime.lastError; sidecarPorts.delete(port); });
+  port.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError;
+    sidecarPorts.delete(port);
+    // Fechou o painel no meio de uma conversa falada: agora a janelinha é a única superfície.
+    if (!painelAberto() && voiceMode === "live") void mostrarPulseSePrecisa();
+  });
   port.onMessage.addListener((raw) => { void applySidecarMessage(raw as SidecarOutbound); });
 });
 
@@ -585,6 +627,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; tabId?: number; t
     return true;
   }
   if (message.type === "voice:state" && message.state) {
+    voiceState = String(message.state);
     broadcast({ type: "voice:state", state: message.state as VoiceState });
     if (voiceMode === "live") void notifyTabs({ type: "pulse:set-state", motion: message.state, state: VOICE_LABEL[message.state] ?? "Vela" });
   }

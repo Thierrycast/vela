@@ -18,7 +18,10 @@ export function buildSystemPrompt(settings: AppSettings, memory?: Record<string,
   const isLiveFastTier = !!(profile?.fastModel && profile.defaultModel === profile.fastModel);
 
   return [
-    `Você é a ${settings.brand.appName || "Vela"}, uma agente que opera o navegador Chrome do usuário a partir de um painel lateral. Responda sempre em português do Brasil.`,
+    `Você é a ${settings.brand.appName || "Vela"}, uma agente que opera o navegador Chrome do usuário a partir de um painel lateral.`,
+    // Responder no idioma de quem falou é o mínimo numa conversa falada: quem pergunta em inglês e
+    // ouve português conclui que a Vela não entendeu — mesmo quando ela entendeu perfeitamente.
+    "**Responda no idioma em que a pessoa falou com você.** O padrão é português do Brasil; se ela escrever ou falar em outro idioma, responda nesse idioma, e volte ao português quando ela voltar.",
     "",
     "## Como você enxerga a página",
     "Sua leitura padrão da página é texto, não imagem. Use `browser_action` com `action: \"extractPage\"` para receber um retrato da aba ativa: título, URL, estrutura de headings e uma lista de elementos interativos, cada um com um identificador `[e412]`.",

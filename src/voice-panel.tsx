@@ -154,6 +154,12 @@ export function VoicePanel({ settings, update }: { settings: AppSettings; update
       <Row label="Transcrição" description="Modelo de /v1/audio/transcriptions. O whisper-large-v3-turbo sai pontuado e capitalizado.">
         <input className="mono" value={voice.transcriptionModel} onChange={(event) => patch({ transcriptionModel: event.target.value })} />
       </Row>
+      <Row label="Idioma da fala" description="“Automático” deixa o servidor detectar — é o que permite conversar em português e em inglês sem trocar nada. Fixe um idioma se a detecção errar no seu sotaque.">
+        <Select value={voice.transcriptionLanguage || "auto"} label="Idioma da fala" options={[{ value: "auto", label: "Automático" }, { value: "pt", label: "Português" }, { value: "en", label: "Inglês" }, { value: "es", label: "Espanhol" }]} onChange={(transcriptionLanguage) => patch({ transcriptionLanguage })} />
+      </Row>
+      <Row label="Voz segue o idioma" description="Se a resposta sair em inglês, ela é falada por uma voz inglesa do servidor — e volta à sua voz quando a conversa voltar ao português.">
+        <button className={`toggle ${voice.followLanguage ? "on" : ""}`} role="switch" aria-checked={voice.followLanguage} aria-label="Voz segue o idioma" onClick={() => patch({ followLanguage: !voice.followLanguage })}><span /></button>
+      </Row>
       <Row label="Síntese" description="Modelo de /v1/audio/speech.">
         <input className="mono" value={voice.speechModel} onChange={(event) => patch({ speechModel: event.target.value })} />
       </Row>

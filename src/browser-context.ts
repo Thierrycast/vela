@@ -46,7 +46,18 @@ async function liveSelection(tabId: number): Promise<string | undefined> {
  */
 export async function collectBrowserContext(settings: AppSettings, options: { lerSelecao?: boolean } = {}): Promise<BrowserContext> {
   const context: BrowserContext = { attachments: await listAttachments(), tabs: [], autonomy: settings.agent.autonomy };
-  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const [emFoco] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  /*
+   * O bloco de estado segue a mesma regra das ações: com o foco na trilha ou nas opções, o "página
+   * atual" que interessa é a última página de verdade, não a janela da própria extensão.
+   */
+  let active = emFoco;
+  if (isRestrictedUrl(active?.url)) {
+    const todas = await chrome.tabs.query({});
+    const comuns = todas.filter((item) => !isRestrictedUrl(item.url));
+    comuns.sort((primeira, segunda) => (segunda.lastAccessed ?? 0) - (primeira.lastAccessed ?? 0));
+    active = comuns[0] ?? active;
+  }
 
   if (settings.context.currentPage && active?.url && !isRestrictedUrl(active.url)) {
     context.page = { url: active.url, title: active.title ?? "" };

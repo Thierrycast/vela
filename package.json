@@ -1,6 +1,6 @@
 {
   "name": "vela",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Agente de navegador para Chrome: lê a página como texto, navega, clica, digita e conversa por voz — no seu navegador, com o seu provedor de IA.",
   "license": "MIT",

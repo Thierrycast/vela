@@ -30,6 +30,8 @@ const TELAS = [
   { arquivo: "painel-aprovacao.png", url: `http://127.0.0.1:${PORTA_UI}/panel.html?estado=aprovacao`, largura: 420, altura: 900 },
   { arquivo: "painel-primeira-vez.png", url: `http://127.0.0.1:${PORTA_UI}/panel.html?estado=novo`, largura: 420, altura: 900 },
   { arquivo: "opcoes.png", url: `http://127.0.0.1:${PORTA_UI}/options.html`, largura: 1180, altura: 860 },
+  // O seletor de modelo aberto: é onde o menu vazava para fora do painel e empurrava a interface.
+  { arquivo: "painel-modelos.png", url: `http://127.0.0.1:${PORTA_UI}/panel.html`, largura: 420, altura: 900, clicar: ".model-label" },
 ];
 
 async function esperarPorta(url, tentativas = 120) {
@@ -92,6 +94,10 @@ for (const tela of TELAS) {
   // Escala 2 para a imagem não ficar borrada num monitor comum.
   await navegador.envia("Emulation.setDeviceMetricsOverride", { width: tela.largura, height: tela.altura, deviceScaleFactor: 2, mobile: false }, sessionId);
   await sleep(1400);
+  if (tela.clicar) {
+    await navegador.envia("Runtime.evaluate", { expression: `document.querySelector(${JSON.stringify(tela.clicar)})?.click()` }, sessionId);
+    await sleep(700);
+  }
   const { data } = await navegador.envia("Page.captureScreenshot", { format: "png" }, sessionId);
   writeFileSync(join(SAIDA, tela.arquivo), Buffer.from(data, "base64"));
   console.log(`${tela.arquivo} — ${tela.largura}×${tela.altura}`);

@@ -3,7 +3,7 @@ import { isPdf, isRestrictedUrl, restrictionReason, waitForContentScript, waitFo
 import { loadSettings } from "./storage";
 import { approvalKey, describeAction, isRisky, requestApproval } from "./approvals";
 import { span } from "./trace";
-import { adoptTab } from "./session";
+import { adoptTab, getSession } from "./session";
 import { isSessionTab } from "./tab-manager";
 import { preciseClick, preciseFill, preciseHover, preciseKey } from "./cdp-actuator";
 import { cdpAvailable } from "./cdp-session";
@@ -42,9 +42,28 @@ export async function endTraceSessions() {
   tracedTabs.clear();
 }
 
+/*
+ * A aba em que se trabalha não é necessariamente a que está em foco.
+ *
+ * A trilha aberta numa janela (`chrome-extension://…/debug.html`), a página de opções, uma aba
+ * `chrome://` — qualquer uma delas pode estar em foco enquanto a pessoa fala sobre o site que está
+ * do lado. Quando isso acontecia, a Vela respondia "não consigo ver esta página", o que soa como
+ * incapacidade e não como o que era: ela estava olhando para a janela dela mesma. Agora, se o foco
+ * está numa página onde ninguém pode agir, ela cai para a última aba de verdade da sessão.
+ */
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  return tab ?? null;
+  if (tab && !isRestrictedUrl(tab.url)) return tab;
+
+  const session = await getSession();
+  const candidatas = await chrome.tabs.query({});
+  const daSessao = candidatas.filter((item) => item.id !== undefined && session?.tabIds.includes(item.id) && !isRestrictedUrl(item.url));
+  if (daSessao.length) return daSessao[daSessao.length - 1];
+
+  // Sem sessão: a última aba comum da janela em foco ainda é melhor que a página da extensão.
+  const comuns = candidatas.filter((item) => !isRestrictedUrl(item.url) && item.lastAccessed !== undefined);
+  comuns.sort((primeira, segunda) => (segunda.lastAccessed ?? 0) - (primeira.lastAccessed ?? 0));
+  return comuns[0] ?? tab ?? null;
 }
 
 async function sendToTab(tabId: number, message: unknown, timeoutMs: number, frameId = 0): Promise<ActionResult> {

@@ -34,7 +34,35 @@ async function ensure(): Promise<Conversation[]> {
     sujas.add(cache[0].id);
   }
   activeId ??= cache[0].id;
+  curarRespostasInterrompidas(cache);
   return cache;
+}
+
+/*
+ * Resposta que ficou "sendo escrita" para sempre.
+ *
+ * O status vive na mensagem e é gravado junto com ela. Se o navegador fecha (ou o service worker
+ * morre) no meio de um turno, aquela mensagem fica `streaming` no disco — e ao reabrir a extensão
+ * dias depois o painel mostra o carrossel de "pensando" numa resposta que morreu, sem nada rodando
+ * para parar. Foi o que aconteceu numa sessão real: a Vela parecia estar trabalhando numa mensagem
+ * de dias atrás, e o botão de parar não tinha o que parar.
+ *
+ * Quem carrega a conversa cura: com texto, a resposta vale o que chegou; sem texto, ela diz que foi
+ * interrompida — que é a verdade, e é acionável (dá para pedir de novo).
+ */
+function curarRespostasInterrompidas(conversas: Conversation[]) {
+  for (const conversa of conversas) {
+    let mudou = false;
+    for (const mensagem of conversa.messages) {
+      if (mensagem.status !== "streaming") continue;
+      mudou = true;
+      if (mensagem.content.trim()) mensagem.status = "complete";
+      else { mensagem.content = "A resposta foi interrompida antes de começar (o navegador fechou, ou a extensão foi recarregada). Peça de novo, se ainda precisar."; mensagem.status = "error"; }
+    }
+    // A cura vai para o disco: sem isso ela se repetiria a cada abertura, e a conversa continuaria
+    // gravada com uma resposta eternamente "sendo escrita".
+    if (mudou) { sujas.add(conversa.id); schedulePersist(conversa.id); }
+  }
 }
 
 async function active(): Promise<Conversation> {

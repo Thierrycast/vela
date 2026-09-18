@@ -22,6 +22,88 @@ O gargalo nunca foi capacidade: era **número de rodadas**. A Vela fazia quase t
 idas ao modelo onde deveriam bastar duas. As decisões abaixo atacam isso, e as três últimas pagam
 a conta de segurança que o ganho de alcance criou.
 
+### A sessão real de voz, e o que ela derrubou
+
+Uma conversa falada de vinte e um turnos, com o rastreio completo ligado, produziu o relatório que
+explicou de uma vez um comportamento que parecia aleatório: **a Vela anunciando "não consegui
+concluir essa" logo depois de ter concluído.** A linha da trilha que resolveu:
+
+```
+12:42:17  microfone — trecho de 172 kB
+12:42:17  transcrição (whisper) → ouviu: "."
+12:42:19  mandou falar: "Não consegui concluir essa. Quer que eu tente de outro jeito?"
+```
+
+Um ponto final. O modelo de transcrição devolveu `"."` para um trecho de ruído, e isso **abriu um
+turno** — que, por desenho, interrompe o turno em andamento (falar por cima é instrução, não ruído).
+O turno interrompido terminava sem resposta nova, e a voz anunciava fracasso. Na mesma sessão
+apareceram `"so"`, `"Thank you."`, `"E aí"` e — o mais revelador — `"Conseguiu sim, você está no
+site do Mercado Livre"`, que é **a própria Vela**: o microfone ouviu o alto-falante.
+
+Três consertos, nessa ordem de causa:
+
+1. **Ruído não vira pedido** (`transcricao.ts`). Alucinação conhecida do Whisper, pontuação solta e
+   menos de quatro letras são descartadas antes de abrir turno — com a lista de respostas curtas
+   legítimas ("sim", "não", "pare") preservada, senão confirmar por voz deixaria de funcionar.
+2. **O microfone fica suspenso enquanto houver fila de fala.** `speaking` era ligado dentro de cada
+   fala e desligado no fim dela; entre uma frase da narração e a seguinte havia uma fresta, e foi
+   por ela que a voz da Vela entrou como pedido do usuário.
+3. **Turno interrompido não anuncia fracasso.** Quem interrompeu foi a pessoa, e o pedido novo já
+   está sendo atendido: dizer "não consegui" ali é mentira dupla — ela não falhou, e o que fazia
+   muitas vezes já tinha dado certo.
+
+### O idioma é de quem fala
+
+Na mesma sessão, a Vela respondia em português com voz inglesa, e a transcrição vinha torta quando a
+frase era em inglês — porque `language: "pt"` estava **fixo no código** da chamada de transcrição.
+
+Agora o idioma da transcrição é preferência (padrão `auto`, o servidor detecta), o system prompt
+manda responder no idioma em que a pessoa falou, e a voz da síntese acompanha o idioma do texto:
+`idioma.ts` decide pelo texto, e a escolha sai da lista de vozes do próprio servidor — que já traz o
+idioma de cada uma e vem ordenada da mais rápida para a mais lenta.
+
+Detectar idioma aqui é deliberadamente simples (acentos e palavras funcionais). A pergunta é binária
+e tolerante a erro — "falo isto com voz portuguesa ou inglesa?" —, e uma biblioteca de detecção
+seria peso morto num documento offscreen.
+
+### Desligar a voz precisava ser um pedido possível
+
+Quando pediram "desativa o modo de voz", a Vela fez o que estava ao alcance dela: escreveu
+`desligado` no campo da voz. A partir dali, toda tentativa de falar voltava HTTP 400 ("voz
+desconhecida") — repetidamente, sem que ela entendesse por quê.
+
+Duas correções, e as duas são de desenho: o campo `voz` passou a **validar contra a lista do
+servidor** (um valor inventado é recusado na hora, com exemplos do que existe), e nasceu o campo
+`voz-ao-vivo`, que encerra a conversa falada de verdade. Ligar por ali não existe de propósito:
+abrir o microfone é decisão da pessoa, no botão, com o Chrome pedindo permissão.
+
+### A resposta que ficou "sendo escrita" para sempre
+
+O status vive na mensagem e é gravado com ela. Se o navegador fecha no meio de um turno, aquela
+mensagem fica `streaming` no disco — e ao reabrir a extensão dias depois o painel mostra o
+carrossel de "pensando" numa resposta morta, sem nada rodando para o botão de parar parar. Quem
+carrega a conversa agora cura: com texto, a resposta vale o que chegou; sem texto, ela diz que foi
+interrompida. E a cura é gravada, senão se repetiria a cada abertura.
+
+### A aba em foco não é sempre a aba de trabalho
+
+Com a trilha aberta numa janela (`chrome-extension://…/debug.html`), a Vela respondia "não consigo
+ver esta página" — o que soa como incapacidade e era outra coisa: ela estava olhando para a janela
+dela mesma. Quando o foco está numa página onde ninguém pode agir, ela cai para a última aba de
+verdade da sessão, tanto para agir quanto para montar o bloco de estado.
+
+### Duas superfícies para a mesma conversa
+
+A janelinha na página (o Pulse) aparecia junto com o painel aberto: o mesmo orb, o mesmo estado e o
+mesmo rascunho em dois lugares, com um retângulo sobrando por cima do site. Ela é a superfície de
+quem está **sem** o painel — entra quando o painel fecha e sai quando ele volta.
+
+### O menu de modelos empurrava a interface
+
+O menu abria ancorado à esquerda com até 300 px de largura. A partir do meio da barra, isso passa da
+borda do painel: o painel ganhava rolagem horizontal e a interface inteira deslizava para o lado.
+Ancorado à direita, com teto de largura e `overflow-x: clip` na casca, ele cabe onde tem que caber.
+
 ### A escada de ferramentas: a captura de tela é o último degrau
 
 O prompt sempre disse que a captura não é a primeira leitura, e mesmo assim ela era. O padrão

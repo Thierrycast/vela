@@ -1,6 +1,8 @@
 import { loadSettings } from "./storage";
 import { AppSettings } from "./types";
-import { VoiceEndpoint, prepareText, streamSpeech, synthesizeSpeech, transcribeAudio } from "./provider";
+import { VoiceEndpoint, VoiceOption, listVoices, prepareText, streamSpeech, synthesizeSpeech, transcribeAudio } from "./provider";
+import { Idioma, combinaComIdioma, idiomaDoTexto } from "./idioma";
+import { avaliarTranscricao } from "./transcricao";
 import { splitSentences } from "./reading-text";
 import { UtteranceSegmenter } from "./vad";
 import { VoiceMetricsAnalyzer } from "./audio-metrics";
@@ -28,7 +30,6 @@ const guardarAudio = (label: string, bytes: ArrayBuffer | Uint8Array, mime: stri
 
 const SAMPLE_RATE = 16_000;
 const MAX_PENDING = 3;
-const HALLUCINATIONS = [/^legendas?\b.*amara\.org/i, /^obrigad[oa]\.?$/i, /^\.{2,}$/, /^tchau\.?$/i, /^\s*$/];
 
 // O listener é registrado antes de qualquer await para o background poder fazer handshake.
 chrome.runtime.onMessage.addListener((message: { type?: string; text?: string; id?: string; mode?: "live" | "dictation" }, _sender, sendResponse) => {
@@ -210,9 +211,10 @@ async function drain() {
        */
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20_000);
-      const text = await transcribeAudio(endpoint, blob, settings.voice.transcriptionModel, controller.signal).finally(() => clearTimeout(timer));
+      const text = await transcribeAudio(endpoint, blob, settings.voice.transcriptionModel, controller.signal, settings.voice.transcriptionLanguage).finally(() => clearTimeout(timer));
       const clean = text.trim();
-      const descartado = !clean || HALLUCINATIONS.some((pattern) => pattern.test(clean));
+      const veredito = avaliarTranscricao(clean);
+      const descartado = veredito.descartar;
       /*
         * O que o STT devolveu, incluindo o que foi descartado e por quê.
         *
@@ -223,7 +225,7 @@ async function drain() {
         ok: !descartado,
         code: descartado ? "descartado" : undefined,
         blobId: audioId,
-        data: { enunciado: deQualFala, texto: clean, bruto: text, bytes: blob.size, modelo: settings.voice.transcriptionModel, descartado, motivo: descartado ? (clean ? "reconhecido como alucinação do modelo de transcrição" : "transcrição vazia") : undefined },
+        data: { enunciado: deQualFala, texto: clean, bruto: text, bytes: blob.size, modelo: settings.voice.transcriptionModel, descartado, motivo: veredito.motivo },
       });
       contarDebug();
       if (!descartado) {
@@ -626,6 +628,28 @@ let enunciado = "";
 let streamingStop: (() => void) | null = null;
 
 /*
+ * A voz acompanha o idioma da resposta.
+ *
+ * Numa sessão real a Vela respondeu português com voz inglesa — sai um sotaque que atrapalha a
+ * compreensão e passa a impressão de que ela não entendeu o pedido. A lista de vozes do servidor já
+ * diz o idioma de cada uma e vem ordenada da mais rápida para a mais lenta, então escolher é pegar
+ * a primeira que combina. A lista é buscada uma vez por sessão: pedir a cada frase somaria uma ida
+ * ao servidor no caminho mais sensível a latência que existe aqui.
+ */
+let vozesConhecidas: VoiceOption[] | null = null;
+
+async function vozParaIdioma(endpoint: VoiceEndpoint, idioma: Idioma, atual: string): Promise<string> {
+  const daAtual = vozesConhecidas?.find((item) => item.id === atual);
+  if (daAtual && combinaComIdioma(daAtual.language, idioma)) return atual;
+  if (!vozesConhecidas) vozesConhecidas = await listVoices(endpoint).catch(() => []);
+  const atualConhecida = vozesConhecidas.find((item) => item.id === atual);
+  // Sem saber o idioma da voz configurada, não se troca nada: o palpite erraria para os dois lados.
+  if (atualConhecida && combinaComIdioma(atualConhecida.language, idioma)) return atual;
+  const candidata = vozesConhecidas.find((item) => combinaComIdioma(item.language, idioma));
+  return candidata?.id ?? atual;
+}
+
+/*
  * Fila de fala: frases que chegam enquanto a resposta ainda está sendo escrita.
  *
  * `voice:speak` interrompe o que estiver tocando — é o certo para "leia esta mensagem", e o errado
@@ -646,16 +670,44 @@ let encerrarReproducao: (() => void) | null = null;
 
 function pararFala() {
   geracaoDeFala += 1;
+  falasNaFila = 0;
   streamingStop?.();
   output?.pause();
   output = null;
   encerrarReproducao?.();
   encerrarReproducao = null;
+  speaking = false;
+  speakingUntil = Date.now() + 500;
+  segmenter?.resume();
 }
+
+/*
+ * Quantas falas ainda vão sair. Enquanto for maior que zero, o microfone continua suspenso.
+ *
+ * `speaking` era ligado dentro de cada `speak` e desligado no fim dele — e entre uma frase da
+ * narração e a seguinte havia uma fresta em que o VAD voltava a ouvir. Com alto-falante aberto, foi
+ * por essa fresta que a **própria voz da Vela** entrou como fala do usuário ("Conseguiu sim, você
+ * está no site do Mercado Livre" transcrito como pedido), abrindo um turno que interrompeu o que
+ * estava em andamento.
+ */
+let falasNaFila = 0;
 
 function enfileirarFala(texto: string) {
   const minha = geracaoDeFala;
-  filaDeFala = filaDeFala.then(() => (minha === geracaoDeFala ? speak(texto) : undefined)).catch(() => undefined);
+  falasNaFila += 1;
+  segmenter?.suspend();
+  speaking = true;
+  filaDeFala = filaDeFala
+    .then(() => (minha === geracaoDeFala ? speak(texto) : undefined))
+    .catch(() => undefined)
+    .finally(() => {
+      falasNaFila = Math.max(0, falasNaFila - 1);
+      if (falasNaFila === 0) {
+        speaking = false;
+        speakingUntil = Date.now() + 700;
+        segmenter?.resume();
+      }
+    });
 }
 
 async function speak(text: string, readingId?: string) {
@@ -667,6 +719,15 @@ async function speak(text: string, readingId?: string) {
     const { settings, endpoint } = await voiceTarget();
     const spoken = speakable(text);
     /*
+     * O idioma é do texto, não da configuração: numa conversa que troca de idioma no meio, a voz
+     * troca junto — e volta sozinha quando o assunto volta.
+     */
+    let voz = settings.voice.speechVoice;
+    if (settings.voice.followLanguage && spoken) {
+      voz = await vozParaIdioma(endpoint, idiomaDoTexto(spoken), voz);
+      if (voz !== settings.voice.speechVoice) trace("voice", "voz trocada para acompanhar o idioma", { data: { de: settings.voice.speechVoice, para: voz } });
+    }
+    /*
      * O que se manda falar não é o que se escreveu.
      *
      * `speakable` tira markdown, bloco de código e link; o servidor ainda normaliza por cima. Numa
@@ -674,7 +735,7 @@ async function speak(text: string, readingId?: string) {
      * exatamente o que costuma explicar — e ela não existia em lugar nenhum antes.
      */
     traceFull("tts.request", "texto enviado para falar", {
-      data: { original: text, falado: spoken, voz: settings.voice.speechVoice, modelo: settings.voice.speechModel, taxa: settings.voice.speechRate, leitura: !!readingId, streaming: settings.voice.streamSpeech },
+      data: { original: text, falado: spoken, voz, modelo: settings.voice.speechModel, taxa: settings.voice.speechRate, leitura: !!readingId, streaming: settings.voice.streamSpeech },
     });
     attempt = traceSpan("tts.audio", "síntese", { chars: text.length, leitura: !!readingId });
     if (!spoken) { attempt.end({ ok: false, code: "vazio", data: { original: text } }); return; }
@@ -688,9 +749,9 @@ async function speak(text: string, readingId?: string) {
     // Leitura de uma mensagem do painel: frase a frase, para o destaque acompanhar a voz.
     if (readingId && settings.voice.streamSpeech) {
       try {
-        const recorded = await speakReading(endpoint, settings.voice.speechVoice, text, readingId, rate);
+        const recorded = await speakReading(endpoint, voz, text, readingId, rate);
         const audioId = recorded ? await guardarAudio("resposta falada (leitura)", recorded.bytes, recorded.mime || "audio/wav") : undefined;
-        attempt.end({ ok: true, blobId: audioId, data: { modo: "leitura", voz: settings.voice.speechVoice, taxa: rate, bytes: recorded?.bytes.byteLength, falado: spoken } });
+        attempt.end({ ok: true, blobId: audioId, data: { modo: "leitura", voz, taxa: rate, bytes: recorded?.bytes.byteLength, falado: spoken } });
         contarDebug();
         return;
       } catch (error) {
@@ -705,7 +766,7 @@ async function speak(text: string, readingId?: string) {
         const tocando = traceSpan("tts.play", "reprodução", { modo: "streaming", taxa: rate });
         const recorded = await speakStreaming(endpoint, spoken, settings.voice.speechVoice, rate).finally(() => tocando.end({ ok: true }));
         const audioId = recorded ? await guardarAudio("resposta falada (streaming)", recorded.bytes, recorded.mime || "audio/wav") : undefined;
-        attempt.end({ ok: true, blobId: audioId, data: { modo: "streaming", voz: settings.voice.speechVoice, taxa: rate, bytes: recorded?.bytes.byteLength, falado: spoken } });
+        attempt.end({ ok: true, blobId: audioId, data: { modo: "streaming", voz, taxa: rate, bytes: recorded?.bytes.byteLength, falado: spoken } });
         contarDebug();
         return;
       } catch (error) {
@@ -714,9 +775,9 @@ async function speak(text: string, readingId?: string) {
       }
     }
 
-    const blob = await synthesizeSpeech(endpoint, spoken, settings.voice.speechModel, settings.voice.speechVoice);
+    const blob = await synthesizeSpeech(endpoint, spoken, settings.voice.speechModel, voz);
     const audioId = await guardarAudio("resposta falada (arquivo)", await blobToBytes(blob), blob.type || "audio/wav");
-    attempt.end({ ok: true, blobId: audioId, data: { modo: "arquivo", voz: settings.voice.speechVoice, taxa: rate, bytes: blob.size, falado: spoken } });
+    attempt.end({ ok: true, blobId: audioId, data: { modo: "arquivo", voz, taxa: rate, bytes: blob.size, falado: spoken } });
         contarDebug();
     url = URL.createObjectURL(blob);
     output = new Audio(url);
@@ -739,9 +800,13 @@ async function speak(text: string, readingId?: string) {
     void send({ type: "voice:error", message });
   } finally {
     if (url) URL.revokeObjectURL(url);
-    speaking = false;
-    speakingUntil = Date.now() + 250;
-    segmenter?.resume();
+    // Só religa o microfone quando não sobrou nada na fila: no meio da narração, religar deixava a
+    // Vela ouvindo a si mesma entre uma frase e a outra.
+    if (falasNaFila === 0) {
+      speaking = false;
+      speakingUntil = Date.now() + 500;
+      segmenter?.resume();
+    }
     // Sem microfone aberto, esta foi uma leitura avulsa: o runtime volta a ocioso em vez de
     // ficar preso em "falando" para sempre.
     publish(stream ? "listening" : "idle");

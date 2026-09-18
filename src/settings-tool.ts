@@ -18,7 +18,7 @@ import { listVoices } from "./provider";
 
 type Field = {
   ler: (settings: AppSettings) => string;
-  escrever: (settings: AppSettings, value: string) => string | null;
+  escrever: (settings: AppSettings, value: string) => string | null | Promise<string | null>;
   descricao: string;
   opcoes?: (settings: AppSettings) => Promise<string[]>;
 };
@@ -27,9 +27,28 @@ const boolean = (value: string) => /^(1|sim|true|ligad[oa]|on)$/i.test(value.tri
 
 export const SETTINGS_FIELDS: Record<string, Field> = {
   voz: {
-    descricao: "A voz usada na síntese, como piper:pt_BR-cadu-medium.",
+    descricao: "A voz usada na síntese, como piper:pt_BR-cadu-medium. Só aceita vozes que o servidor oferece.",
     ler: (settings) => settings.voice.speechVoice,
-    escrever: (settings, value) => { settings.voice.speechVoice = value.trim(); return null; },
+    /*
+     * Escrever qualquer texto aqui quebrava a fala.
+     *
+     * Ao pedirem "desativa o modo de voz", a Vela escreveu `desligado` neste campo — e a partir daí
+     * cada tentativa de falar voltava HTTP 400 ("voz desconhecida"), repetidamente, sem que ela
+     * entendesse por quê. Aceitar só o que o servidor conhece transforma um erro silencioso e
+     * permanente numa recusa imediata, com a lista do que existe. Para desligar a voz existe campo
+     * próprio: `voz-ao-vivo`.
+     */
+    escrever: async (settings, value) => {
+      const escolhida = value.trim();
+      if (!escolhida) return "Diga qual voz. Consulte o campo “voz” para ver a lista do servidor.";
+      const disponiveis = await listVoices({ baseUrl: settings.voice.baseUrl, apiKey: settings.voice.apiKey }).catch(() => []);
+      if (disponiveis.length && !disponiveis.some((item) => item.id === escolhida)) {
+        const amostra = disponiveis.slice(0, 8).map((item) => item.id).join(", ");
+        return `“${escolhida}” não é uma voz deste servidor. Algumas disponíveis: ${amostra}. Para desligar a fala, use o campo “voz-ao-vivo” com “desligada”.`;
+      }
+      settings.voice.speechVoice = escolhida;
+      return null;
+    },
     opcoes: async (settings) => (await listVoices({ baseUrl: settings.voice.baseUrl, apiKey: settings.voice.apiKey }))
       .map((item) => `${item.id}${item.ratio !== undefined ? ` (gera em ${item.ratio.toFixed(2)}× a duração)` : ""}`),
   },
@@ -43,6 +62,24 @@ export const SETTINGS_FIELDS: Record<string, Field> = {
       return null;
     },
     opcoes: async () => VISUALS.map((item) => item.id),
+  },
+  /*
+   * "Desativa o modo de voz" não tinha como ser atendido.
+   *
+   * A Vela tentou o que estava ao alcance dela — trocar a voz por "desligado" — e só conseguiu
+   * quebrar a síntese. Encerrar a conversa falada é um pedido comum e legítimo; ele merece um campo,
+   * não uma gambiarra. Ligar por aqui não existe de propósito: abrir o microfone é decisão da
+   * pessoa, no botão, com o Chrome pedindo permissão.
+   */
+  "voz-ao-vivo": {
+    descricao: "A conversa falada. Só aceita “desligada” — para ligar, a pessoa usa o botão Live no painel.",
+    ler: () => "use o botão Live no painel para ligar",
+    escrever: (_settings, value) => {
+      if (boolean(value)) return "Não posso ligar a conversa falada por aqui: abrir o microfone é decisão do usuário, no botão Live do painel.";
+      void chrome.runtime?.sendMessage({ type: "voice:stop-live" }).catch(() => undefined);
+      return null;
+    },
+    opcoes: async () => ["desligada"],
   },
   "voz-em-streaming": {
     descricao: "Tocar a fala enquanto o servidor gera, em vez de esperar o arquivo inteiro.",
@@ -110,7 +147,7 @@ export async function writeSetting(field: string, value: string): Promise<{ ok: 
   if (!item) return { ok: false, summary: `Não existe a configuração “${field}”. Disponíveis: ${Object.keys(SETTINGS_FIELDS).join(", ")}.` };
   const settings = await loadSettings();
   const before = item.ler(settings);
-  const problem = item.escrever(settings, value);
+  const problem = await item.escrever(settings, value);
   if (problem) return { ok: false, summary: problem };
   await saveSettings(settings);
   return { ok: true, summary: `Mudei ${field} de ${before} para ${item.ler(settings)}.` };

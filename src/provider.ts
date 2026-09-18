@@ -407,11 +407,19 @@ export async function checkVoiceEndpoint(endpoint: VoiceEndpoint): Promise<Conne
   }
 }
 
-export async function transcribeAudio(endpoint: VoiceEndpoint, audio: Blob, model: string, signal?: AbortSignal): Promise<string> {
+/*
+ * O idioma da transcrição é escolha, não constante.
+ *
+ * `language: "pt"` estava fixo no código: quem falasse inglês era transcrito como se fosse
+ * português — sai texto torto, e o modelo responde ao texto torto. Com "auto" o campo não é
+ * enviado e o servidor detecta sozinho, que é o que permite conversar nos dois idiomas sem tocar em
+ * configuração nenhuma.
+ */
+export async function transcribeAudio(endpoint: VoiceEndpoint, audio: Blob, model: string, signal?: AbortSignal, idioma = "auto"): Promise<string> {
   const form = new FormData();
   form.append("file", audio, "vela-fala.wav");
   form.append("model", model);
-  form.append("language", "pt");
+  if (idioma && idioma !== "auto") form.append("language", idioma);
   const response = await fetch(voiceUrl(endpoint, "audio/transcriptions"), { method: "POST", headers: { Accept: "application/json", ...voiceHeaders(endpoint) }, body: form, signal });
   if (!response.ok) { const detail = await responseDetail(response); throw new Error(`Transcrição falhou (HTTP ${response.status})${detail ? `: ${detail}` : "."}`); }
   const payload = await response.json() as { text?: string; transcript?: string };
