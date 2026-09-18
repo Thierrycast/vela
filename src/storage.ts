@@ -37,7 +37,13 @@ export function normalizeSettings(stored: Partial<AppSettings> | undefined): App
     ...defaultSettings,
     ...(stored ?? {}),
     brand: { ...defaultSettings.brand, ...(stored?.brand ?? {}) },
-    agent: { ...defaultSettings.agent, ...(stored?.agent ?? {}) },
+    agent: {
+      ...defaultSettings.agent,
+      ...(stored?.agent ?? {}),
+      // Subobjeto novo dentro de `agent`: sem esta linha, um settings salvo antes dele existir
+      // chegaria com `modelos: undefined` e derrubaria a escolha de modelo no primeiro turno.
+      modelos: { ...defaultSettings.agent.modelos, ...(stored?.agent?.modelos ?? {}) },
+    },
     /*
      * Sem esta linha, um settings salvo antes das habilidades existirem (que não tem o campo)
      * passaria pelo espalhamento de cima como `capabilities: undefined` e derrubaria toda

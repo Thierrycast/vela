@@ -11,6 +11,7 @@ import { recordTurn } from "./action-stats";
 import { cancelDelegated, configureDelegation } from "./background-task";
 import { noteSource, resetDomainMemory } from "./domain-policy";
 import { novaEscada } from "./tool-ladder";
+import { ClasseDeModelo, decidir, modeloDaClasse, subirClasse } from "./roteador-de-modelo";
 import * as conversation from "./conversation";
 
 const newId = () => crypto.randomUUID();
@@ -161,18 +162,49 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
   if (running) return false;
   const settings = await loadSettings();
   const profile = settings.providers.find((item) => item.id === settings.activeProviderId);
+  /*
+   * Qual modelo atende este turno — e como ele sobe se a tarefa exigir.
+   *
+   * O modo `fixo` é o de sempre: vale o que a pessoa escolheu. No `auto`, a classe do pedido decide
+   * o ponto de partida (uma pergunta curta não paga a latência de um modelo de raciocínio) e a
+   * escada sobe sozinha diante de sinal observado: virou trabalho na página, as tentativas estão
+   * falhando, a tarefa passou de três rodadas, o modelo desistiu em texto. Só sobe, nunca desce:
+   * trocar de cabeça no meio de um raciocínio produz respostas que se contradizem entre rodadas.
+   *
+   * A escada da voz continua existindo por dentro disto: começar rápido numa conversa falada é o
+   * mesmo princípio, e agora é uma classe entre outras em vez de um caso especial.
+   */
+  const automatico = settings.agent.modelRouting === "auto" && !!profile;
+  let classeAtual: ClasseDeModelo = "navegacao";
+  const trocarModelo = (modelo: string, classe: ClasseDeModelo, motivo: string) => {
+    if (!profile || !modelo || modelo === profile.defaultModel) return;
+    classeAtual = classe;
+    settings.providers = settings.providers.map((p) => p.id === profile.id ? { ...p, defaultModel: modelo } : p);
+    traceRecord("model.request", `modelo escolhido: ${modelo}`, { data: { classe, motivo, modelo } });
+  };
+
   const fastModelId = options.useFastModel ? profile?.fastModel?.trim() : "";
   const robustModelId = profile?.defaultModel;
-  const usingFastModel = !!(fastModelId && robustModelId);
+  const usingFastModel = !automatico && !!(fastModelId && robustModelId);
   let onFastModel = usingFastModel;
   let escalatedByRefusal = false;
-  const escalate = () => {
+  const escalate = (motivo: "chamou_ferramenta" | "erro_repetido" | "muitas_rodadas" | "desistiu" = "chamou_ferramenta") => {
+    if (automatico && profile) {
+      const subida = subirClasse(classeAtual, motivo);
+      if (subida) trocarModelo(modeloDaClasse(subida.classe, profile, settings), subida.classe, subida.motivo);
+      return;
+    }
     if (!profile || !robustModelId || !onFastModel) return;
     onFastModel = false;
     settings.providers = settings.providers.map((p) => p.id === profile.id ? { ...p, defaultModel: robustModelId } : p);
   };
   if (usingFastModel && profile) {
     settings.providers = settings.providers.map((p) => p.id === profile.id ? { ...p, defaultModel: fastModelId! } : p);
+  }
+  if (automatico && profile) {
+    const decisao = decidir({ texto: text, daVoz: options.origem === "voz", comImagem: false }, profile, settings);
+    classeAtual = decisao.classe;
+    trocarModelo(decisao.modelo, decisao.classe, decisao.motivo);
   }
   const maxRounds = 100;
   // Um id por turno costura tudo o que vem depois: rodadas, chamadas de tool, ações e falhas.
@@ -206,6 +238,7 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
       // e a transcricao — gravados antes de o turno existir — para dentro da narrativa dele.
       enunciado: options.enunciado,
       model: profile?.defaultModel,
+      roteamento: settings.agent.modelRouting,
       autonomia: settings.agent.autonomy,
       modoPreciso: settings.agent.preciseMode,
       habilidades: Object.entries(settings.capabilities).filter(([, ligada]) => ligada).map(([nome]) => nome),
@@ -249,9 +282,11 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
       if (round === 0) selecaoDoTurno = context.selection;
       else context.selection = selecaoDoTurno;
 
-      // Multi-tier Voice: começa com o fastModel; se precisar de mais de uma rodada (chamou
-      // ferramenta na anterior), sobe para o defaultModel mais robusto a partir daqui.
-      if (round > 0 && onFastModel) escalate();
+      // Chamou ferramenta na rodada anterior: o pedido virou trabalho na página. Passou de três
+      // rodadas: está patinando. Os dois são motivo para subir um degrau — e só para subir.
+      if (round > 0 && onFastModel) escalate("chamou_ferramenta");
+      if (automatico && round === 1 && toolCallsMade > 0) escalate("chamou_ferramenta");
+      if (automatico && round === 4) escalate("muitas_rodadas");
 
       for await (const event of streamChat(settings, await conversation.all(), context, controller.signal)) {
         if (event.type === "text") {
@@ -296,9 +331,9 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
          * desistência em prosa, nunca havia rodada seguinte para escalar. Aqui a recusa nem chega a
          * ser mostrada: apaga a mensagem e tenta de novo, uma vez só, com o modelo robusto.
          */
-        if (onFastModel && !escalatedByRefusal && DECLINE_PATTERN.test(assistant.content)) {
+        if ((onFastModel || automatico) && !escalatedByRefusal && DECLINE_PATTERN.test(assistant.content)) {
           escalatedByRefusal = true;
-          escalate();
+          escalate("desistiu");
           await conversation.truncateFrom(assistant.id);
           /*
            * Numa conversa falada, esta resposta pode já ter sido dita em voz alta.
@@ -341,7 +376,10 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
         if (seen < 3) continue;
         blocked.add(call.id);
         traceRecord("tool.call", `repetição bloqueada: ${call.name}`, { ok: false, code: "repeticao", data: { name: call.name, vezes: seen, arguments: safeParse(call.arguments) } });
-        if (seen === 3) record({ kind: "error", text: `${call.name} repetido sem mudar nada — bloqueei e pedi outro caminho.` }, emit);
+        if (seen === 3) {
+          record({ kind: "error", text: `${call.name} repetido sem mudar nada — bloqueei e pedi outro caminho.` }, emit);
+          escalate("erro_repetido");
+        }
       }
 
       toolCallsMade += calls.length;

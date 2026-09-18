@@ -87,6 +87,15 @@ export type AppSettings = {
     /** Desabilita o bloqueio e pedido de intervenção do usuário para senhas e formulários sensíveis. */
     bypassWireguard: boolean;
     /**
+     * Quem escolhe o modelo de cada turno: a pessoa (`fixo`) ou o pedido (`auto`).
+     *
+     * Em `auto`, um pedido curto não paga a latência de um modelo de raciocínio, e uma tarefa que
+     * emperra sobe para um mais forte sem ninguém precisar trocar nada no meio.
+     */
+    modelRouting: "fixo" | "auto";
+    /** O modelo de cada classe. Vazio herda o modelo padrão do provider. */
+    modelos: { rapido: string; conversa: string; navegacao: string; raciocinio: string; visao: string };
+    /**
      * Rastreio completo: grava o prompt exato, a resposta inteira do modelo e o conteúdo integral
      * de cada leitura de página, em vez de recortes.
      *
@@ -251,6 +260,13 @@ export const defaultSettings: AppSettings = {
     preciseMode: false,
     bypassWireguard: false,
     fullTrace: false,
+    modelRouting: "fixo",
+    /*
+     * Os apelidos do OmniRoute como ponto de partida: eles já apontam para o melhor modelo de cada
+     * categoria no momento, que é exatamente a pergunta que este roteamento faz. Em outro gateway,
+     * a pessoa troca por nomes reais — e com `modelRouting: "fixo"` nada disso é consultado.
+     */
+    modelos: { rapido: "auto/best-fast", conversa: "auto/best-chat", navegacao: "auto/best-coding-fast", raciocinio: "auto/best-reasoning", visao: "auto/best-vision" },
   },
   capabilities: {
     batch: true,

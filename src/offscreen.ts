@@ -3,6 +3,7 @@ import { AppSettings } from "./types";
 import { VoiceEndpoint, VoiceOption, listVoices, prepareText, streamSpeech, synthesizeSpeech, transcribeAudio } from "./provider";
 import { Idioma, combinaComIdioma, idiomaDoTexto } from "./idioma";
 import { avaliarTranscricao } from "./transcricao";
+import { EnergiaDaFala, rms } from "./energia-da-fala";
 import { splitSentences } from "./reading-text";
 import { UtteranceSegmenter } from "./vad";
 import { VoiceMetricsAnalyzer } from "./audio-metrics";
@@ -297,6 +298,25 @@ async function start(nextMode: "live" | "dictation") {
           data: { enunciado, segundos: Number((amostras / (audio?.sampleRate ?? SAMPLE_RATE)).toFixed(2)) },
         });
         if (engolido) return;
+        /*
+         * Energia antes da transcrição: o trecho fraco demais nem sai da máquina.
+         *
+         * Medido nos áudios de uma sessão real, o eco do alto-falante e o ruído de sala ficam uma
+         * ordem de grandeza abaixo da fala da mesma pessoa — e eram eles que voltavam como "." ou
+         * "Thank you." e interrompiam a tarefa em andamento. Descartar aqui poupa a ida ao servidor
+         * inteira, que é o que mais custa nesse caminho.
+         */
+        const energia = rms(chunks);
+        const veredito = energiaDaFala.avaliar(energia);
+        if (!veredito.fala) {
+          trace("stt.result", "trecho descartado antes de transcrever", {
+            ok: false,
+            code: "sem_energia",
+            data: { enunciado, energia: Number(energia.toFixed(4)), referencia: veredito.referencia, motivo: veredito.motivo },
+          });
+          return;
+        }
+        energiaDaFala.registrarFala(energia);
         if (pending.length >= MAX_PENDING) { pending.shift(); void send({ type: "voice:error", message: "Transcrição atrasada; um trecho foi descartado." }); }
         pending.push({ wav: encodeWav(chunks, audio?.sampleRate ?? SAMPLE_RATE), enunciado });
         void drain();
@@ -624,6 +644,9 @@ async function speakReading(endpoint: VoiceEndpoint, voice: string, text: string
  * proximidade no tempo.
  */
 let enunciado = "";
+
+/** A energia típica da fala desta pessoa, aprendida durante a sessão. */
+const energiaDaFala = new EnergiaDaFala();
 
 let streamingStop: (() => void) | null = null;
 

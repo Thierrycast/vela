@@ -773,3 +773,60 @@ console.log("\n=== voz: idioma do texto ===");
   console.log(`  sem sinal, mantém o padrão: ${idiomaDoTexto("1706.03762", "pt") === "pt" ? "sim" : "NAO"}`);
   console.log(`  voz casa com o idioma: ${combinaComIdioma("pt_BR", "pt") && !combinaComIdioma("en_US", "pt") ? "sim" : "NAO"}`);
 }
+
+// O roteamento de modelo: a classe sai do pedido, e a escada só sobe.
+console.log("\n=== modelo: a escolha segue o pedido ===");
+{
+  const { classificarPedido, subirClasse, modeloDaClasse, decidir } = await import("../src/roteador-de-modelo");
+  const classe = (texto: string, daVoz = false, comImagem = false) => classificarPedido({ texto, daVoz, comImagem }).classe;
+  console.log(`  conversa curta não vai no modelo forte: ${classe("que horas são no Japão?") === "conversa" ? "sim" : "NAO"}`);
+  console.log(`  a mesma pergunta por voz vai no rápido: ${classe("que horas são no Japão?", true) === "rapido" ? "sim" : "NAO"}`);
+  console.log(`  trabalho na página vai no intermediário: ${classe("abre o carrinho e adiciona o café") === "navegacao" ? "sim" : "NAO"}`);
+  console.log(`  comparar vai no raciocínio: ${classe("compara esses três notebooks e diz qual vale mais a pena") === "raciocinio" ? "sim" : "NAO"}`);
+  console.log(`  imagem no turno exige visão: ${classe("o que tem nesta foto", false, true) === "visao" ? "sim" : "NAO"}`);
+
+  console.log(`  a escada sobe com sinal: ${subirClasse("conversa", "chamou_ferramenta")?.classe === "navegacao" ? "sim" : "NAO"}`);
+  console.log(`  e nunca desce: ${subirClasse("raciocinio", "chamou_ferramenta") === null ? "sim" : "NAO"}`);
+  console.log(`  erro repetido sobe para raciocínio: ${subirClasse("navegacao", "erro_repetido")?.classe === "raciocinio" ? "sim" : "NAO"}`);
+
+  const perfil = { ...defaultSettings.providers[0], defaultModel: "meu-modelo", fastModel: "" };
+  const comVazio = { ...defaultSettings, agent: { ...defaultSettings.agent, modelRouting: "auto" as const, modelos: { rapido: "", conversa: "", navegacao: "", raciocinio: "", visao: "" } } };
+  console.log(`  classe sem modelo herda o padrão: ${modeloDaClasse("raciocinio", perfil, comVazio) === "meu-modelo" ? "sim" : "NAO"}`);
+  const fixo = { ...defaultSettings, agent: { ...defaultSettings.agent, modelRouting: "fixo" as const } };
+  console.log(`  modo fixo não roteia nada: ${decidir({ texto: "compara tudo", daVoz: false, comImagem: false }, perfil, fixo).modelo === "meu-modelo" ? "sim" : "NAO"}`);
+  console.log(`  e toda decisão explica o motivo: ${decidir({ texto: "abre o carrinho", daVoz: false, comImagem: false }, perfil, comVazio).motivo.length > 10 ? "sim" : "NAO"}`);
+}
+
+// No turno de verdade: pedido de conversa começa na classe leve, e chamar ferramenta sobe o degrau.
+console.log("\n=== modelo: a escada dentro de um turno ===");
+{
+  const modelosUsados: string[] = [];
+  await run("turno com escada", [
+    [delta("Vou ver a página."), toolCall("c1", "browser_action", { action: "extractPage" }), DONE],
+    [delta("Pronto."), DONE],
+  ], {
+    agent: { ...defaultSettings.agent, autonomy: "auto", modelRouting: "auto", modelos: { rapido: "m-rapido", conversa: "m-conversa", navegacao: "m-navegacao", raciocinio: "m-raciocinio", visao: "m-visao" } },
+  }, "allow", 1, undefined, "e aí");
+  for (const corpo of wire) modelosUsados.push((JSON.parse(corpo) as { model: string }).model);
+  console.log(`  começou na classe leve: ${modelosUsados[0] === "m-conversa" ? "sim" : `NAO (${modelosUsados[0]})`}`);
+  console.log(`  subiu ao chamar ferramenta: ${modelosUsados[1] === "m-navegacao" ? "sim" : `NAO (${modelosUsados[1]})`}`);
+}
+
+// Energia da fala: os números vêm dos áudios de uma sessão real — fala da pessoa entre 0,048 e
+// 0,086 de RMS, eco e ruído entre 0,011 e 0,018. É essa distância que o filtro usa.
+console.log("\n=== voz: eco e ruído não chegam a virar transcrição ===");
+{
+  const { EnergiaDaFala, rms } = await import("../src/energia-da-fala");
+  const energia = new EnergiaDaFala();
+  console.log(`  sem referência, deixa passar (primeira fala): ${energia.avaliar(0.02).fala ? "sim" : "NAO"}`);
+  console.log(`  silêncio absoluto é barrado desde a primeira: ${!energia.avaliar(0.002).fala ? "sim" : "NAO"}`);
+  energia.registrarFala(0.06);
+  energia.registrarFala(0.075);
+  energia.registrarFala(0.049);
+  console.log(`  eco medido na sessão (0,013) é barrado: ${!energia.avaliar(0.013).fala ? "sim" : "NAO"}`);
+  console.log(`  fala medida na sessão (0,048) passa: ${energia.avaliar(0.048).fala ? "sim" : "NAO"}`);
+  console.log(`  fala baixinha ainda passa (0,03): ${energia.avaliar(0.03).fala ? "sim" : "NAO"}`);
+  console.log(`  o motivo do descarte é dito: ${energia.avaliar(0.013).motivo ? "sim" : "NAO"}`);
+  const onda = new Float32Array(1000).fill(0.5);
+  console.log(`  rms de onda constante confere: ${Math.abs(rms([onda]) - 0.5) < 0.001 ? "sim" : "NAO"}`);
+}
