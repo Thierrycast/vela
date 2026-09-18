@@ -130,6 +130,34 @@ antecipadas: a desistência do modelo rápido (o loop ainda pode descartá-la e 
 falada antes, a pessoa ouviria uma recusa que não aconteceu) e o texto dentro de um bloco de código
 ainda aberto, que seria lido em voz alta.
 
+### O que a revisão da rodada de desempenho pegou
+
+Oito achados; três mudam desenho e ficam registrados.
+
+**A fila de fala travava para sempre.** A narração frase a frase encadeia as falas numa fila, e a
+reprodução de arquivo só terminava pelo `onended` — mas interromper a Vela chama `pause()`, que não
+dispara evento nenhum. A promessa daquele item nunca se resolvia, e tudo o que viesse depois (o
+resto da resposta, e a fala de todos os turnos seguintes) ficava esperando atrás dela, em silêncio.
+Quem manda parar agora resolve a reprodução em curso explicitamente.
+
+**Degradar a requisição não podia virar estado permanente.** O degrau que funcionou passou a ser
+lembrado para não pagar uma recusa por rodada — só que o último degrau desliga as ferramentas, e a
+escalada até ele disparava com qualquer 400 cujo texto contivesse "invalid". Uma recusa passageira
+deixaria a agente sem ferramenta nenhuma até o service worker dormir. Agora esse degrau não é
+lembrado, e só se chega a ele quando a recusa fala de ferramenta.
+
+**A escada de leitura é de cada pedido.** Era um estado global, e as tarefas de fundo rodam em
+paralelo com a conversa: a leitura de uma destravava a captura da outra, e uma mensagem nova no
+painel zerava a escada de uma tarefa que acabara de ler a página. O pedido agora carrega a própria
+escada.
+
+Os outros cinco, em uma linha cada: a soma das estatísticas de ação perdia incrementos quando duas
+ações terminavam juntas (agora entram em fila); a narração podia falar uma desistência que o loop
+ainda ia descartar (agora emenda em voz alta quando isso acontece); a poda de conversas podia apagar
+justamente a conversa aberta (abrir não mexe no `updatedAt`); a marca de "precisa gravar" era
+limpada antes de a gravação dar certo; e o observador de mutação do clique ficava pendurado na
+página se o disparo do evento lançasse.
+
 ### O que a revisão da branch inteira pegou
 
 Uma revisão de `main...navegacao-agentica` achou onze defeitos que nenhum teste tinha exercitado. Os
