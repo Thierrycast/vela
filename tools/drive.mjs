@@ -12,6 +12,7 @@
  *   node tools/drive.mjs --roteiro=meu.json       # roteiro próprio
  *   node tools/drive.mjs --manter                 # não fecha o Chrome no fim
  *   node tools/drive.mjs --saida=trace.jsonl      # grava a trilha
+ *   node tools/drive.mjs --voz=http://host:8010   # onde fica o servidor de fala (roteiros de voz)
  *
  * Um roteiro é uma lista de passos:
  *   { "acao": "abrirPagina", "url": "https://exemplo.com" }
@@ -54,6 +55,18 @@ const ROTEIRO_PADRAO = [
 ];
 
 const roteiro = flags.roteiro ? JSON.parse(readFileSync(String(flags.roteiro), "utf8")) : ROTEIRO_PADRAO;
+
+/*
+ * `--voz=http://servidor:8010` diz onde fica o servidor de fala do teste.
+ *
+ * Os padroes do produto nao apontam para servidor nenhum — endereco de maquina de quem desenvolve
+ * nao entra em codigo publicado —, entao o roteiro de voz recebe o endereco aqui, na linha de
+ * comando. Sem a flag, o roteiro de voz roda sem voz e o resultado nao engana: a trilha fica vazia.
+ */
+if (flags.voz) {
+  const base = String(flags.voz).replace(/\/+$/, "");
+  roteiro.unshift({ acao: "definirSettings", patch: { voice: { baseUrl: base, streamingUrl: `${base.replace(/^http/, "ws")}/stt/stream` } } });
+}
 
 /**
  * As fixtures precisam de http real: extensao nao alcanca file:// sem permissao manual, e uma

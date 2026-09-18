@@ -10,6 +10,11 @@
  * A recusa não é um beco. Ela diz qual degrau tentar, e se o degrau barato não resolver, a captura
  * seguinte passa — é uma ordem, não uma proibição. E quando a própria pessoa pede a imagem ("tira
  * um print", "como está o layout"), não há o que subir: a captura roda direto.
+ *
+ * **Cada pedido tem a sua escada.** Era um estado só, global ao service worker, e as tarefas de
+ * fundo rodam ao mesmo tempo que a conversa: a leitura de uma destravava a captura da outra, e uma
+ * mensagem nova no painel zerava a escada de uma tarefa que já tinha lido a página. Agora o pedido
+ * carrega a própria escada, e quem executa a ferramenta recebe qual é.
  */
 
 /*
@@ -21,23 +26,18 @@ const PEDIDO_VISUAL = /\b(print\w*|captur\w*|screenshot|imagem|imagens|foto\w*|v
 /** As ações que leem a página por texto — qualquer uma delas conta como degrau tentado. */
 const LEITURAS = new Set(["extractPage", "find", "evaluateScript", "pageTool"]);
 
-let pedidoVisual = false;
-let leuPorTexto = false;
+export type Escada = { visual: boolean; leu: boolean };
 
-/** Um pedido novo recomeça a escada: o que foi lido para o pedido anterior não conta para este. */
-export function iniciarPedido(texto: string) {
-  pedidoVisual = PEDIDO_VISUAL.test(texto);
-  leuPorTexto = false;
-}
+/** A escada de um pedido novo. `texto` é o que a pessoa pediu, como ela pediu. */
+export const novaEscada = (texto: string): Escada => ({ visual: PEDIDO_VISUAL.test(texto), leu: false });
 
-export function registrarAcao(tipo: string, ok: boolean) {
-  if (ok && LEITURAS.has(tipo)) leuPorTexto = true;
+export function registrarAcao(escada: Escada | undefined, tipo: string, ok: boolean) {
+  if (escada && ok && LEITURAS.has(tipo)) escada.leu = true;
 }
 
 /** Devolve a recusa, ou `null` quando a captura pode rodar. */
-export function recusaDaCaptura(): string | null {
-  if (pedidoVisual || leuPorTexto) return null;
-  return "ERRO [escada] Ainda não li esta página por texto neste pedido, e a captura de tela é o degrau mais caro: segundos de espera e milhares de tokens para reconhecer em pixel um texto que o DOM já tem. Leia primeiro — `find` se você sabe o que procura, `extractPage` com `extractMode: \"text\"` para ler o conteúdo, ou `extractPage` para ver os elementos. Se depois disso o que você precisa só existir em imagem (foto, gráfico, cor, layout), chame `screenshot` de novo e ela roda.";
+export function recusaDaCaptura(escada: Escada | undefined): string | null {
+  // Sem escada (a ponte MCP, um agente de fora pedindo a imagem direto), não há pedido a escalar.
+  if (!escada || escada.visual || escada.leu) return null;
+  return "ERRO [escada] Ainda não li esta página por texto neste pedido, e a captura de tela é o degrau mais caro: segundos de espera e milhares de tokens para reconhecer em pixel um texto que o DOM já tem. Leia primeiro — `find` se você sabe o que procura, `extractPage` com `extractMode: \"text\"` para ler o conteúdo, ou `extractPage` para ver os elementos. Se depois disso o que você precisar só existir em imagem (foto, gráfico, cor, layout), chame `screenshot` de novo e ela roda.";
 }
-
-export const pediuImagem = (texto: string) => PEDIDO_VISUAL.test(texto);

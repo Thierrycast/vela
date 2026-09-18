@@ -21,8 +21,11 @@ salvo, para o visual nunca sumir no painel sem explicação.
 documento offscreen **não consegue exibir o prompt de permissão** — sem essa liberação, feita na
 página de opções, `getUserMedia` falha calado e o botão parece quebrado.
 
-Endpoint em HTTP puro precisa entrar no `connect-src` do manifest: o CSP libera `https:`, `wss:` e o
-loopback; um servidor remoto servido em HTTP puro precisa ter a origem acrescentada ali.
+Servidor de fala em HTTP puro funciona sem mexer em nada: o `connect-src` do manifest libera
+`https:`, `wss:` e também `http://*:*` — porque um servidor auto-hospedado na rede local quase nunca
+tem certificado, e exigir que cada pessoa editasse o manifest para usar o próprio servidor seria
+trocar uma inconveniência de segurança por uma barreira de uso. A extensão só fala com o endereço
+que **você** configurou; a liberação do CSP não faz ela procurar ninguém.
 
 A voz de fábrica é `piper:pt_BR-cadu-medium`. A escolha não é de timbre: o servidor devolve
 quanto tempo leva para gerar em relação à duração do áudio, e o piper gera em **0,58×** o que

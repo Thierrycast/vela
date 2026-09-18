@@ -57,5 +57,7 @@ export function criarNarrador(falar: (texto: string) => void) {
       return conteudo.slice(falado.get(id) ?? 0).trim();
     },
     jaFalou: (id: string) => (falado.get(id) ?? 0) > 0,
+    /** A mensagem foi descartada: o que foi falado dela não conta mais para nada. */
+    esquecer(id: string) { falado.delete(id); acumulado.delete(id); },
   };
 }

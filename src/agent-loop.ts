@@ -10,7 +10,7 @@ import { collectBrowserContext, clearAttachments } from "./browser-context";
 import { recordTurn } from "./action-stats";
 import { cancelDelegated, configureDelegation } from "./background-task";
 import { noteSource, resetDomainMemory } from "./domain-policy";
-import { iniciarPedido } from "./tool-ladder";
+import { novaEscada } from "./tool-ladder";
 import * as conversation from "./conversation";
 
 const newId = () => crypto.randomUUID();
@@ -219,7 +219,8 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
   configureTrace({ detail: settings.agent.fullTrace ? "completo" : "normal" });
   // O que o usuário escreveu é decisão dele: endereços que ele mencionou passam sem confirmação.
   noteSource("user", text);
-  iniciarPedido(text);
+  // A escada de ferramentas é deste pedido: uma tarefa de fundo tem a sua, e uma não destrava a outra.
+  const escada = novaEscada(text);
   running = true;
   controller = new AbortController();
   emit({ type: "chat:running", running: true });
@@ -299,6 +300,16 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
           escalatedByRefusal = true;
           escalate();
           await conversation.truncateFrom(assistant.id);
+          /*
+           * Numa conversa falada, esta resposta pode já ter sido dita em voz alta.
+           *
+           * A narração fala frase a frase enquanto o modelo escreve, e a desistência costuma vir na
+           * segunda frase ("Vou verificar. Infelizmente não tenho acesso."): quando o loop descobre
+           * e descarta, o começo já saiu pelo alto-falante. Avisar quem está falando é o que permite
+           * emendar — em vez de a pessoa ouvir uma recusa e, logo depois, a resposta certa, sem
+           * entender o que aconteceu no meio.
+           */
+          emit({ type: "chat:descartada", id: assistant.id });
           emit({ type: "chat:snapshot", ...(await snapshot()) });
           traceRecord("turn", "recusa do modelo rápido descartada; tentando com o robusto", { data: { texto: assistant.content.slice(0, 200) } });
           round -= 1;
@@ -346,7 +357,7 @@ export async function submit(text: string, emit: Emit, options: { useFastModel?:
         }
         beginCall(call.id);
         const callSpan = span("tool.call", call.name, { arguments: safeParse(call.arguments) });
-        const { content, event, image } = await runToolCall(call, settings, emit);
+        const { content, event, image } = await runToolCall(call, settings, emit, escada);
         callSpan.end({ ok: event.kind !== "error", callId: call.id, data: { name: call.name, arguments: safeParse(call.arguments), result: content.slice(0, 600) } });
         /*
          * O resultado inteiro, separado do resumo.

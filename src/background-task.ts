@@ -2,6 +2,7 @@ import { AppSettings, ChatMessage } from "./types";
 import { Emit } from "./messages";
 import { ToolCall, streamChat } from "./provider";
 import { runToolCall } from "./tool-runner";
+import { novaEscada } from "./tool-ladder";
 import { loadSettings } from "./storage";
 import { beginTurn, record as traceRecord, span } from "./trace";
 import { collectBrowserContext } from "./browser-context";
@@ -124,6 +125,8 @@ Você está rodando por trás enquanto o usuário continua usando o navegador. A
   }];
 
   const repeats = new Map<string, number>();
+  // Escada própria: o que a conversa principal leu não vale como leitura desta tarefa, e vice-versa.
+  const escada = novaEscada(task);
   let finalText = "";
   let ok = true;
 
@@ -181,7 +184,7 @@ Você está rodando por trás enquanto o usuário continua usando o navegador. A
             continue;
           }
           const callSpan = span("tool.call", `[bg] ${call.name}`, { arguments: call.arguments.slice(0, 300) });
-          const { content, event } = await runToolCall(call, settings, emit);
+          const { content, event } = await runToolCall(call, settings, emit, escada);
           callSpan.end({ ok: event.kind !== "error", data: { result: content.slice(0, 300) } });
           status(emit, event.text);
           historico.push({ id: newId(), role: "tool", tool_call_id: call.id, content, createdAt: Date.now(), status: event.kind === "error" ? "error" : "complete" });

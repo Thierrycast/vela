@@ -294,6 +294,15 @@ async function speakTurn(text: string, enunciado?: string) {
   const narrador = criarNarrador((frase) => { void chrome.runtime.sendMessage({ type: "voice:speak-queue", text: frase }).catch(() => undefined); });
   const comNarracao = (message: SidecarInbound) => {
     if (message.type === "chat:delta") narrador.pedaco(message.id, message.text);
+    /*
+     * A resposta que já estava sendo falada foi descartada pelo loop (desistência do modelo rápido).
+     * Sem emenda, a pessoa ouviria o começo de uma resposta e, em seguida, outra resposta diferente,
+     * sem nada explicando o corte. Uma frase curta cobre o intervalo e é honesta sobre o que houve.
+     */
+    if (message.type === "chat:descartada" && narrador.jaFalou(message.id)) {
+      narrador.esquecer(message.id);
+      void chrome.runtime.sendMessage({ type: "voice:speak-queue", text: "Deixa eu tentar de outro jeito." }).catch(() => undefined);
+    }
     return notifySurfaces(message);
   };
   const accepted = await runTurn(text, voiceMode === "live", "voz", enunciado, comNarracao);

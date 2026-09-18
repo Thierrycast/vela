@@ -29,7 +29,12 @@ export async function loadActionStats(): Promise<ActionStats> {
   return { ...empty(), ...((stored[KEY] as Partial<ActionStats> | undefined) ?? {}) };
 }
 
-export const clearActionStats = async () => { pendente = null; if (gravacao) { clearTimeout(gravacao); gravacao = undefined; } await chrome.storage.local.set({ [KEY]: empty() }); };
+export const clearActionStats = async () => {
+  await fila;
+  pendente = null;
+  if (gravacao) { clearTimeout(gravacao); gravacao = undefined; }
+  await chrome.storage.local.set({ [KEY]: empty() });
+};
 
 /*
  * A contagem é acumulada em memória e gravada em lote.
@@ -41,17 +46,33 @@ export const clearActionStats = async () => { pendente = null; if (gravacao) { c
  */
 let pendente: ActionStats | null = null;
 let gravacao: ReturnType<typeof setTimeout> | undefined;
+/*
+ * As somas entram em fila, uma de cada vez.
+ *
+ * `pendente ??= await load()` parecia bastar e não bastava: o teste de nulo acontece **antes** do
+ * await, então duas chamadas concorrentes — e elas são concorrentes, porque quem registra não espera
+ * (`void recordAction(...)`, e um lote dispara uma por item) — carregavam as duas do storage e a
+ * segunda substituía o objeto da primeira, jogando fora o que ela já tinha somado. Serializar num
+ * encadeamento custa nada e acaba com a classe inteira de perda.
+ */
+let fila: Promise<void> = Promise.resolve();
 
-async function acumular(muda: (stats: ActionStats) => void) {
-  if (typeof chrome === "undefined" || !chrome.storage?.local) return;
-  pendente ??= await loadActionStats();
-  muda(pendente);
-  if (gravacao) return;
-  gravacao = setTimeout(() => { gravacao = undefined; void flushActionStats(); }, 2_000);
+function acumular(muda: (stats: ActionStats) => void): Promise<void> {
+  if (typeof chrome === "undefined" || !chrome.storage?.local) return Promise.resolve();
+  fila = fila.then(async () => {
+    pendente ??= await loadActionStats();
+    muda(pendente);
+    if (gravacao) return;
+    gravacao = setTimeout(() => { gravacao = undefined; void flushActionStats(); }, 2_000);
+  }).catch(() => undefined);
+  return fila;
 }
 
 export async function flushActionStats() {
   if (gravacao) { clearTimeout(gravacao); gravacao = undefined; }
+  // Espera a fila esvaziar: gravar no meio de uma soma que ainda não terminou publicaria um número
+  // velho e ainda deixaria a soma seguinte partindo de um retrato já gravado.
+  await fila;
   const stats = pendente;
   pendente = null;
   if (stats) await chrome.storage.local.set({ [KEY]: stats });

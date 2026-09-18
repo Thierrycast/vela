@@ -47,7 +47,7 @@
     "<all_urls>"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https: wss: ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*; style-src 'self' 'unsafe-inline';"
+    "extension_pages": "script-src 'self'; object-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https: wss: http://*:* ws://*:*; style-src 'self' 'unsafe-inline';"
   },
   "web_accessible_resources": [
     {

@@ -39,9 +39,10 @@ chrome.runtime.onMessage.addListener((message: { type?: string; text?: string; i
   // esta mensagem "resolve" — sem esperar, o documento morria no meio do download.
   if (message.type === "voice:stop") { void stop().then(() => sendResponse({ ok: true })); return true; }
   if (message.type === "voice:toggle-mute") { toggleMute(); return false; }
-  if (message.type === "voice:speak" && message.text) { void speak(message.text, message.id); return false; }
+  // Ler uma mensagem é um pedido novo: o que estava na fila da narração não fala por cima dela.
+  if (message.type === "voice:speak" && message.text) { pararFala(); void speak(message.text, message.id); return false; }
   if (message.type === "voice:speak-queue" && message.text) { enfileirarFala(message.text); return false; }
-  if (message.type === "voice:speak-stop") { geracaoDeFala += 1; streamingStop?.(); output?.pause(); output = null; return false; }
+  if (message.type === "voice:speak-stop") { pararFala(); return false; }
   if (message.type === "voice:debug-start") { startDebugRecording(); return false; }
   if (message.type === "voice:debug-stop") { void stopDebugRecording(); return false; }
   return false;
@@ -633,6 +634,25 @@ let streamingStop: (() => void) | null = null;
  */
 let filaDeFala: Promise<void> = Promise.resolve();
 let geracaoDeFala = 0;
+/*
+ * Quem encerra a reprodução em curso quando alguém manda parar.
+ *
+ * Sem isto a fila **travava para sempre**: a reprodução de arquivo só terminava pelo `onended`, e
+ * `pause()` não dispara evento nenhum. A promessa daquele item nunca se resolvia, e como a fila é um
+ * encadeamento, tudo o que viesse depois — o resto da resposta, e a fala de todos os turnos
+ * seguintes — ficava esperando atrás de algo que não ia acabar nunca. Em silêncio.
+ */
+let encerrarReproducao: (() => void) | null = null;
+
+function pararFala() {
+  geracaoDeFala += 1;
+  streamingStop?.();
+  output?.pause();
+  output = null;
+  encerrarReproducao?.();
+  encerrarReproducao = null;
+}
+
 function enfileirarFala(texto: string) {
   const minha = geracaoDeFala;
   filaDeFala = filaDeFala.then(() => (minha === geracaoDeFala ? speak(texto) : undefined)).catch(() => undefined);
@@ -703,10 +723,13 @@ async function speak(text: string, readingId?: string) {
     output.playbackRate = rate;
     const tocando = traceSpan("tts.play", "reprodução", { bytes: blob.size, taxa: rate });
     await new Promise<void>((resolve, reject) => {
+      // `encerrarReproducao` é o resolve guardado para quem mandar parar: pausar o áudio não dispara
+      // `onended`, e sem uma saída a fila de fala ficaria parada atrás desta promessa.
+      encerrarReproducao = resolve;
       output!.onended = () => resolve();
       output!.onerror = () => reject(new Error("Falha ao reproduzir a resposta."));
       void output!.play().catch(reject);
-    });
+    }).finally(() => { encerrarReproducao = null; });
     // Quanto durou de fato na caixa de som: é o número que a pessoa sente como "ela falou por
     // muito tempo", e ele não se deduz do tamanho do arquivo nem da duração da síntese.
     tocando.end({ ok: true, blobId: audioId, data: { segundos: output?.duration } });

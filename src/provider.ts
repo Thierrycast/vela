@@ -509,14 +509,23 @@ const VARIANTS: Variant[] = [
  * requisição a mais — ida, recusa HTTP 400, volta — em **toda** rodada de **toda** tarefa, antes da
  * que de fato respondia: latência pura, somada ao tempo até o primeiro token que a pessoa sente.
  * Memória do service worker basta: se ele dormir, a primeira rodada seguinte reaprende em uma recusa.
+ *
+ * **O último degrau não é lembrado.** Ele desliga as ferramentas, e desligá-las transforma a agente
+ * numa conversa sem ação. Se uma recusa passageira — um payload inválido, um erro do gateway com a
+ * palavra "invalid" no texto — levasse a tentativa até lá e isso ficasse gravado, toda rodada
+ * seguinte sairia sem ferramenta nenhuma, em silêncio, até o service worker dormir. Degradar por
+ * uma requisição é aceitável; degradar para sempre, não.
  */
+const ULTIMO_DEGRAU = 4;
 const degrauAceito = new Map<string, number>();
 
 function nextVariant(current: number, errorText: string): number {
   if (/stream_options|include_usage/i.test(errorText) && current < 1) return 1;
   if (/parallel_tool_calls/i.test(errorText) && current < 2) return 2;
   if (/tool_choice/i.test(errorText) && current < 3) return 3;
-  if (/tool|function|unsupported|invalid/i.test(errorText) && current < 4) return 4;
+  // Só sobe para "sem ferramentas" quando a recusa fala de ferramenta: "invalid" sozinho aparece em
+  // erro de payload comum, e subir por causa dele desligava a caixa de ferramentas inteira.
+  if (/\btools?\b|function[_ ]?call|tool[_ ]?choice/i.test(errorText) && current < ULTIMO_DEGRAU) return ULTIMO_DEGRAU;
   return -1;
 }
 
@@ -595,7 +604,11 @@ export async function* streamChat(
         yield { type: "error", message: error instanceof DOMException && error.name === "AbortError" ? "A requisição foi cancelada ou excedeu 2 minutos." : error instanceof Error ? error.message : "Falha de rede." };
         return;
       }
-      if (attempt.ok && attempt.body) { response = attempt; degrauAceito.set(chaveDoDegrau, variantIndex); break; }
+      if (attempt.ok && attempt.body) {
+        if (variantIndex < ULTIMO_DEGRAU) degrauAceito.set(chaveDoDegrau, variantIndex);
+        response = attempt;
+        break;
+      }
       const detail = await responseDetail(attempt);
       if (attempt.status !== 400) { cleanup(); yield { type: "error", message: `Provider retornou HTTP ${attempt.status}${detail ? `: ${detail}` : "."}` }; return; }
       const next = nextVariant(variantIndex, detail);

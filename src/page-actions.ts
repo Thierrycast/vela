@@ -25,6 +25,8 @@ function observarReacao() {
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
   return {
     get mudou() { return ultima > 0; },
+    /** Desliga o observador. Idempotente: quem falha no meio chama, e `assentar` chama de novo. */
+    parar() { observer.disconnect(); },
     async assentar(teto: number, minimo = 120, quieto = 90) {
       for (;;) {
         await wait(30);
@@ -374,11 +376,13 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
     const rect = element.getBoundingClientRect();
     const base = { bubbles: true, cancelable: true, composed: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, view: window } as const;
     const reacao = observarReacao();
-    element.dispatchEvent(new PointerEvent("pointerover", { ...base, pointerId: 1, isPrimary: true }));
-    element.dispatchEvent(new MouseEvent("mouseover", base));
-    element.dispatchEvent(new PointerEvent("pointermove", { ...base, pointerId: 1, isPrimary: true }));
-    element.dispatchEvent(new MouseEvent("mousemove", base));
-    if (element instanceof HTMLElement) element.focus({ preventScroll: true });
+    try {
+      element.dispatchEvent(new PointerEvent("pointerover", { ...base, pointerId: 1, isPrimary: true }));
+      element.dispatchEvent(new MouseEvent("mouseover", base));
+      element.dispatchEvent(new PointerEvent("pointermove", { ...base, pointerId: 1, isPrimary: true }));
+      element.dispatchEvent(new MouseEvent("mousemove", base));
+      if (element instanceof HTMLElement) element.focus({ preventScroll: true });
+    } catch { reacao.parar(); throw new Error("a página recusou o evento de ponteiro"); }
     await reacao.assentar(450);
     return { ok: true, summary: `Passei o mouse sobre ${describeTarget(element)}${note ?? ""} — ${reacao.mudou ? "alguma coisa apareceu; leia a página para ver o quê" : "nada mudou na página"}.` };
   }
@@ -444,7 +448,9 @@ export async function performAction(action: BrowserAction, resolved?: Target): P
   if (action.type === "click") {
     const before = captureSignals(element);
     const reacao = observarReacao();
-    pointerSequence(element);
+    // Um listener do site que lança durante o disparo deixaria o observador pendurado no documento
+    // para sempre, reagindo a cada mutação da página — custo que ninguém mais desligaria.
+    try { pointerSequence(element); } catch { reacao.parar(); throw new Error("a página recusou o clique"); }
     await reacao.assentar(400);
     const mutated = reacao.mudou;
     const after = captureSignals(element);

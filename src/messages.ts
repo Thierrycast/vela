@@ -11,6 +11,9 @@ export type SidecarInbound =
   | ({ type: "chat:snapshot" } & LoopSnapshot)
   | { type: "chat:message"; message: ChatMessage }
   | { type: "chat:delta"; id: string; text: string }
+  /** A resposta foi descartada antes de ser mostrada (desistência do modelo rápido). Quem estava
+   *  falando essa resposta em voz alta precisa saber para emendar. */
+  | { type: "chat:descartada"; id: string }
   | { type: "chat:patch"; id: string; patch: Partial<ChatMessage> }
   | { type: "chat:reset" }
   | { type: "chat:event"; event: AgentEvent }

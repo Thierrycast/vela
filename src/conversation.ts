@@ -52,17 +52,40 @@ export async function flush() {
   if (persistTimer) { clearTimeout(persistTimer); persistTimer = 0; }
   if (!cache) return;
   cache.sort((left, right) => right.updatedAt - left.updatedAt);
-  // As que passam do teto saem da memória e do storage, em vez de só deixarem de ser regravadas.
-  for (const sobra of cache.splice(MAX_CONVERSATIONS)) { removidas.add(sobra.id); sujas.delete(sobra.id); }
+  /*
+   * As que passam do teto saem da memória e do storage — **menos a que está aberta**.
+   *
+   * Abrir uma conversa antiga não mexe no `updatedAt` dela (ler não é usar), então com mais de
+   * cinquenta conversas ela ficava além do corte: a primeira gravação disparada por qualquer outro
+   * caminho apagava justamente a conversa que a pessoa estava lendo, e a tela caía na primeira da
+   * lista sem explicação.
+   */
+  const sobrando = cache.filter((item) => item.id !== activeId).slice(MAX_CONVERSATIONS - 1);
+  for (const sobra of sobrando) {
+    cache.splice(cache.indexOf(sobra), 1);
+    removidas.add(sobra.id);
+    sujas.delete(sobra.id);
+  }
   const mudadas = cache
     .filter((item) => sujas.has(item.id))
     // Captura não é persistida: uma tela em base64 come o orçamento de `chrome.storage.local`
     // sozinha, e ao reabrir a conversa ela já estaria mentindo sobre o que está na página.
     .map((item) => ({ ...item, messages: item.messages.slice(-MAX_MESSAGES).map((message) => message.images ? { ...message, images: undefined } : message) }));
   const apagar = [...removidas];
-  sujas.clear();
-  removidas.clear();
-  await saveConversationChanges(cache.map(({ id, title, updatedAt }) => ({ id, title, updatedAt })), mudadas, apagar);
+  /*
+   * As marcas de "mudou" só saem depois que a gravação deu certo.
+   *
+   * Limpando antes, uma falha de escrita (cota estourada, worker derrubado no meio) levava junto a
+   * informação de que aquela conversa ainda precisava ser salva: nenhuma gravação futura tentaria de
+   * novo, e a mensagem se perdia em silêncio.
+   */
+  try {
+    await saveConversationChanges(cache.map(({ id, title, updatedAt }) => ({ id, title, updatedAt })), mudadas, apagar);
+    for (const item of mudadas) sujas.delete(item.id);
+    for (const id of apagar) removidas.delete(id);
+  } catch {
+    // Fica tudo marcado: a próxima gravação tenta de novo.
+  }
 }
 
 export async function all(): Promise<ChatMessage[]> { return (await active()).messages; }

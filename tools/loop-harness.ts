@@ -698,3 +698,53 @@ console.log("\n=== armazenamento: ciclo de vida das conversas ===");
   console.log(`  passar do teto poda o índice: ${indice.length === 50 ? "sim" : "NAO"} (${indice.length})`);
   console.log(`  e não deixa chave órfã: ${chaves().length === indice.length ? "sim" : "NAO"} (${chaves().length} chaves)`);
 }
+
+// A escada é de cada pedido: uma tarefa de fundo lendo a página não pode destravar a captura da
+// conversa principal, nem o contrário.
+console.log("\n=== escada: cada pedido tem a sua ===");
+{
+  const { novaEscada, recusaDaCaptura, registrarAcao } = await import("../src/tool-ladder");
+  const conversa = novaEscada("o que tem nesta página?");
+  const fundo = novaEscada("compare os preços em segundo plano");
+  registrarAcao(fundo, "extractPage", true);
+  console.log(`  leitura da tarefa de fundo não destrava a conversa: ${recusaDaCaptura(conversa)?.startsWith("ERRO [escada]") ? "sim" : "NAO"}`);
+  console.log(`  e destrava a própria: ${recusaDaCaptura(fundo) === null ? "sim" : "NAO"}`);
+  registrarAcao(conversa, "find", true);
+  console.log(`  depois de ler, a conversa captura: ${recusaDaCaptura(conversa) === null ? "sim" : "NAO"}`);
+  console.log(`  pedido de imagem nem precisa ler: ${recusaDaCaptura(novaEscada("tira um print")) === null ? "sim" : "NAO"}`);
+  console.log(`  ação que falhou não conta como leitura: ${(() => { const nova = novaEscada("leia"); registrarAcao(nova, "extractPage", false); return recusaDaCaptura(nova) !== null; })() ? "sim" : "NAO"}`);
+}
+
+// A resposta descartada pelo loop precisa sumir da contabilidade da narração — senão o "restante"
+// falado no fim do turno seria o pedaço de uma resposta que não existe mais.
+console.log("\n=== voz: resposta descartada some da narração ===");
+{
+  const { criarNarrador } = await import("../src/voice-narrator");
+  const ditas: string[] = [];
+  const narrador = criarNarrador((frase) => ditas.push(frase));
+  narrador.pedaco("m9", "Vou verificar isso para você agora. ");
+  const falouAntes = narrador.jaFalou("m9");
+  narrador.esquecer("m9");
+  console.log(`  falou a primeira frase: ${falouAntes ? "sim" : "NAO"}`);
+  console.log(`  depois de descartada, não sobra resto para falar: ${narrador.restante("m9", "Vou verificar isso para você agora. Infelizmente não tenho acesso.") === "Vou verificar isso para você agora. Infelizmente não tenho acesso." ? "sim" : "NAO"}`);
+  console.log(`  e ela deixa de constar como já falada: ${narrador.jaFalou("m9") === false ? "sim" : "NAO"}`);
+}
+
+// Degradar a requisição por uma recusa passageira não pode virar estado permanente: desligar as
+// ferramentas é o degrau que transforma a agente numa conversa sem ação.
+console.log("\n=== provedor: degradação não fica gravada ===");
+{
+  let semFerramentas = 0;
+  let recusas = 0;
+  await run("gateway com erro passageiro", [[delta("Ok."), DONE]], { agent: { ...defaultSettings.agent, autonomy: "auto" } });
+  (globalThis as Record<string, unknown>).fetch = async (_url: string, init: { body: string }) => {
+    const corpo = JSON.parse(init.body) as { tools?: unknown[] };
+    if (!corpo.tools) semFerramentas += 1;
+    // Um erro de payload qualquer, com a palavra "invalid", como os gateways costumam devolver.
+    if (corpo.tools && recusas === 0) { recusas += 1; return new Response(JSON.stringify({ error: "invalid request payload" }), { status: 400 }); }
+    return new Response(sseStream([delta("Ok."), DONE]), { status: 200 });
+  };
+  await agentLoop.submit("primeira", emit);
+  await agentLoop.submit("segunda", emit);
+  console.log(`  "invalid" genérico não desliga as ferramentas: ${semFerramentas === 0 ? "sim" : "NAO"} (${semFerramentas} requisição(ões) sem tools)`);
+}
