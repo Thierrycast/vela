@@ -8,6 +8,10 @@ extensão carregada. Os dois rodam sem chave de API.
 npm run typecheck && npm run lint && npm run build && npm run harness
 ```
 
+Para o teste **manual**, com a extensão na sua mão e um modelo de verdade, o caminho é o
+[roteiro de ponta a ponta](ROTEIRO-DE-TESTE.md): ele exercita leitura, ação, lote, abas, voz,
+autonomia e segurança numa sessão só, e termina num pacote de revisão.
+
 ## O harness
 
 `npm run harness` executa o loop de verdade — mesmo código do service worker — contra um provider

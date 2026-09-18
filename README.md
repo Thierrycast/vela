@@ -185,6 +185,7 @@ relatar um problema de segurança, ver [SECURITY.md](SECURITY.md).
 | [docs/USO.md](docs/USO.md) | o guia de uso: o que ela faz, trocar de modelo, scripts, ponte MCP, backup |
 | [docs/VOZ.md](docs/VOZ.md) | pipeline de voz, visuais, shader do usuário |
 | [docs/TRILHA.md](docs/TRILHA.md) | trilha de execução, rastreio completo e o relatório de revisão |
+| [docs/ROTEIRO-DE-TESTE.md](docs/ROTEIRO-DE-TESTE.md) | um caminho para exercitar quase tudo numa sessão só, com o que observar em cada passo |
 | [docs/TESTES.md](docs/TESTES.md) | harness, Chrome real dirigido por roteiro, medição de desempenho |
 | [docs/PRIVACIDADE.md](docs/PRIVACIDADE.md) | o que é guardado, onde, e o que nunca sai |
 | [docs/MOVIMENTO.md](docs/MOVIMENTO.md) | a camada de movimento (orb, cursor, presença) |
